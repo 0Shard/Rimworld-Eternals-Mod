@@ -1,0 +1,166 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Defs>
+    <!-- Eternal Essence Hediff - Core immortality marker -->
+    <HediffDef>
+        <defName>Eternal_Essence</defName>
+        <hediffClass>Eternal.Eternal_Hediff</hediffClass>
+        <label>Eternal Essence</label>
+        <description>The biological essence that enables eternal regeneration.</description>
+        <initialSeverity>1.0</initialSeverity>
+        <isBad>false</isBad>
+        <showGizmosOnCorpse>true</showGizmosOnCorpse>
+        <stages>
+            <li>
+                <capMods>
+                    <li>
+                        <capacity>Consciousness</capacity>
+                        <postFactor>3.0</postFactor>
+                    </li>
+                </capMods>
+            </li>
+        </stages>
+        <comps>
+            <li Class="HediffCompProperties_SeverityPerDay">
+                <severityPerDay>0.0</severityPerDay>
+            </li>
+        </comps>
+    </HediffDef>
+
+    <!-- NEW: Unified Regrowing Hediff with partEfficiencyOffset stages -->
+    <!-- Following the Immortals mod pattern - simple hediff tracking body part regrowth -->
+    <HediffDef>
+        <defName>Eternal_Regrowing</defName>
+        <hediffClass>Eternal.EternalRegrowing_Hediff</hediffClass>
+        <label>Regrowing</label>
+        <description>This body part is regenerating through Eternal essence.</description>
+        <initialSeverity>0.01</initialSeverity>
+        <isBad>false</isBad>
+        <tendable>false</tendable>
+        <displayWound>false</displayWound>
+        <defaultLabelColor>(0.4, 0.8, 0.4)</defaultLabelColor>
+        <stages>
+            <li>
+                <label>forming</label>
+                <minSeverity>0</minSeverity>
+                <partEfficiencyOffset>-1.0</partEfficiencyOffset>
+            </li>
+            <li>
+                <label>developing</label>
+                <minSeverity>0.25</minSeverity>
+                <partEfficiencyOffset>-1.0</partEfficiencyOffset>
+            </li>
+            <li>
+                <label>integrating</label>
+                <minSeverity>0.5</minSeverity>
+                <partEfficiencyOffset>-0.75</partEfficiencyOffset>
+            </li>
+            <li>
+                <label>completing</label>
+                <minSeverity>0.75</minSeverity>
+                <partEfficiencyOffset>-0.5</partEfficiencyOffset>
+            </li>
+        </stages>
+    </HediffDef>
+
+    <!-- LEGACY: Eternal_RegrowthState - still used by EternalRegrowthManager until manager refactor -->
+    <!-- Will be deprecated when manager is updated to use unified Eternal_Regrowing -->
+    <HediffDef>
+        <defName>Eternal_RegrowthState</defName>
+        <hediffClass>Eternal.EternalRegrowthState_Hediff</hediffClass>
+        <label>Regenerating</label>
+        <description>This pawn's body is regenerating following the Eternal sequence.</description>
+        <initialSeverity>0.0</initialSeverity>
+        <isBad>false</isBad>
+        <tendable>false</tendable>
+        <displayWound>false</displayWound>
+    </HediffDef>
+
+    <!-- Teleportation Recovery Hediff -->
+    <HediffDef>
+        <defName>Eternal_TeleportationRecovery</defName>
+        <hediffClass>Eternal.Hediffs.EternalTeleportationRecovery_Hediff</hediffClass>
+        <label>Teleportation Recovery</label>
+        <description>Recovering from teleportation after death in caravan.</description>
+        <initialSeverity>1.0</initialSeverity>
+        <isBad>true</isBad>
+        <tendable>false</tendable>
+        <displayWound>false</displayWound>
+        <comps>
+            <li Class="HediffCompProperties_SeverityPerDay">
+                <severityPerDay>-2.0</severityPerDay>
+            </li>
+        </comps>
+    </HediffDef>
+
+    <!-- Metabolic Recovery Hediff -->
+    <!-- Applied after resurrection to represent the metabolic cost of healing.
+         Severity maps to accumulated food debt: 0.0 = no debt, 1.0 = maximum debt.
+         Higher severity = faster hunger, incentivising the player to feed the pawn quickly.
+         The custom hediff class (Plan 02) may override the cap for configurable max hunger rate.
+         The 8 stages provide a smooth BASE hunger rate curve from 1.1x at minimal debt up to
+         2.0x at maximum debt (2x hunger cap per design decision). -->
+    <HediffDef>
+        <defName>Eternal_MetabolicRecovery</defName>
+        <hediffClass>Eternal.Hediffs.MetabolicRecovery_Hediff</hediffClass>
+        <label>Metabolic Recovery</label>
+        <description>This pawn is metabolically recovering from resurrection. Increased hunger accelerates recovery.</description>
+        <initialSeverity>0.01</initialSeverity>
+        <minSeverity>0</minSeverity>
+        <maxSeverity>1.0</maxSeverity>
+        <isBad>true</isBad>
+        <tendable>false</tendable>
+        <displayWound>false</displayWound>
+        <defaultLabelColor>(0.9, 0.6, 0.2)</defaultLabelColor>
+        <stages>
+            <!-- Stage 0: minimal debt — very slight hunger increase -->
+            <li>
+                <label>minor recovery</label>
+                <minSeverity>0.00</minSeverity>
+                <hungerRateFactor>1.1</hungerRateFactor>
+            </li>
+            <!-- Stage 1: noticeable but mild -->
+            <li>
+                <label>minor recovery</label>
+                <minSeverity>0.10</minSeverity>
+                <hungerRateFactor>1.2</hungerRateFactor>
+            </li>
+            <!-- Stage 2: moderate onset -->
+            <li>
+                <label>minor recovery</label>
+                <minSeverity>0.20</minSeverity>
+                <hungerRateFactor>1.33</hungerRateFactor>
+            </li>
+            <!-- Stage 3: moderate recovery -->
+            <li>
+                <label>moderate recovery</label>
+                <minSeverity>0.33</minSeverity>
+                <hungerRateFactor>1.5</hungerRateFactor>
+            </li>
+            <!-- Stage 4: sustained moderate recovery -->
+            <li>
+                <label>moderate recovery</label>
+                <minSeverity>0.50</minSeverity>
+                <hungerRateFactor>1.66</hungerRateFactor>
+            </li>
+            <!-- Stage 5: intensive recovery begins -->
+            <li>
+                <label>intensive recovery</label>
+                <minSeverity>0.66</minSeverity>
+                <hungerRateFactor>1.75</hungerRateFactor>
+            </li>
+            <!-- Stage 6: intensive recovery sustained -->
+            <li>
+                <label>intensive recovery</label>
+                <minSeverity>0.80</minSeverity>
+                <hungerRateFactor>1.85</hungerRateFactor>
+            </li>
+            <!-- Stage 7: maximum debt — 2x hunger cap -->
+            <li>
+                <label>intensive recovery</label>
+                <minSeverity>0.90</minSeverity>
+                <hungerRateFactor>2.0</hungerRateFactor>
+            </li>
+        </stages>
+    </HediffDef>
+
+</Defs>

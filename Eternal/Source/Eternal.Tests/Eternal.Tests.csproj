@@ -1,0 +1,42 @@
+<!-- Relative Path: Eternal/Source/Eternal.Tests/Eternal.Tests.csproj -->
+<!-- Creation Date: 24-02-2026 -->
+<!-- Last Edit: 24-02-2026 -->
+<!-- Author: 0Shard -->
+<!-- Description: xUnit 2.9 + NSubstitute test project targeting net472. -->
+<!--              References the production Eternal.csproj for testing all pure-logic surfaces. -->
+<!--              Uses Krafs.Rimworld.Ref for compile-time type safety without game runtime. -->
+<!--              Note: xUnit v3 requires netstandard2.1 at runtime which net472 cannot provide; -->
+<!--              xUnit v2 is the proven path for .NET Framework 4.7.2 projects. -->
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net472</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <LangVersion>latest</LangVersion>
+    <RootNamespace>Eternal.Tests</RootNamespace>
+    <AssemblyName>Eternal.Tests</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- xUnit v2 core: Fact/Theory attributes, Assert class -->
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <!-- VSTest adapter: enables dotnet test discovery and execution -->
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.13.0" />
+    <!-- NSubstitute: interface mocking for ISettingsProvider, IPawnData -->
+    <PackageReference Include="NSubstitute" Version="5.3.0" />
+    <!-- RimWorld reference assemblies: compile-time type safety, no game runtime needed -->
+    <PackageReference Include="Krafs.Rimworld.Ref" Version="1.6.4494-beta" />
+    <!-- Harmony: patch attribute verification via reflection -->
+    <PackageReference Include="Lib.Harmony" Version="2.4.2" />
+  </ItemGroup>
+
+  <!-- Reference production project -->
+  <ItemGroup>
+    <ProjectReference Include="..\Eternal.csproj" />
+  </ItemGroup>
+
+</Project>

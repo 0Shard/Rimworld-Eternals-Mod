@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<!-- file path: Eternal/Defs/WorldObjects/WorldObjects_Eternal.xml -->
+<!-- Author Name: 0Shard -->
+<!-- Date Created: 06-12-2025 -->
+<!-- Date Last Modified: 26-12-2025 -->
+<!-- Description: WorldObject definitions for Eternal mod. -->
+<!--              Includes crash site for Eternals that fell from space. -->
+
+<Defs>
+
+    <!-- Crash Site WorldObject for Eternals that fell from space -->
+    <WorldObjectDef>
+        <defName>Eternal_CrashSite</defName>
+        <label>eternal crash site</label>
+        <description>An Eternal pawn fell from space and crash-landed here. They survived but are severely injured. You can enter to control them directly, or send a caravan to rescue them.</description>
+        <worldObjectClass>Eternal.World.WorldObject_EternalCrashSite</worldObjectClass>
+        <texture>World/WorldObjects/Sites/GenericSite</texture>
+        <expandingIconTexture>World/WorldObjects/Expanding/Site</expandingIconTexture>
+        <expandingIconPriority>10</expandingIconPriority>
+        <useDynamicDrawer>true</useDynamicDrawer>
+        <canHaveFaction>true</canHaveFaction>
+        <comps>
+            <li Class="WorldObjectCompProperties_FormCaravan"/>
+        </comps>
+    </WorldObjectDef>
+
+</Defs>

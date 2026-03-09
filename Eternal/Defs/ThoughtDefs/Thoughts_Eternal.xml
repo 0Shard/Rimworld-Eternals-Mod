@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Defs>
+  <!-- ThoughtDef for the Eternal mood buff -->
+  <ThoughtDef>
+    <defName>Eternal_MoodBuff</defName>
+    <workerClass>ThoughtWorker_AlwaysActive</workerClass>
+    <validWhileDespawned>true</validWhileDespawned>
+    <requiredHediffs>
+      <li>Eternal_Essence</li>
+    </requiredHediffs>
+    <stages>
+      <li>
+        <baseMoodEffect>40</baseMoodEffect>
+        <label>I'm Eternal !!!</label>
+        <description>I am eternal, bound by neither time nor death. My existence transcends mortal limitations.</description>
+      </li>
+    </stages>
+  </ThoughtDef>
+</Defs>

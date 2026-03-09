@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LanguageData>
+    <TraitDef.Eternal_GeneticMarker.label>Eternal</TraitDef.Eternal_GeneticMarker.label>
+    <TraitDef.Eternal_GeneticMarker.description>This pawn possesses the Eternal genetic marker, enabling true biological immortality through precise regrowth.</TraitDef.Eternal_GeneticMarker.description>
+    
+    <TraitDef.Eternal_GeneticMarker.degreeDatas.0.label>Eternal</TraitDef.Eternal_GeneticMarker.degreeDatas.0.label>
+    <TraitDef.Eternal_GeneticMarker.degreeDatas.0.description>This pawn is an Eternal, capable of regenerating from any injury through a precise biological sequence.</TraitDef.Eternal_GeneticMarker.degreeDatas.0.description>
+</LanguageData>

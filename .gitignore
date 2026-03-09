@@ -1,0 +1,28 @@
+Example/
+RimWorld/
+RimWorld-Decompiled/
+
+# Build artifacts
+**/obj/
+**/bin/
+*.user
+*.suo
+*.userprefs
+
+# IDE
+.vs/
+.vscode/
+*.csproj.user
+
+# NuGet
+packages/
+*.nupkg
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Backup files
+*~
+*.bak
+*.swp

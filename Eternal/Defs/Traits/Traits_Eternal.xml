@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Defs>
+    <TraitDef>
+        <defName>Eternal_GeneticMarker</defName>
+        <label>Eternal</label>
+        <description>This pawn possesses the Eternal genetic marker, enabling true biological immortality through precise regrowth.</description>
+        <degreeDatas>
+            <li>
+                <label>Eternal</label>
+                <description>This pawn is an Eternal, capable of regenerating from any injury through a precise biological sequence.</description>
+            </li>
+        </degreeDatas>
+        <commonality>0.0</commonality> <!-- Never spawns naturally -->
+    </TraitDef>
+</Defs>

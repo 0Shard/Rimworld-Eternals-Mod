@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LanguageData>
+    <!-- Settings Menu -->
+    <Eternal_Settings> Eternal Settings</Eternal_Settings>
+    
+    <!-- General Settings -->
+    <Eternal_EnableMod>Enable Eternal Mod</Eternal_EnableMod>
+    <Eternal_DebugMode>Debug Mode</Eternal_DebugMode>
+    <Eternal_LoggingLevel>Logging Level</Eternal_LoggingLevel>
+    
+    <!-- Regrowth Settings -->
+    <Eternal_RegrowthSettings>Regrowth Settings</Eternal_RegrowthSettings>
+    <Eternal_RegrowthSpeedMultiplier>Regrowth Speed Multiplier</Eternal_RegrowthSpeedMultiplier>
+    <Eternal_NeckDurationMultiplier>Neck Duration Multiplier</Eternal_NeckDurationMultiplier>
+    <Eternal_HeadSkullDurationMultiplier>Head/Skull Duration Multiplier</Eternal_HeadSkullDurationMultiplier>
+    <Eternal_BrainDurationMultiplier>Brain Duration Multiplier</Eternal_BrainDurationMultiplier>
+    <Eternal_FacialSensoryDurationMultiplier>Facial/Sensory Duration Multiplier</Eternal_FacialSensoryDurationMultiplier>
+    <Eternal_ShowRegrowthEffects>Show Regrowth Effects</Eternal_ShowRegrowthEffects>
+    <Eternal_ShowRegrowthProgress>Show Regrowth Progress</Eternal_ShowRegrowthProgress>
+    
+    <!-- Resource Settings -->
+    <Eternal_ResourceSettings>Resource Settings</Eternal_ResourceSettings>
+    <Eternal_NutritionCostMultiplier>Nutrition Cost Multiplier</Eternal_NutritionCostMultiplier>
+    <Eternal_PauseOnResourceDepletion>Pause on Resource Depletion</Eternal_PauseOnResourceDepletion>
+    <Eternal_MinimumNutritionThreshold>Minimum Nutrition Threshold</Eternal_MinimumNutritionThreshold>
+    <Eternal_AllowResourceBorrowing>Allow Resource Borrowing</Eternal_AllowResourceBorrowing>
+    
+    <!-- Performance Settings -->
+    <Eternal_PerformanceSettings>Performance Settings</Eternal_PerformanceSettings>
+    <Eternal_UpdateFrequency>Update Frequency (ticks)</Eternal_UpdateFrequency>
+    <Eternal_EnableBatchProcessing>Enable Batch Processing</Eternal_EnableBatchProcessing>
+    <Eternal_BatchSize>Batch Size</Eternal_BatchSize>
+    <Eternal_EnableMemoryOptimization>Enable Memory Optimization</Eternal_EnableMemoryOptimization>
+    
+    <!-- Compatibility Settings -->
+    <Eternal_CompatibilitySettings>Compatibility Settings</Eternal_CompatibilitySettings>
+    <Eternal_EnableCompatibilityMode>Enable Compatibility Mode</Eternal_EnableCompatibilityMode>
+    <Eternal_AutoDetectConflicts>Auto Detect Conflicts</Eternal_AutoDetectConflicts>
+    <Eternal_EnableSafeMode>Enable Safe Mode</Eternal_EnableSafeMode>
+    
+    <!-- Research Projects -->
+    <!-- Removed: EternalBiology and EternalRegrowthAcceleration -->
+    
+    <!-- Buildings -->
+    <!-- Removed: EternalRegrowthChamber and EternalResearchLab -->
+
+    <!-- Odyssey DLC - Space Survival -->
+    <EternalWarning>Eternal Warning</EternalWarning>
+    <EternalWillFallToPlanet>The following Eternal colonists will fall to the planet surface if left behind</EternalWillFallToPlanet>
+    <EternalFellFromSpace>Eternal Fell From Space</EternalFellFromSpace>
+    <EternalFellFromSpaceDesc>{0} Eternal pawn(s) fell from the grav ship and crash-landed on the planet. They survived but are severely injured. You can control them directly at the crash site or send a caravan to rescue them.</EternalFellFromSpaceDesc>
+    <EternalsCrashed>{0} Eternal(s) crashed here</EternalsCrashed>
+    <ClickToEnterCrashSite>Click to enter and control the Eternal(s)</ClickToEnterCrashSite>
+    <RescueEternalsWithCaravan>Rescue Eternal(s) with caravan</RescueEternalsWithCaravan>
+    <EternalsRescued>Eternal(s) successfully rescued to caravan.</EternalsRescued>
+
+    <!-- Eternal Death and Resurrection -->
+    <EternalPawnDied>Eternal Pawn Died</EternalPawnDied>
+    <EternalPawnDiedDesc>{PAWN_nameFull} has died. Their corpse is being tracked for potential resurrection.</EternalPawnDiedDesc>
+
+    <!-- Resurrection Completion -->
+    <EternalResurrectionComplete>Eternal Resurrected</EternalResurrectionComplete>
+    <EternalResurrectionCompleteDesc>{PAWN_nameFull} has been resurrected. They will need to repay {DEBT:F1} nutrition of biological debt accumulated during healing.</EternalResurrectionCompleteDesc>
+    <EternalResurrectionImmediateDesc>{PAWN_nameFull} has been resurrected without injury — no biological debt was incurred.</EternalResurrectionImmediateDesc>
+
+    <!-- Permanent Death (SAFE-05) -->
+    <EternalPermanentDeath>Eternal Lost</EternalPermanentDeath>
+    <EternalPermanentDeathDesc>{PAWN_nameFull}'s accumulated food debt ({DEBT:F1}) has exceeded the maximum capacity ({LIMIT:F1}). The enormous biological cost of repeated resurrections has overwhelmed {PAWN_pronoun}'s body beyond recovery. {PAWN_nameDef} is permanently dead and cannot be resurrected again.</EternalPermanentDeathDesc>
+
+    <!-- Settlement Abandonment Blocking -->
+    <Eternal_CannotAbandonTitle>Cannot Abandon Settlement</Eternal_CannotAbandonTitle>
+    <Eternal_CannotAbandonDesc>This settlement cannot be abandoned while Eternal colonists are present:</Eternal_CannotAbandonDesc>
+    <Eternal_CannotAbandonSuggestion>Resurrect all Eternal corpses or relocate living Eternals to a caravan before abandoning this settlement.</Eternal_CannotAbandonSuggestion>
+    <Eternal_PawnStatusDead>deceased - awaiting resurrection</Eternal_PawnStatusDead>
+    <Eternal_PawnStatusAlive>living</Eternal_PawnStatusAlive>
+    <Eternal_PawnStatusResurrecting>resurrection in progress</Eternal_PawnStatusResurrecting>
+
+    <!-- SOS2 Compatibility -->
+    <EternalSOS2ShipBurnUp>{0} Eternal pawn(s) were rescued from the burning ship and fell to the planet surface. They crashed at a rescue site and need assistance.</EternalSOS2ShipBurnUp>
+    <EternalSOS2ShipAbandoned>{0} Eternal pawn(s) were rescued from the abandoned ship and fell to the planet surface. They are at a crash site awaiting rescue.</EternalSOS2ShipAbandoned>
+    <EternalEmergencyRecovery>Eternal pawn(s) were emergency teleported to your colony after a ship destruction event.</EternalEmergencyRecovery>
+
+    <!-- Roof Collapse Protection -->
+    <EternalRoofCollapseSaved>The corpse of {0} was saved from roof collapse!</EternalRoofCollapseSaved>
+</LanguageData>

@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Relative Path: Eternal/Defs/ThingDefs/ThingDefs_Eternal.xml
+  Creation Date: 04-03-2026
+  Last Edit: 04-03-2026
+  Author: 0Shard
+  Description: ThingDef XML definitions for the Eternal mod.
+               Defines EternalAnchor — an invisible map retention anchor that
+               prevents temporary maps (quest sites, caravan encounters) from
+               closing while an Eternal corpse is present on them.
+-->
+<Defs>
+
+    <!-- EternalAnchor ThingDef -->
+    <!-- An invisible, non-interactive thing spawned on a map when an Eternal pawn dies there.
+         Its sole purpose is to hold a reference to EternalMapManager so the map is kept alive
+         until the Eternal corpse is transferred or resurrected. The thing itself is never
+         rendered or selectable by the player. -->
+    <ThingDef>
+        <defName>EternalAnchor</defName>
+        <thingClass>Eternal.Map.EternalAnchor</thingClass>
+        <label>Eternal Anchor</label>
+        <description>An invisible metaphysical anchor bound to an Eternal pawn's essence. It persists on a map until the Eternal is resurrected or relocated, preventing the map from closing prematurely.</description>
+        <category>Mote</category>
+        <drawerType>None</drawerType>
+        <selectable>false</selectable>
+        <useHitPoints>false</useHitPoints>
+        <seeThroughFog>false</seeThroughFog>
+        <altitudeLayer>FloorEmplacement</altitudeLayer>
+        <passability>Standable</passability>
+        <destroyable>false</destroyable>
+        <rotatable>false</rotatable>
+        <clearBuildingArea>false</clearBuildingArea>
+        <tickerType>Normal</tickerType>
+    </ThingDef>
+
+</Defs>

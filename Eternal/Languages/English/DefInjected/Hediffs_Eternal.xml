@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LanguageData>
+    <!-- Eternal Essence Hediff -->
+    <HediffDef.Eternal_Essence.label>Eternal Essence</HediffDef.Eternal_Essence.label>
+    <HediffDef.Eternal_Essence.description>The biological essence that enables eternal regeneration.</HediffDef.Eternal_Essence.description>
+    
+    <!-- Eternal Regrowth State Hediff -->
+    <HediffDef.Eternal_RegrowthState.label>Regenerating</HediffDef.Eternal_RegrowthState.label>
+    <HediffDef.Eternal_RegrowthState.description>This pawn's body is regenerating following the Eternal sequence.</HediffDef.Eternal_RegrowthState.description>
+    
+    <!-- Neck Regrowth Hediff -->
+    <HediffDef.Eternal_Regrowing_Neck.label>Regrowing Neck</HediffDef.Eternal_Regrowing_Neck.label>
+    <HediffDef.Eternal_Regrowing_Neck.description>The neck is regenerating, reconnecting the head to the torso.</HediffDef.Eternal_Regrowing_Neck.description>
+    
+    <!-- Head/Skull Regrowth Hediff -->
+    <HediffDef.Eternal_Regrowing_HeadSkull.label>Regrowing Head</HediffDef.Eternal_Regrowing_HeadSkull.label>
+    <HediffDef.Eternal_Regrowing_HeadSkull.description>The head and skull are regenerating, providing protection for the brain.</HediffDef.Eternal_Regrowing_HeadSkull.description>
+    
+    <!-- Brain Regrowth Hediff -->
+    <HediffDef.Eternal_Regrowing_Brain.label>Regrowing Brain</HediffDef.Eternal_Regrowing_Brain.label>
+    <HediffDef.Eternal_Regrowing_Brain.description>The brain is regenerating, restoring consciousness and neural function.</HediffDef.Eternal_Regrowing_Brain.description>
+    
+    <!-- Facial/Sensory Regrowth Hediff -->
+    <HediffDef.Eternal_Regrowing_FacialSensory.label>Regrowing Facial Features</HediffDef.Eternal_Regrowing_FacialSensory.label>
+    <HediffDef.Eternal_Regrowing_FacialSensory.description>Facial features and sensory organs are regenerating.</HediffDef.Eternal_Regrowing_FacialSensory.description>
+    
+    <!-- Regrowth Paused Hediff -->
+    <HediffDef.Eternal_RegrowthPaused.label>Regrowth Paused</HediffDef.Eternal_RegrowthPaused.label>
+    <HediffDef.Eternal_RegrowthPaused.description>Regrowth is paused due to insufficient resources.</HediffDef.Eternal_RegrowthPaused.description>
+    
+    <!-- Teleportation Recovery Hediff -->
+    <HediffDef.Eternal_TeleportationRecovery.label>Teleportation Recovery</HediffDef.Eternal_TeleportationRecovery.label>
+    <HediffDef.Eternal_TeleportationRecovery.description>Recovering from teleportation after death in caravan.</HediffDef.Eternal_TeleportationRecovery.description>
+</LanguageData>
