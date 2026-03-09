@@ -9,6 +9,11 @@ RimWorld-Decompiled/
 *.suo
 *.userprefs
 
+# NuGet-restored Harmony DLLs (users install Harmony separately)
+**/0Harmony.dll
+# Nested build artifact from NuGet restore
+Eternal/1.6/Assemblies/net472/net472/
+
 # IDE
 .vs/
 .vscode/
