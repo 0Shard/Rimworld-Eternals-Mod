@@ -1,0 +1,88 @@
+name: Bug Report
+description: Report a bug with Eternal. Incomplete reports will be closed.
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Before submitting, please ensure you have:**
+        - The latest version of Eternal installed
+        - Harmony loaded before Eternal in your mod order
+        - Tested with only Eternal + Harmony to rule out mod conflicts
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Bug Description
+      description: What happened? What did you expect to happen instead?
+      placeholder: Describe the bug clearly and concisely.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to Reproduce
+      description: Exact steps to trigger this bug. If we can't reproduce it, we can't fix it.
+      placeholder: |
+        1. Start a new colony with an Eternal pawn
+        2. Do X
+        3. Do Y
+        4. Bug occurs
+    validations:
+      required: true
+
+  - type: textarea
+    id: log
+    attributes:
+      label: Log File or Stack Trace
+      description: |
+        Paste the relevant error from your Player.log or the full stack trace.
+        Log location: `C:\Users\<you>\AppData\LocalLow\Ludeon Studios\RimWorld by Ludeon Studios\Player.log`
+        You can also use the in-game dev console (toggle with ~) to find errors.
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: modlist
+    attributes:
+      label: Mod List and Load Order
+      description: |
+        Paste your full mod list in load order. You can export this from RimWorld's mod menu or use a mod manager.
+        At minimum, list any mods you suspect may conflict.
+      placeholder: |
+        1. Harmony
+        2. Core
+        3. Royalty
+        4. ...
+        5. Eternal
+    validations:
+      required: true
+
+  - type: input
+    id: rimworld-version
+    attributes:
+      label: RimWorld Version
+      placeholder: "e.g. 1.6.4494"
+    validations:
+      required: true
+
+  - type: input
+    id: eternal-version
+    attributes:
+      label: Eternal Version
+      placeholder: "e.g. v1.0"
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: confirmation
+    attributes:
+      label: Confirmation
+      options:
+        - label: I have tested this with only Harmony + Eternal enabled to rule out mod conflicts
+          required: false
+        - label: I have included the log file or stack trace
+          required: true
