@@ -62,19 +62,6 @@
         </stages>
     </HediffDef>
 
-    <!-- LEGACY: Eternal_RegrowthState - still used by EternalRegrowthManager until manager refactor -->
-    <!-- Will be deprecated when manager is updated to use unified Eternal_Regrowing -->
-    <HediffDef>
-        <defName>Eternal_RegrowthState</defName>
-        <hediffClass>Eternal.EternalRegrowthState_Hediff</hediffClass>
-        <label>Regenerating</label>
-        <description>This pawn's body is regenerating following the Eternal sequence.</description>
-        <initialSeverity>0.0</initialSeverity>
-        <isBad>false</isBad>
-        <tendable>false</tendable>
-        <displayWound>false</displayWound>
-    </HediffDef>
-
     <!-- Teleportation Recovery Hediff -->
     <HediffDef>
         <defName>Eternal_TeleportationRecovery</defName>

@@ -1,6 +1,6 @@
 // Relative Path: Eternal/Source/Eternal/Hediffs/Eternal_Hediff.cs
 // Creation Date: 28-10-2025
-// Last Edit: 04-03-2026
+// Last Edit: 09-03-2026
 // Author: 0Shard
 // Description: Core hediff class for Eternal mod, manages Eternal Essence hediff with enhanced validation, error handling, and healing system integration.
 //              Added GetGizmos() override to show resurrection gizmo on corpses using RimWorld's native showGizmosOnCorpse mechanism.
@@ -30,7 +30,7 @@ namespace Eternal
     /// Manages Eternal Essence hediff that enables immortality mechanics.
     /// Enhanced with comprehensive validation and error handling.
     /// </summary>
-    public class Eternal_Hediff : Hediff
+    public class Eternal_Hediff : HediffWithComps
     {
         /// <summary>
         /// Called when hediff is added to a pawn.

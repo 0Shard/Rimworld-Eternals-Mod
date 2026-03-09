@@ -3,11 +3,7 @@
     <!-- Eternal Essence Hediff -->
     <HediffDef.Eternal_Essence.label>Eternal Essence</HediffDef.Eternal_Essence.label>
     <HediffDef.Eternal_Essence.description>The biological essence that enables eternal regeneration.</HediffDef.Eternal_Essence.description>
-    
-    <!-- Eternal Regrowth State Hediff -->
-    <HediffDef.Eternal_RegrowthState.label>Regenerating</HediffDef.Eternal_RegrowthState.label>
-    <HediffDef.Eternal_RegrowthState.description>This pawn's body is regenerating following the Eternal sequence.</HediffDef.Eternal_RegrowthState.description>
-    
+
     <!-- Neck Regrowth Hediff -->
     <HediffDef.Eternal_Regrowing_Neck.label>Regrowing Neck</HediffDef.Eternal_Regrowing_Neck.label>
     <HediffDef.Eternal_Regrowing_Neck.description>The neck is regenerating, reconnecting the head to the torso.</HediffDef.Eternal_Regrowing_Neck.description>
