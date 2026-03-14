@@ -1,7 +1,7 @@
 /*
  * Relative Path: Eternal/Source/Eternal/Resources/UnifiedFoodDebtManager.cs
  * Creation Date: 03-12-2025
- * Last Edit: 06-03-2026
+ * Last Edit: 14-03-2026
  * Author: 0Shard
  * Description: Unified food debt manager consolidating EternalFoodDebtSystem and EternalFoodDebtMonitor.
  *              Implements IFoodDebtSystem (inherits IFoodDebtReader + IFoodDebtWriter for ISP compliance).
@@ -68,7 +68,14 @@ namespace Eternal.Resources
                     return;
                 }
 
-                if (!pawn.IsValidEternal())
+                // Dead pawns are always Destroyed Things in RimWorld (pawn.Destroyed is set before
+                // Notify_PawnDied is called — see CLAUDE.md "RimWorld Death Sequence"). IsValidEternal()
+                // checks the Destroyed flag and therefore always returns false for dead pawns. Use
+                // IsValidEternalCorpse() for dead pawns; it skips the Destroyed check intentionally.
+                bool isValidEternal = pawn.Dead
+                    ? pawn.IsValidEternalCorpse()
+                    : pawn.IsValidEternal();
+                if (!isValidEternal)
                 {
                     Log.Warning($"[Eternal] Attempted to register non-Eternal pawn: {pawn.Name}");
                     return;

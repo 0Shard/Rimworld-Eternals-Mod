@@ -1,6 +1,6 @@
 // Relative Path: Eternal/Source/Eternal/InGameTests/Helpers/TickAdvancer.cs
 // Creation Date: 24-02-2026
-// Last Edit: 24-02-2026
+// Last Edit: 14-03-2026
 // Author: 0Shard
 // Description: Tick advancement helper for in-game integration tests.
 //              Advances the game tick counter to trigger time-dependent processing
@@ -9,11 +9,16 @@
 //              because GameComponentUpdate() runs in the render/frame loop (Game.UpdatePlay()), NOT in
 //              DoSingleTick() which only calls GameComponentTick(). Without this explicit call, the
 //              TickOrchestrator (and thus all regrowth/healing processing) never fires during tests.
+//              RC4-FIX: Sets CurTimeSpeed to TimeSpeed.Normal during tick advancement because debug
+//              actions run while the game is paused (CurTimeSpeed == TimeSpeed.Paused). TickOrchestrator
+//              guards on CanProcessTick() which checks Find.TickManager.Paused — if the game is paused
+//              the orchestrator never fires, so healing/regrowth/resurrection tests all time out.
 
 #if DEBUG
 
 using System;
 using Verse;
+using RimWorld;
 using Eternal.Components;
 
 namespace Eternal.InGameTests.Helpers
@@ -43,20 +48,32 @@ namespace Eternal.InGameTests.Helpers
                 return;
             }
 
-            for (int i = 0; i < count; i++)
+            // RC4-FIX: Ensure TickOrchestrator.CanProcessTick() returns true during test advancement.
+            // Debug actions run while the game is paused (CurTimeSpeed == TimeSpeed.Paused), so the
+            // orchestrator's Paused guard would block all healing/regrowth/resurrection processing.
+            var savedSpeed = tickManager.CurTimeSpeed;
+            tickManager.CurTimeSpeed = TimeSpeed.Normal;
+            try
             {
-                try
+                for (int i = 0; i < count; i++)
                 {
-                    tickManager.DoSingleTick();
-                    // RC3-FIX: Drive Eternal processing explicitly — GameComponentUpdate() is NOT called
-                    // by DoSingleTick(). It lives in Game.UpdatePlay() (render/frame loop), so tests must
-                    // invoke it manually to trigger TickOrchestrator -> regrowth/healing/resurrection.
-                    Eternal_Component.Current?.GameComponentUpdate();
+                    try
+                    {
+                        tickManager.DoSingleTick();
+                        // RC3-FIX: Drive Eternal processing explicitly — GameComponentUpdate() is NOT called
+                        // by DoSingleTick(). It lives in Game.UpdatePlay() (render/frame loop), so tests must
+                        // invoke it manually to trigger TickOrchestrator -> regrowth/healing/resurrection.
+                        Eternal_Component.Current?.GameComponentUpdate();
+                    }
+                    catch (Exception ex)
+                    {
+                        Log.Warning($"[EternalTests] Tick {i} threw: {ex.Message}");
+                    }
                 }
-                catch (Exception ex)
-                {
-                    Log.Warning($"[EternalTests] Tick {i} threw: {ex.Message}");
-                }
+            }
+            finally
+            {
+                tickManager.CurTimeSpeed = savedSpeed;
             }
         }
 
@@ -74,21 +91,31 @@ namespace Eternal.InGameTests.Helpers
             if (tickManager == null)
                 throw new TestFailedException("[EternalTests] TickManager is null");
 
-            for (int i = 0; i < maxTicks; i++)
+            // RC4-FIX: Same rationale as AdvanceTicks — ensure orchestrator processes while paused.
+            var savedSpeed = tickManager.CurTimeSpeed;
+            tickManager.CurTimeSpeed = TimeSpeed.Normal;
+            try
             {
-                if (condition())
-                    return i;
+                for (int i = 0; i < maxTicks; i++)
+                {
+                    if (condition())
+                        return i;
 
-                try
-                {
-                    tickManager.DoSingleTick();
-                    // RC3-FIX: Drive Eternal processing explicitly — same reason as AdvanceTicks.
-                    Eternal_Component.Current?.GameComponentUpdate();
+                    try
+                    {
+                        tickManager.DoSingleTick();
+                        // RC3-FIX: Drive Eternal processing explicitly — same reason as AdvanceTicks.
+                        Eternal_Component.Current?.GameComponentUpdate();
+                    }
+                    catch (Exception ex)
+                    {
+                        Log.Warning($"[EternalTests] Tick {i} threw: {ex.Message}");
+                    }
                 }
-                catch (Exception ex)
-                {
-                    Log.Warning($"[EternalTests] Tick {i} threw: {ex.Message}");
-                }
+            }
+            finally
+            {
+                tickManager.CurTimeSpeed = savedSpeed;
             }
 
             throw new TestFailedException(

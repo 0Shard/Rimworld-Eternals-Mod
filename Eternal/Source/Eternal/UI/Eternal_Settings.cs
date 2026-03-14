@@ -1,6 +1,6 @@
 // Relative Path: Eternal/Source/Eternal/UI/Eternal_Settings.cs
 // Creation Date: 01-01-2025
-// Last Edit: 04-03-2026
+// Last Edit: 12-03-2026
 // Author: 0Shard
 // Description: Settings data class for Eternal mod configuration. Contains all
 //              mod-specific settings and user preferences. UI drawing is delegated
@@ -95,6 +95,14 @@ namespace Eternal
         public const bool EnableMapAnchors = true;
         public const int AnchorGracePeriodTicks = 300;
         public const bool EnableRoofCollapseProtection = true;
+
+        // Effects
+        public const bool ConsciousnessBuffEnabled = true;
+        public const float ConsciousnessMultiplier = 3.0f;
+        public const bool MoodBuffEnabled = true;
+        public const int MoodBuffValue = 40;
+        public const bool PopulationCapEnabled = true;
+        public const int PopulationCap = 3;
     }
 
     /// <summary>
@@ -266,6 +274,17 @@ namespace Eternal
 
         #endregion
 
+        #region Effects Settings
+
+        public bool consciousnessBuffEnabled = SettingsDefaults.ConsciousnessBuffEnabled;
+        public float consciousnessMultiplier = SettingsDefaults.ConsciousnessMultiplier;
+        public bool moodBuffEnabled = SettingsDefaults.MoodBuffEnabled;
+        public int moodBuffValue = SettingsDefaults.MoodBuffValue;
+        public bool populationCapEnabled = SettingsDefaults.PopulationCapEnabled;
+        public int populationCap = SettingsDefaults.PopulationCap;
+
+        #endregion
+
         #region Per-Section Reset Methods
 
         /// <summary>
@@ -345,6 +364,43 @@ namespace Eternal
             enableRoofCollapseProtection = SettingsDefaults.EnableRoofCollapseProtection;
         }
 
+        /// <summary>
+        /// Resets Consciousness Buff settings to defaults.
+        /// </summary>
+        public void ResetConsciousnessBuffSettings()
+        {
+            consciousnessBuffEnabled = SettingsDefaults.ConsciousnessBuffEnabled;
+            consciousnessMultiplier = SettingsDefaults.ConsciousnessMultiplier;
+        }
+
+        /// <summary>
+        /// Resets Mood Buff settings to defaults.
+        /// </summary>
+        public void ResetMoodBuffSettings()
+        {
+            moodBuffEnabled = SettingsDefaults.MoodBuffEnabled;
+            moodBuffValue = SettingsDefaults.MoodBuffValue;
+        }
+
+        /// <summary>
+        /// Resets Population Cap settings to defaults.
+        /// </summary>
+        public void ResetPopulationCapSettings()
+        {
+            populationCapEnabled = SettingsDefaults.PopulationCapEnabled;
+            populationCap = SettingsDefaults.PopulationCap;
+        }
+
+        /// <summary>
+        /// Resets all Effects settings to defaults (consciousness buff, mood buff, population cap).
+        /// </summary>
+        public void ResetEffectsSettings()
+        {
+            ResetConsciousnessBuffSettings();
+            ResetMoodBuffSettings();
+            ResetPopulationCapSettings();
+        }
+
         #endregion
 
         #region Snapshot
@@ -409,6 +465,15 @@ namespace Eternal
                     EnableMapAnchors           = enableMapAnchors,
                     AnchorGracePeriodTicks     = anchorGracePeriodTicks,
                     EnableRoofCollapseProtection = enableRoofCollapseProtection,
+                },
+                Effects = new ImmutableSettingsSnapshot.EffectsSection
+                {
+                    ConsciousnessBuffEnabled = consciousnessBuffEnabled,
+                    ConsciousnessMultiplier  = consciousnessMultiplier,
+                    MoodBuffEnabled          = moodBuffEnabled,
+                    MoodBuffValue            = moodBuffValue,
+                    PopulationCapEnabled     = populationCapEnabled,
+                    PopulationCap            = populationCap,
                 },
             };
         }
@@ -488,6 +553,14 @@ namespace Eternal
             Scribe_Values.Look(ref enableMapAnchors, "enableMapAnchors", true);
             Scribe_Values.Look(ref anchorGracePeriodTicks, "anchorGracePeriodTicks", 300);
             Scribe_Values.Look(ref enableRoofCollapseProtection, "enableRoofCollapseProtection", true);
+
+            // Effects settings
+            Scribe_Values.Look(ref consciousnessBuffEnabled, "consciousnessBuffEnabled", SettingsDefaults.ConsciousnessBuffEnabled);
+            Scribe_Values.Look(ref consciousnessMultiplier, "consciousnessMultiplier", SettingsDefaults.ConsciousnessMultiplier);
+            Scribe_Values.Look(ref moodBuffEnabled, "moodBuffEnabled", SettingsDefaults.MoodBuffEnabled);
+            Scribe_Values.Look(ref moodBuffValue, "moodBuffValue", SettingsDefaults.MoodBuffValue);
+            Scribe_Values.Look(ref populationCapEnabled, "populationCapEnabled", SettingsDefaults.PopulationCapEnabled);
+            Scribe_Values.Look(ref populationCap, "populationCap", SettingsDefaults.PopulationCap);
 
             // After loading, initialize hediff settings from XML
             if (Scribe.mode == LoadSaveMode.LoadingVars || Scribe.mode == LoadSaveMode.PostLoadInit)

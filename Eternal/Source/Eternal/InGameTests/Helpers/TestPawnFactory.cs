@@ -1,6 +1,6 @@
 // Relative Path: Eternal/Source/Eternal/InGameTests/Helpers/TestPawnFactory.cs
 // Creation Date: 24-02-2026
-// Last Edit: 24-02-2026
+// Last Edit: 13-03-2026
 // Author: 0Shard
 // Description: Factory for spawning and managing test Eternal pawns in-game.
 //              Handles pawn generation, trait assignment, killing, and cleanup.
@@ -8,6 +8,7 @@
 //              to eliminate any dependency on Harmony TraitSet_Patch firing in the test context.
 //              If Harmony already added it, the existing one is removed first to ensure clean state.
 //              Note: Verse.Corpse and Verse.Map used fully-qualified to avoid Eternal.Corpse/Eternal.Map conflicts.
+//              13-03: Added SpawnNonEternalPawn for elixir and mood buff non-Eternal target tests.
 
 #if DEBUG
 
@@ -90,6 +91,42 @@ namespace Eternal.InGameTests.Helpers
             _spawnedTestThings.Add(pawn);
 
             Log.Message($"[EternalTests] Spawned Eternal pawn: {pawn.LabelShort} at {cell}");
+            return pawn;
+        }
+
+        /// <summary>
+        /// Spawns a plain colonist pawn WITHOUT the Eternal trait or Eternal_Essence hediff.
+        /// Used to test elixir acceptance logic (CanBeUsedBy) and non-Eternal mood buff targets.
+        /// Tracked in _spawnedTestThings for cleanup.
+        /// </summary>
+        public static Pawn SpawnNonEternalPawn(Verse.Map map)
+        {
+            var request = new PawnGenerationRequest(
+                PawnKindDefOf.Colonist,
+                Faction.OfPlayer,
+                PawnGenerationContext.NonPlayer,
+                forceGenerateNewPawn: true);
+
+            var pawn = PawnGenerator.GeneratePawn(request);
+
+            // Remove Eternal trait if somehow assigned by random generation
+            if (pawn.story?.traits != null && EternalDefOf.Eternal_GeneticMarker != null)
+            {
+                var existingTrait = pawn.story.traits.GetTrait(EternalDefOf.Eternal_GeneticMarker);
+                if (existingTrait != null)
+                {
+                    pawn.story.traits.RemoveTrait(existingTrait);
+                    Log.Message("[EternalTests] SpawnNonEternalPawn: removed randomly-generated Eternal trait.");
+                }
+            }
+
+            // Spawn on map at a walkable cell near center
+            var cell = CellFinder.RandomClosewalkCellNear(map.Center, map, 10);
+            GenSpawn.Spawn(pawn, cell, map);
+
+            _spawnedTestThings.Add(pawn);
+
+            Log.Message($"[EternalTests] Spawned non-Eternal pawn: {pawn.LabelShort} at {cell}");
             return pawn;
         }
 

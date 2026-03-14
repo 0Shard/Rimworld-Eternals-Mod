@@ -3,14 +3,14 @@
   <!-- ThoughtDef for the Eternal mood buff -->
   <ThoughtDef>
     <defName>Eternal_MoodBuff</defName>
-    <workerClass>ThoughtWorker_AlwaysActive</workerClass>
+    <workerClass>Eternal.ThoughtWorker_EternalMoodBuff</workerClass>
     <validWhileDespawned>true</validWhileDespawned>
     <requiredHediffs>
       <li>Eternal_Essence</li>
     </requiredHediffs>
     <stages>
       <li>
-        <baseMoodEffect>40</baseMoodEffect>
+        <baseMoodEffect>1</baseMoodEffect>
         <label>I'm Eternal !!!</label>
         <description>I am eternal, bound by neither time nor death. My existence transcends mortal limitations.</description>
       </li>

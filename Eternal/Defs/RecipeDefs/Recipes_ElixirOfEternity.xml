@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Relative Path: Eternal/Defs/RecipeDefs/Recipes_ElixirOfEternity.xml
+  Creation Date: 12-03-2026
+  Last Edit: 12-03-2026
+  Author: 0Shard
+  Description: RecipeDef for crafting the Elixir of Eternity at a Fabrication bench.
+               Requires 5x Glitterworld Medicine (MedicineUltratech) and
+               10x Spacer Components (ComponentSpacer). Gated behind
+               Eternal_ElixirSynthesis research. Crafting 15 + Medicine 15 skill floors.
+               Only Crafting XP is awarded (per Pitfall 7 — dual-workSkill not supported).
+-->
+<Defs>
+
+    <!-- Elixir of Eternity crafting recipe -->
+    <!-- 30000 ticks (~8.3 hours at 1x speed) reflects the complexity of biological serum
+         synthesis. workSpeedStat=GeneralLaborSpeed gives pawn work speed modifiers full effect.
+         Both Crafting 15 AND Medicine 15 are required (AND logic, not OR) — the synthesis
+         demands expert knowledge of both manufacturing and xenobiology. -->
+    <RecipeDef>
+        <defName>Make_ElixirOfEternity</defName>
+        <label>synthesize Elixir of Eternity</label>
+        <description>Synthesize a single vial of the Elixir of Eternity — a biological serum capable of permanently encoding immortality into a pawn's genetic structure. Requires expert crafting and medical knowledge.</description>
+        <jobString>Synthesizing Elixir of Eternity.</jobString>
+        <workAmount>30000</workAmount>
+        <workSpeedStat>GeneralLaborSpeed</workSpeedStat>
+        <effectWorking>Cook</effectWorking>
+        <soundWorking>Recipe_Machining</soundWorking>
+        <unfinishedThingDef>UnfinishedComponent</unfinishedThingDef>
+        <ingredients>
+            <!-- 5x Glitterworld Medicine — the biological carrier matrix -->
+            <li>
+                <filter>
+                    <thingDefs>
+                        <li>MedicineUltratech</li>
+                    </thingDefs>
+                </filter>
+                <count>5</count>
+            </li>
+            <!-- 10x Spacer Components — for the precision delivery mechanism -->
+            <li>
+                <filter>
+                    <thingDefs>
+                        <li>ComponentSpacer</li>
+                    </thingDefs>
+                </filter>
+                <count>10</count>
+            </li>
+        </ingredients>
+        <fixedIngredientFilter>
+            <thingDefs>
+                <li>MedicineUltratech</li>
+                <li>ComponentSpacer</li>
+            </thingDefs>
+        </fixedIngredientFilter>
+        <products>
+            <Eternal_ElixirOfEternity>1</Eternal_ElixirOfEternity>
+        </products>
+        <researchPrerequisite>Eternal_ElixirSynthesis</researchPrerequisite>
+        <skillRequirements>
+            <!-- Both skills required simultaneously — synthesis demands dual expertise -->
+            <Crafting>15</Crafting>
+            <Medicine>15</Medicine>
+        </skillRequirements>
+        <!-- Only Crafting gains XP — Medicine is a knowledge floor, not active practice -->
+        <workSkill>Crafting</workSkill>
+        <recipeUsers>
+            <li>FabricationBench</li>
+        </recipeUsers>
+    </RecipeDef>
+
+</Defs>

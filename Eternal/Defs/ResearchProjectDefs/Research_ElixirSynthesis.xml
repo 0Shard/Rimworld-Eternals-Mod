@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Relative Path: Eternal/Defs/ResearchProjectDefs/Research_ElixirSynthesis.xml
+  Creation Date: 12-03-2026
+  Last Edit: 12-03-2026
+  Author: 0Shard
+  Description: ResearchProjectDef for Eternal Elixir synthesis — an Ultra-tier research
+               project unlocking the Elixir of Eternity crafting recipe. Requires
+               AdvancedFabrication, VitalsMonitor, and MedicineProduction as prerequisites.
+               Positioned in the research tree at x=20.00, y=2.40 (Ultra column).
+-->
+<Defs>
+
+    <!-- Eternal Elixir Synthesis research project -->
+    <!-- Ultra tech level positions this as end-game content — beyond spacer civilization.
+         6000 base cost reflects the complexity of synthesizing a biological immortality serum.
+         Three prerequisites ensure the player has invested heavily in both fabrication and
+         medical research trees before unlocking this. HiTechResearchBench + MultiAnalyzer
+         required because the xenobiological modeling demands the highest-tier research setup. -->
+    <ResearchProjectDef>
+        <defName>Eternal_ElixirSynthesis</defName>
+        <label>Eternal Elixir synthesis</label>
+        <description>Decades of xenobiological research have led to this breakthrough: a synthesis process capable of producing a serum that rewrites the genetic architecture of a living organism at the cellular level. The resulting compound — the Elixir of Eternity — permanently encodes biological immortality into its recipient, allowing their body to heal from any injury and return from death itself.\n\nUnlocks: Elixir of Eternity (crafted at Fabrication bench).</description>
+        <baseCost>6000</baseCost>
+        <techLevel>Ultra</techLevel>
+        <prerequisites>
+            <li>AdvancedFabrication</li>
+            <li>VitalsMonitor</li>
+            <li>MedicineProduction</li>
+        </prerequisites>
+        <requiredResearchBuilding>HiTechResearchBench</requiredResearchBuilding>
+        <requiredResearchFacilities>
+            <li>MultiAnalyzer</li>
+        </requiredResearchFacilities>
+        <researchViewX>20.00</researchViewX>
+        <researchViewY>2.40</researchViewY>
+        <generalRules>
+            <rulesStrings>
+                <li>subject->Eternal Elixir synthesis</li>
+                <li>subject_story->developed a synthesis protocol for a serum capable of encoding permanent biological immortality into living tissue</li>
+                <li>subject_gerund->synthesizing the Elixir of Eternity</li>
+            </rulesStrings>
+        </generalRules>
+    </ResearchProjectDef>
+
+</Defs>

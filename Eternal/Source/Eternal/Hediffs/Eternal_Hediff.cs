@@ -1,6 +1,6 @@
 // Relative Path: Eternal/Source/Eternal/Hediffs/Eternal_Hediff.cs
 // Creation Date: 28-10-2025
-// Last Edit: 09-03-2026
+// Last Edit: 12-03-2026
 // Author: 0Shard
 // Description: Core hediff class for Eternal mod, manages Eternal Essence hediff with enhanced validation, error handling, and healing system integration.
 //              Added GetGizmos() override to show resurrection gizmo on corpses using RimWorld's native showGizmosOnCorpse mechanism.
@@ -9,10 +9,12 @@
 //              BUGFIX: Pre-calculates healing queue at death time before RimWorld removes injuries from dead pawns.
 //              05-02: Reactive healing history cleanup — calls HediffHealer.ClearPawnHealingProgress on essence removal (SAFE-07).
 //              09-03: Removed debt display from SeverityLabel and GetHealingStatus — debt is now shown on Metabolic Recovery hediff only.
+//              12-03: CurStage override for configurable consciousness buff — reads consciousnessBuffEnabled/Multiplier from settings at runtime.
 
 using System;
 using System.Collections.Generic;
 using Verse;
+using RimWorld;
 using Eternal.Caravan;
 using Eternal.DI;
 using Eternal.Extensions;
@@ -32,6 +34,95 @@ namespace Eternal
     /// </summary>
     public class Eternal_Hediff : HediffWithComps
     {
+        // Cache for the constructed consciousness HediffStage to avoid rebuilding every frame.
+        // Invalidated whenever the toggle or multiplier changes in settings.
+        private HediffStage _cachedBuffStage;
+        private bool _lastBuffEnabled;
+        private float _lastMultiplier;
+
+        /// <summary>
+        /// Returns a dynamically constructed HediffStage so the consciousness buff tracks
+        /// the current settings values at runtime without requiring a save/load.
+        /// Dead pawns (corpses) fall through to base.CurStage — the buff only applies to
+        /// living Eternals.
+        /// </summary>
+        public override HediffStage CurStage
+        {
+            get
+            {
+                // Dead pawns skip the consciousness buff entirely — corpses have no need for it
+                // and bypassing here also prevents null pawn crashes during the death sequence.
+                if (pawn == null || pawn.Dead)
+                    return base.CurStage;
+
+                bool buffEnabled = Eternal_Mod.settings?.consciousnessBuffEnabled
+                    ?? SettingsDefaults.ConsciousnessBuffEnabled;
+                float multiplier = Eternal_Mod.settings?.consciousnessMultiplier
+                    ?? SettingsDefaults.ConsciousnessMultiplier;
+
+                // Floor enforced here even though the UI slider is already clamped — defence-in-depth
+                // against programmatic writes that bypass the slider range check.
+                if (multiplier < 1.0f)
+                    multiplier = 1.0f;
+
+                // Float == is safe here: the slider moves in 0.5-step increments (Mathf.Round(x * 2f) / 2f),
+                // so the stored value is always one of a discrete set and never drifts via floating point ops.
+                if (_cachedBuffStage != null
+                    && _lastBuffEnabled == buffEnabled
+                    && _lastMultiplier == multiplier)
+                {
+                    return _cachedBuffStage;
+                }
+
+                var stage = new HediffStage();
+                if (buffEnabled)
+                {
+                    stage.capMods = new List<PawnCapacityModifier>
+                    {
+                        new PawnCapacityModifier
+                        {
+                            capacity = PawnCapacityDefOf.Consciousness,
+                            postFactor = multiplier
+                        }
+                    };
+                }
+                // When disabled: capMods remains null (empty = no capacity modification)
+
+                _cachedBuffStage = stage;
+                _lastBuffEnabled = buffEnabled;
+                _lastMultiplier = multiplier;
+
+                return _cachedBuffStage;
+            }
+        }
+
+        /// <summary>
+        /// Appends the current consciousness buff state to the hediff tooltip so players can
+        /// see the effective multiplier directly in the health tab without opening settings.
+        /// </summary>
+        public override string TipStringExtra
+        {
+            get
+            {
+                string baseText = base.TipStringExtra;
+
+                // Only show buff status for living pawns — dead pawns don't have the buff active
+                if (pawn == null || pawn.Dead)
+                    return baseText;
+
+                bool buffEnabled = Eternal_Mod.settings?.consciousnessBuffEnabled
+                    ?? SettingsDefaults.ConsciousnessBuffEnabled;
+                float multiplier = Eternal_Mod.settings?.consciousnessMultiplier
+                    ?? SettingsDefaults.ConsciousnessMultiplier;
+
+                string buffLine = buffEnabled
+                    ? $"\nConsciousness: {multiplier:F1}x"
+                    : "\nConsciousness: Disabled";
+
+                return (baseText ?? string.Empty) + buffLine;
+            }
+        }
+
         /// <summary>
         /// Called when hediff is added to a pawn.
         /// </summary>

@@ -1,13 +1,14 @@
 // file path: Eternal/Source/Eternal/Corpse/EternalCorpseManager.cs
 // Author Name: 0Shard
 // Date Created: 09-11-2025
-// Date Last Modified: 20-02-2026
+// Date Last Modified: 12-03-2026
 // Description: Manages all dead Eternal corpses globally, tracking their locations, states, and resurrection progress.
 //              Implements IExposable for save/load persistence of corpse tracking data.
 //              Now accepts and stores PawnAssignmentSnapshot for work priority/policy preservation.
 //              Fixed: Added logging for orphaned/invalid corpse entries skipped during load.
 //              Added: ResetAllRotProgress() to fix rot on saves from before the rot prevention fix.
 //              Added: PreCalculatedHealingQueue parameter to capture injuries at death before RimWorld removes them.
+//              Added: GetHealingCorpseCount() for live Effects tab population count display.
 
 using System;
 using System.Collections.Generic;
@@ -271,6 +272,23 @@ namespace Eternal.Corpse
         /// Gets the total count of tracked corpses.
         /// </summary>
         public int TrackedCount => trackedCorpses.Count;
+
+        /// <summary>
+        /// Returns the count of tracked corpses that are actively being healed.
+        /// Used by the Effects settings tab for live population count display.
+        /// Only counts entries where IsHealingActive is true — excludes corpses awaiting
+        /// player activation ("Resurrect Eternal" gizmo not yet clicked).
+        /// </summary>
+        public int GetHealingCorpseCount()
+        {
+            int healingCount = 0;
+            foreach (var entry in trackedCorpses.Values)
+            {
+                if (entry.IsHealingActive)
+                    healingCount++;
+            }
+            return healingCount;
+        }
 
         /// <summary>
         /// Updates corpse location if moved between maps.

@@ -1,10 +1,10 @@
 // Relative Path: Eternal/Source/Eternal.Tests/Infrastructure/ImmutableSettingsSnapshotTests.cs
 // Creation Date: 24-02-2026
-// Last Edit: 24-02-2026
+// Last Edit: 12-03-2026
 // Author: 0Shard
 // Description: Unit tests for ImmutableSettingsSnapshot readonly record struct.
 //              Verifies default construction, initializer round-trip, with-expression independence,
-//              value equality, and all 7 section types.
+//              value equality, and all 8 section types (including EffectsSection).
 
 using Xunit;
 using Eternal.Infrastructure;
@@ -113,6 +113,132 @@ namespace Eternal.Tests.Infrastructure
             Assert.Equal(60, snapshot.Perf.NormalTickRate);
             Assert.True(snapshot.AdvancedHediff.AutoHealEnabled);
             Assert.True(snapshot.Map.EnableMapAnchors);
+        }
+
+        [Fact]
+        public void Initializer_AllEightSections_CanBeInitialized()
+        {
+            var snapshot = new ImmutableSettingsSnapshot
+            {
+                General = new ImmutableSettingsSnapshot.GeneralSection { ModEnabled = true },
+                Healing = new ImmutableSettingsSnapshot.HealingSection { BaseRate = 1.8f },
+                Resource = new ImmutableSettingsSnapshot.ResourceSection { NutritionCostMultiplier = 1.0f },
+                FoodDebt = new ImmutableSettingsSnapshot.FoodDebtSection { MaxDebtMultiplier = 5.0f },
+                Perf = new ImmutableSettingsSnapshot.PerfSection { NormalTickRate = 60 },
+                AdvancedHediff = new ImmutableSettingsSnapshot.AdvancedHediffSection { AutoHealEnabled = true },
+                Map = new ImmutableSettingsSnapshot.MapSection { EnableMapAnchors = true },
+                Effects = new ImmutableSettingsSnapshot.EffectsSection
+                {
+                    ConsciousnessBuffEnabled = true,
+                    ConsciousnessMultiplier  = 3.0f,
+                    MoodBuffEnabled          = true,
+                    MoodBuffValue            = 40,
+                    PopulationCapEnabled     = true,
+                    PopulationCap            = 3,
+                }
+            };
+
+            Assert.True(snapshot.Effects.ConsciousnessBuffEnabled);
+            Assert.Equal(3.0f, snapshot.Effects.ConsciousnessMultiplier, TestData.FloatPrecision);
+            Assert.True(snapshot.Effects.MoodBuffEnabled);
+            Assert.Equal(40, snapshot.Effects.MoodBuffValue);
+            Assert.True(snapshot.Effects.PopulationCapEnabled);
+            Assert.Equal(3, snapshot.Effects.PopulationCap);
+        }
+
+        // -----------------------------------------------------------------
+        // EffectsSection tests
+        // -----------------------------------------------------------------
+
+        [Fact]
+        public void EffectsSection_CanBeInitialized_AllFieldsAccessible()
+        {
+            var section = new ImmutableSettingsSnapshot.EffectsSection
+            {
+                ConsciousnessBuffEnabled = true,
+                ConsciousnessMultiplier  = 5.5f,
+                MoodBuffEnabled          = false,
+                MoodBuffValue            = 100,
+                PopulationCapEnabled     = true,
+                PopulationCap            = 10,
+            };
+
+            Assert.True(section.ConsciousnessBuffEnabled);
+            Assert.Equal(5.5f, section.ConsciousnessMultiplier, TestData.FloatPrecision);
+            Assert.False(section.MoodBuffEnabled);
+            Assert.Equal(100, section.MoodBuffValue);
+            Assert.True(section.PopulationCapEnabled);
+            Assert.Equal(10, section.PopulationCap);
+        }
+
+        [Fact]
+        public void EffectsSection_DefaultValues_AreZeroOrFalse()
+        {
+            var section = default(ImmutableSettingsSnapshot.EffectsSection);
+
+            Assert.False(section.ConsciousnessBuffEnabled);
+            Assert.Equal(0f, section.ConsciousnessMultiplier, TestData.FloatPrecision);
+            Assert.False(section.MoodBuffEnabled);
+            Assert.Equal(0, section.MoodBuffValue);
+            Assert.False(section.PopulationCapEnabled);
+            Assert.Equal(0, section.PopulationCap);
+        }
+
+        [Fact]
+        public void EffectsSection_WithExpression_CreatesIndependentCopy()
+        {
+            var original = new ImmutableSettingsSnapshot.EffectsSection
+            {
+                ConsciousnessBuffEnabled = true,
+                ConsciousnessMultiplier  = 3.0f,
+                MoodBuffEnabled          = true,
+                MoodBuffValue            = 40,
+                PopulationCapEnabled     = true,
+                PopulationCap            = 3,
+            };
+
+            var modified = original with
+            {
+                ConsciousnessMultiplier = 7.0f,
+                MoodBuffValue           = 80,
+                PopulationCap           = 15,
+            };
+
+            // Original is unchanged
+            Assert.Equal(3.0f, original.ConsciousnessMultiplier, TestData.FloatPrecision);
+            Assert.Equal(40, original.MoodBuffValue);
+            Assert.Equal(3, original.PopulationCap);
+
+            // Modified has new values
+            Assert.Equal(7.0f, modified.ConsciousnessMultiplier, TestData.FloatPrecision);
+            Assert.Equal(80, modified.MoodBuffValue);
+            Assert.Equal(15, modified.PopulationCap);
+        }
+
+        [Fact]
+        public void EffectsSection_ValueEquality_IdenticalSectionsAreEqual()
+        {
+            var sectionA = new ImmutableSettingsSnapshot.EffectsSection
+            {
+                ConsciousnessBuffEnabled = true,
+                ConsciousnessMultiplier  = 3.0f,
+                MoodBuffEnabled          = true,
+                MoodBuffValue            = 40,
+                PopulationCapEnabled     = true,
+                PopulationCap            = 3,
+            };
+
+            var sectionB = new ImmutableSettingsSnapshot.EffectsSection
+            {
+                ConsciousnessBuffEnabled = true,
+                ConsciousnessMultiplier  = 3.0f,
+                MoodBuffEnabled          = true,
+                MoodBuffValue            = 40,
+                PopulationCapEnabled     = true,
+                PopulationCap            = 3,
+            };
+
+            Assert.Equal(sectionA, sectionB);
         }
 
         // -----------------------------------------------------------------

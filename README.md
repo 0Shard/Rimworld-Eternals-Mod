@@ -12,13 +12,20 @@ Eternal gives your pawns true biological immortality. When an Eternal dies, thei
 - **Map Protection and Teleportation** -- Temporary maps (quest sites, encounters) won't close while an Eternal corpse is present. If the map must close, corpses are automatically teleported to your home map.
 - **Caravan Death Support** -- Eternals who die in caravans can be resurrected while traveling. Work priorities, policies, and schedules are captured at death and restored on resurrection.
 - **Accelerated Living Healing** -- Living Eternals passively heal injuries and even permanent scars over time.
+- **Elixir of Eternity** -- A craftable item that grants immortality to any living pawn. Requires Ultra-tier research (Eternal Elixir Synthesis) with three prerequisites. Can also appear as a rare quest reward for wealthy colonies.
+- **Population Cap** -- Configurable limit on how many Eternals your colony can sustain. Living Eternals and corpses being healed both count toward the cap.
+- **Configurable Buffs** -- Toggle and adjust the consciousness multiplier and mood bonus for Eternals through the Effects settings tab. Changes apply instantly without reloading.
 - **Configurable Everything** -- Healing rates, nutrition costs, tick intervals, per-hediff behavior, and debug logging are all adjustable through mod settings.
 
 ## How It Works
 
 ### Becoming Eternal
 
-Pawns gain immortality through the **Eternal_GeneticMarker** trait. This trait does not spawn naturally and must be assigned via character creation, dev tools, or custom scenarios.
+Pawns gain immortality through the **Eternal_GeneticMarker** trait. There are three ways to become Eternal:
+
+1. **Elixir of Eternity** -- Craft it at a Fabrication bench after completing the "Eternal Elixir Synthesis" research (Ultra tier, requires Advanced Fabrication + Vitals Monitor + Medicine Production). Ingredients: 5x Glitterworld Medicine + 10x Advanced Components. Requires Crafting 15 and Medicine 15.
+2. **Quest reward** -- The Elixir can appear as a rare reward in quest item stashes (wealthy colonies only).
+3. **Manual assignment** -- Via character creation, dev tools, or custom scenarios.
 
 ### The Resurrection Flow
 
@@ -60,6 +67,7 @@ Eternal includes dedicated Harmony patches for each of the following:
 
 Access mod settings via **Options > Mod Settings > Eternal** to adjust:
 
+- **Effects** -- Toggle and adjust consciousness buff multiplier, mood buff value, and population cap
 - Base healing rate and tick intervals
 - Nutrition cost multiplier and severity-to-nutrition ratio
 - Per-hediff healing behavior (enable/disable, custom rates)
@@ -68,7 +76,7 @@ Access mod settings via **Options > Mod Settings > Eternal** to adjust:
 
 ## Known Limitations
 
-- The Eternal trait must be manually assigned (does not spawn naturally)
+- Without the Elixir, the Eternal trait must be manually assigned (does not spawn naturally)
 - Resurrection requires the corpse to exist (no recovery from total destruction)
 - Heavy food debt can strain colony resources
 

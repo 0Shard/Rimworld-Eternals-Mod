@@ -1,12 +1,13 @@
 // Relative Path: Eternal/Source/Eternal/EternalDefOf.cs
 // Creation Date: 28-10-2025
-// Last Edit: 04-03-2026
+// Last Edit: 12-03-2026
 // Author: 0Shard
 // Description: DefOf references for Eternal mod definitions.
 //              Includes WorldObject definitions for Odyssey DLC compatibility.
 //              VerifyBindings() now triggers EternalModState kill switch when critical
 //              defs are null, and sends an in-game letter for player notification.
 //              09-03: Added Eternal_MetabolicRecovery as critical def binding.
+//              12-03: Added Eternal_ElixirSynthesis research project binding (non-critical).
 
 using System.Collections.Generic;
 using Verse;
@@ -33,6 +34,9 @@ namespace Eternal
         public static HediffDef Eternal_Regrowing;  // Unified regrowing hediff (Immortals pattern)
         public static HediffDef Eternal_MetabolicRecovery;  // Food debt visibility hediff (09-03)
         public static HediffDef Eternal_TeleportationRecovery;
+
+        // Research project definitions
+        public static ResearchProjectDef Eternal_ElixirSynthesis;
 
         // Thing definitions
         public static ThingDef EternalAnchor;
@@ -132,6 +136,11 @@ namespace Eternal
             if (EternalAnchor == null)
             {
                 Log.Error("[Eternal] DefOf binding FAILED: EternalAnchor is null — map retention anchor thing missing. Check ThingDefs_Eternal.xml.");
+            }
+
+            if (Eternal_ElixirSynthesis == null)
+            {
+                Log.Error("[Eternal] DefOf binding FAILED: Eternal_ElixirSynthesis is null — elixir crafting research will not gate correctly. Check Research_ElixirSynthesis.xml.");
             }
 
             // --- Optional DLC-gated def: only check when Odyssey is active ---

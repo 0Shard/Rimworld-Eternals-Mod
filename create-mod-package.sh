@@ -3,7 +3,7 @@
 # file path: create-mod-package.sh
 # Author Name: 0Shard
 # Date Created: 29-10-2025
-# Date Last Modified: 08-01-2026
+# Date Last Modified: 09-03-2026
 # Description: Creates a distributable RimWorld mod package from the Eternal project.
 #              Output: Mods/Eternal/ - ready to copy directly to RimWorld's Mods folder.
 #              Includes Textures folder for gizmo icons (RimWorld ContentFinder requirement).
@@ -102,6 +102,14 @@ else
     print_warning "No Preview.png found in About/ — Steam Workshop preview will be missing"
 fi
 
+# Copy PublishedFileId.txt (Steam Workshop item ID)
+if [ -f "$SOURCE_DIR/About/PublishedFileId.txt" ]; then
+    cp "$SOURCE_DIR/About/PublishedFileId.txt" "$DEST_DIR/About/"
+    print_success "Copied PublishedFileId.txt"
+else
+    print_warning "No PublishedFileId.txt found in About/ — Steam Workshop item linking will not work"
+fi
+
 # Copy all XML files from Defs directory
 print_status "Copying XML definitions from Defs directory..."
 find "$SOURCE_DIR/Defs" -name "*.xml" -type f | while read -r file; do
@@ -185,6 +193,7 @@ done
 # Check if all required files exist
 required_files=(
     "$DEST_DIR/About/About.xml"
+    "$DEST_DIR/About/PublishedFileId.txt"
     "$DEST_DIR/Textures/UI/Gizmos/Eternal_Resurrection.png"
 )
 

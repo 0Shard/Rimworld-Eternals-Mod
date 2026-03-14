@@ -82,4 +82,14 @@
 
     <!-- Roof Collapse Protection -->
     <EternalRoofCollapseSaved>The corpse of {0} was saved from roof collapse!</EternalRoofCollapseSaved>
+
+    <!-- Elixir of Eternity — confirmation dialogs and rejection reasons -->
+    <!-- Used by CompUseEffect_EternalElixir when the player targets a pawn -->
+    <Eternal_Elixir_ConfirmMessage>Grant immortality to {0}?\n\nThis action is irreversible. {1} will gain the Eternal Genetic Marker and can never be used as a target again.</Eternal_Elixir_ConfirmMessage>
+    <Eternal_Elixir_ConfirmMessageWithCap>Grant immortality to {0}?\n\nThis action is irreversible. {1} will gain the Eternal Genetic Marker and can never be used as a target again.\n\n(Eternals: {2}/{3})</Eternal_Elixir_ConfirmMessageWithCap>
+    <!-- Rejection reasons — surfaced as "Cannot use: [reason]" via FloatMenu -->
+    <Eternal_Elixir_RejectDead>target is dead</Eternal_Elixir_RejectDead>
+    <Eternal_Elixir_RejectAlreadyEternal>already Eternal</Eternal_Elixir_RejectAlreadyEternal>
+    <Eternal_Elixir_RejectCapReached>population cap reached ({0}/{1})</Eternal_Elixir_RejectCapReached>
+    <Eternal_Elixir_RejectModDisabled>Eternal mod is disabled</Eternal_Elixir_RejectModDisabled>
 </LanguageData>

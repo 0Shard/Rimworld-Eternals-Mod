@@ -34,12 +34,15 @@
 
 Features:
 - Resurrect dead Eternal pawns via a gizmo on their corpse
-- 4-phase body part regrowth (Initial Formation → Tissue Development → Nerve Integration → Functional Completion)
+- 4-phase body part regrowth (Initial Formation, Tissue Development, Nerve Integration, Functional Completion)
+- Elixir of Eternity — craftable item that grants immortality to any living pawn (requires Ultra-tier research)
+- Rare quest reward — the Elixir can appear in quest item stashes for wealthy colonies
+- Population cap — configurable limit on how many Eternals your colony can have
+- Configurable consciousness and mood buffs with runtime toggle
 - Resource-based balance through nutrition debt
 - Corpse preservation, caravan support, and map protection
-- Accelerated injury and scar healing for living Eternals
 - Fully configurable healing rates, nutrition costs, and per-hediff behavior
-- Odyssey DLC compatibility
+- Odyssey DLC, SOS2, VGE, and RimImmortal compatibility
 
 Requires: Harmony (load before Eternal)</description>
 </ModMetaData>

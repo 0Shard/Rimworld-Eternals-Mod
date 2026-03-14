@@ -1,6 +1,6 @@
 // Relative Path: Eternal/Source/Eternal/UI/Settings/SettingsValidator.cs
 // Creation Date: 01-01-2025
-// Last Edit: 14-01-2026
+// Last Edit: 12-03-2026
 // Author: 0Shard
 // Description: Validation logic for Eternal mod settings. Clamps values to valid
 //              ranges and logs warnings for potentially problematic configurations.
@@ -47,6 +47,11 @@ namespace Eternal.UI.Settings
 
             // Validate logging level
             settings.loggingLevel = Mathf.Clamp(settings.loggingLevel, 0, 3);
+
+            // Validate effects settings
+            settings.consciousnessMultiplier = Mathf.Clamp(settings.consciousnessMultiplier, 1.0f, 10.0f);
+            settings.moodBuffValue = Mathf.Clamp(settings.moodBuffValue, 1, 200);
+            settings.populationCap = Mathf.Clamp(settings.populationCap, 1, 30);
 
             // Log warnings for potentially problematic settings
             CheckForWarnings(settings);

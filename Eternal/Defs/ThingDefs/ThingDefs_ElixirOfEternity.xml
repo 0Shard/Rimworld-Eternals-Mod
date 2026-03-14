@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Relative Path: Eternal/Defs/ThingDefs/ThingDefs_ElixirOfEternity.xml
+  Creation Date: 12-03-2026
+  Last Edit: 12-03-2026
+  Author: 0Shard
+  Description: ThingDef for the Elixir of Eternity — a consumable item that grants
+               the Eternal_GeneticMarker trait to a target pawn, making them immortal.
+               Gated behind Ultra-tier research and requires a Fabrication bench to craft.
+               Can also appear as a rare quest reward via RewardStandardLowFreq tag.
+-->
+<Defs>
+
+    <!-- Elixir of Eternity ThingDef -->
+    <!-- A hyper-advanced biological serum that rewrites a pawn's cellular structure at the
+         genetic level, permanently encoding the Eternal resurrection trait into their DNA.
+         Market value reflects extreme rarity — it is not sold by traders, only crafted or
+         obtained as a rare quest reward. Stack limit of 1 prevents bulk stockpiling. -->
+    <ThingDef ParentName="MechSerumBase">
+        <defName>Eternal_ElixirOfEternity</defName>
+        <label>Elixir of Eternity</label>
+        <description>A translucent serum of impossible complexity. Centuries of xenobiological research condensed into a single vial — engineered to rewrite the genetic architecture of a living being at the cellular level. Those who receive it find their body transformed: injuries mend with unnatural speed, death itself becomes a temporary inconvenience. The process is irreversible. Once the cellular rewrite takes hold, the recipient will never age or die permanently again.\n\nHandle with extreme caution. There is no antidote.</description>
+        <graphicData>
+            <texPath>Things/Item/Special/MechSerumHealer</texPath>
+            <graphicClass>Graphic_Single</graphicClass>
+        </graphicData>
+        <stackLimit>1</stackLimit>
+        <statBases>
+            <MarketValue>25000</MarketValue>
+        </statBases>
+        <tradeability>Sellable</tradeability>
+        <thingSetMakerTags>
+            <li>RewardStandardLowFreq</li>
+        </thingSetMakerTags>
+        <thingCategories>
+            <li>Drugs</li>
+        </thingCategories>
+        <comps>
+            <!-- Allows pawn to use the item via job system; 600 ticks (~10 seconds) use duration -->
+            <li Class="CompProperties_Usable">
+                <useJob>UseItem</useJob>
+                <useLabel>Use {0_label}</useLabel>
+                <useDuration>600</useDuration>
+                <showUseGizmo>true</showUseGizmo>
+            </li>
+            <!-- Restricts use to a single targeted pawn (self or other) -->
+            <li Class="CompProperties_Targetable">
+                <compClass>CompTargetable_SinglePawn</compClass>
+            </li>
+            <!-- Custom comp that validates the target and applies the Eternal trait -->
+            <li Class="CompProperties_UseEffect">
+                <compClass>Eternal.Elixir.CompUseEffect_EternalElixir</compClass>
+            </li>
+            <!-- Destroys the item on use — one vial, one immortal -->
+            <li Class="CompProperties_UseEffectDestroySelf" />
+        </comps>
+    </ThingDef>
+
+</Defs>

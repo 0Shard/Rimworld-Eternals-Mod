@@ -1,16 +1,19 @@
 // Relative Path: Eternal/Source/Eternal/UI/Settings/SettingsDrawer.cs
 // Creation Date: 01-01-2025
-// Last Edit: 21-02-2026
+// Last Edit: 12-03-2026
 // Author: 0Shard
 // Description: UI drawing methods for Eternal mod settings. Features tab-based layout,
 //              styled section headers with reset buttons, info boxes, live preview stats,
 //              inline-editable slider values (click to type), and comprehensive tooltips.
 //              Healing rate displayed in ratio format: 250 : 1 (severity : nutrition).
+//              v1.0.1: Added Effects tab with consciousness buff, mood buff, population cap sections.
 
 using System;
 using UnityEngine;
 using Verse;
 using Eternal.UI.HediffSettings;
+using Eternal.Extensions;
+using Eternal.DI;
 
 namespace Eternal.UI.Settings
 {
@@ -21,6 +24,7 @@ namespace Eternal.UI.Settings
     {
         Core,        // General + Healing
         Economy,     // Resources + Food Debt
+        Effects,     // Consciousness buff, mood buff, population cap
         Performance, // Tick rates and intervals
         Advanced,    // Hediff Manager + Map Protection
         Status       // Calculated statistics & previews
@@ -307,12 +311,14 @@ namespace Eternal.UI.Settings
         /// </summary>
         private void DrawSettingsTabs(Rect rect)
         {
-            float tabWidth = rect.width / 5f;
+            float tabWidth = rect.width / 6f;
             float x = rect.x;
 
             DrawTabButton(new Rect(x, rect.y, tabWidth, rect.height), "Core", SettingsTab.Core);
             x += tabWidth;
             DrawTabButton(new Rect(x, rect.y, tabWidth, rect.height), "Economy", SettingsTab.Economy);
+            x += tabWidth;
+            DrawTabButton(new Rect(x, rect.y, tabWidth, rect.height), "Effects", SettingsTab.Effects);
             x += tabWidth;
             DrawTabButton(new Rect(x, rect.y, tabWidth, rect.height), "Performance", SettingsTab.Performance);
             x += tabWidth;
@@ -379,6 +385,9 @@ namespace Eternal.UI.Settings
                 case SettingsTab.Economy:
                     DrawResourceSettings(listing);
                     DrawFoodDebtSettings(listing);
+                    break;
+                case SettingsTab.Effects:
+                    DrawEffectsTab(listing);
                     break;
                 case SettingsTab.Performance:
                     DrawPerformanceSettings(listing);
@@ -655,6 +664,91 @@ namespace Eternal.UI.Settings
             DrawStatusRow(listing, "Can heal scars",
                 StatusCalculator.ScarsCoveredByDebt(maxDebt, settings.nutritionCostMultiplier));
 
+        }
+
+        private void DrawEffectsTab(Listing_Standard listing)
+        {
+            // Reset All Effects button at the top for quick access
+            Rect resetAllRect = listing.GetRect(30f);
+            if (Widgets.ButtonText(resetAllRect, "Reset All Effects"))
+            {
+                settings.ResetEffectsSettings();
+            }
+            listing.Gap(8f);
+
+            // --- Consciousness Buff ---
+            DrawSectionHeader(listing, "Consciousness Buff", () => settings.ResetConsciousnessBuffSettings());
+            DrawInfoBox(listing, "Multiplies consciousness capacity for Eternal pawns. Minimum 1.0x ensures no debuff is possible.");
+
+            CheckboxLabeledWithTooltip(listing, "Enable Consciousness Buff", ref settings.consciousnessBuffEnabled,
+                "Toggle the consciousness capacity multiplier for all Eternal pawns.");
+
+            GUI.enabled = settings.consciousnessBuffEnabled;
+            SliderWithInlineEdit(listing, "Consciousness Multiplier",
+                ref settings.consciousnessMultiplier, 1.0f, 10.0f,
+                "Consciousness capacity multiplier. 3.0x = triple consciousness. Steps: 0.5x.");
+            if (settings.consciousnessBuffEnabled)
+            {
+                // Round to nearest 0.5 step so slider snaps cleanly (1.0, 1.5, 2.0 ... 10.0)
+                settings.consciousnessMultiplier = Mathf.Round(settings.consciousnessMultiplier * 2f) / 2f;
+            }
+            GUI.enabled = true;
+
+            // --- Mood Buff ---
+            DrawSectionHeader(listing, "Mood Buff", () => settings.ResetMoodBuffSettings());
+            DrawInfoBox(listing, "Grants a permanent mood bonus to all Eternal pawns. The thought appears in the Needs tab when enabled.");
+
+            CheckboxLabeledWithTooltip(listing, "Enable Mood Buff", ref settings.moodBuffEnabled,
+                "Toggle the permanent mood bonus for all Eternal pawns.");
+
+            GUI.enabled = settings.moodBuffEnabled;
+            SliderWithInlineEditInt(listing, "Mood Buff Value",
+                ref settings.moodBuffValue, 1, 200,
+                "Mood bonus amount. Default: 40. Higher values make Eternals happier.");
+            GUI.enabled = true;
+
+            // --- Population Cap ---
+            DrawSectionHeader(listing, "Population Cap", () => settings.ResetPopulationCapSettings());
+            DrawInfoBox(listing, "Counts living Eternals and corpses being healed toward the cap. When the cap is reached, new Eternal Elixir use is blocked.");
+
+            CheckboxLabeledWithTooltip(listing, "Enable Population Cap", ref settings.populationCapEnabled,
+                "Toggle the maximum number of Eternals allowed.");
+
+            GUI.enabled = settings.populationCapEnabled;
+            int currentCount = GetCurrentEternalCount();
+            // Dynamic minimum: cannot set cap below current Eternal count when a game is loaded
+            int sliderMin = Math.Max(1, currentCount);
+            SliderWithInlineEditInt(listing, "Maximum Eternals",
+                ref settings.populationCap, sliderMin, 30,
+                "Maximum number of Eternals allowed. Cannot be set below current count.");
+            GUI.enabled = true;
+
+            // Live count display
+            if (Current.Game != null)
+            {
+                int livingCount = PawnExtensions.GetAllLivingEternalPawnsCached()?.Count ?? 0;
+                int healingCount = EternalServiceContainer.Instance?.CorpseManager?.GetHealingCorpseCount() ?? 0;
+                int totalCount = livingCount + healingCount;
+                listing.Label($"Current: {totalCount} / {settings.populationCap} ({livingCount} living, {healingCount} healing)");
+            }
+            else
+            {
+                GUI.color = Color.gray;
+                listing.Label("Current: N/A (no active game)");
+                GUI.color = Color.white;
+            }
+        }
+
+        /// <summary>
+        /// Returns the total count of living Eternals plus actively-healing corpses.
+        /// Returns 0 when no game is loaded (main menu) to keep the population cap slider unclamped.
+        /// </summary>
+        private int GetCurrentEternalCount()
+        {
+            if (Current.Game == null) return 0;
+            int livingCount = PawnExtensions.GetAllLivingEternalPawnsCached()?.Count ?? 0;
+            int healingCount = EternalServiceContainer.Instance?.CorpseManager?.GetHealingCorpseCount() ?? 0;
+            return livingCount + healingCount;
         }
 
         #endregion
@@ -954,6 +1048,7 @@ namespace Eternal.UI.Settings
             {
                 SettingsTab.Core => CalculateCoreTabHeight(),
                 SettingsTab.Economy => CalculateEconomyTabHeight(),
+                SettingsTab.Effects => CalculateEffectsTabHeight(),
                 SettingsTab.Performance => CalculatePerformanceTabHeight(),
                 SettingsTab.Advanced => CalculateAdvancedTabHeight(),
                 SettingsTab.Status => CalculateStatusTabHeight(),
@@ -1034,6 +1129,28 @@ namespace Eternal.UI.Settings
 
             // Food Debt Capacity (header + 4 rows)
             height += 40f + (4 * 25f);
+
+            // Padding
+            height += 30f;
+
+            return height;
+        }
+
+        private float CalculateEffectsTabHeight()
+        {
+            float height = 0f;
+
+            // Reset All Effects button + gap
+            height += 30f + 8f;
+
+            // Consciousness Buff (header + info box + checkbox + slider + gap)
+            height += 40f + 50f + 30f + 50f + 10f;
+
+            // Mood Buff (header + info box + checkbox + slider + gap)
+            height += 40f + 50f + 30f + 50f + 10f;
+
+            // Population Cap (header + info box + checkbox + slider + live count label + gap)
+            height += 40f + 50f + 30f + 50f + 25f + 10f;
 
             // Padding
             height += 30f;

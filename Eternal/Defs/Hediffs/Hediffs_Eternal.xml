@@ -10,14 +10,7 @@
         <isBad>false</isBad>
         <showGizmosOnCorpse>true</showGizmosOnCorpse>
         <stages>
-            <li>
-                <capMods>
-                    <li>
-                        <capacity>Consciousness</capacity>
-                        <postFactor>3.0</postFactor>
-                    </li>
-                </capMods>
-            </li>
+            <li />
         </stages>
         <comps>
             <li Class="HediffCompProperties_SeverityPerDay">

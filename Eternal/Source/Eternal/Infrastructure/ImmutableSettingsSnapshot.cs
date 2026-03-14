@@ -1,12 +1,13 @@
 /*
  * Relative Path: Eternal/Source/Eternal/Infrastructure/ImmutableSettingsSnapshot.cs
  * Creation Date: 19-02-2026
- * Last Edit: 04-03-2026
+ * Last Edit: 12-03-2026
  * Author: 0Shard
  * Description: Immutable snapshot of all Eternal mod settings, captured once per tick batch.
  *              Eliminates repeated null-checks and property lookups on the hot path (PERF-03).
  *              All sections are readonly record structs — stack-allocated, zero GC pressure.
  *              Produced by Eternal_Settings.CreateSnapshot(); consumed by Phase 2 tick processors.
+ *              v1.0.1: Added EffectsSection for consciousness buff, mood buff, and population cap.
  */
 
 namespace Eternal.Infrastructure
@@ -29,6 +30,7 @@ namespace Eternal.Infrastructure
         public PerfSection Perf { get; init; }
         public AdvancedHediffSection AdvancedHediff { get; init; }
         public MapSection Map { get; init; }
+        public EffectsSection Effects { get; init; }
 
         // -------------------------------------------------------------------------
         // Nested section types
@@ -110,6 +112,20 @@ namespace Eternal.Infrastructure
             public bool EnableMapAnchors { get; init; }
             public int AnchorGracePeriodTicks { get; init; }
             public bool EnableRoofCollapseProtection { get; init; }
+        }
+
+        /// <summary>
+        /// Effects settings section: consciousness buff, mood buff, and population cap.
+        /// Consumed by Phases 2, 3, and 4 for runtime behavior wiring.
+        /// </summary>
+        public readonly record struct EffectsSection
+        {
+            public bool ConsciousnessBuffEnabled { get; init; }
+            public float ConsciousnessMultiplier { get; init; }
+            public bool MoodBuffEnabled { get; init; }
+            public int MoodBuffValue { get; init; }
+            public bool PopulationCapEnabled { get; init; }
+            public int PopulationCap { get; init; }
         }
     }
 }
