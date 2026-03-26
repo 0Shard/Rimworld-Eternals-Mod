@@ -1,6 +1,6 @@
 // Relative Path: Eternal/Source/Eternal/Hediffs/EternalRegrowing_Hediff.cs
 // Creation Date: 28-10-2025
-// Last Edit: 07-01-2026
+// Last Edit: 26-03-2026
 // Author: 0Shard
 // Description: Hediff for tracking body part regrowth using the Immortals pattern.
 //              Stores forPart and partMaxHp, severity progresses 0->1, uses partEfficiencyOffset stages.
@@ -38,6 +38,9 @@ namespace Eternal
         {
             get
             {
+                if (pawn == null)
+                    return base.SeverityLabel;
+
                 if (forPart != null)
                 {
                     float currentHp = severityInt * partMaxHp;
@@ -54,6 +57,9 @@ namespace Eternal
         {
             get
             {
+                if (pawn == null)
+                    return false;
+
                 if (!pawn.Dead) return true;
 
                 var essenceHediff = pawn.health?.hediffSet?.GetFirstHediffOfDef(EternalDefOf.Eternal_Essence);
@@ -73,6 +79,12 @@ namespace Eternal
             partMaxHp = EBFCompat.GetMaxHealth(part, ownerPawn);
             if (partMaxHp <= 0f) partMaxHp = 1f;
         }
+
+        /// <summary>
+        /// Defense-in-depth: Eternal regrowth hediffs must never trigger the lethal severity
+        /// death path, regardless of XML configuration or runtime severity manipulation.
+        /// </summary>
+        public override bool CauseDeathNow() => false;
 
         /// <summary>
         /// Save/load forPart and partMaxHp.

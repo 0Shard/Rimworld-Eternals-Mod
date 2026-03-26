@@ -1,6 +1,6 @@
 // Relative Path: Eternal/Source/Eternal/Hediffs/MetabolicRecovery_Hediff.cs
 // Creation Date: 04-03-2026
-// Last Edit: 04-03-2026
+// Last Edit: 26-03-2026
 // Author: 0Shard
 // Description: Custom hediff class for the Metabolic Recovery hediff applied to Eternal pawns
 //              when they accumulate food debt during healing. Syncs severity from the food
@@ -34,6 +34,12 @@ namespace Eternal.Hediffs
 
         // Clamp floor prevents severity == 0 auto-removal when debt > 0 (Pitfall 7)
         private const float MinActiveSeverity = 0.01f;
+
+        /// <summary>
+        /// Defense-in-depth: Metabolic Recovery must never trigger the lethal severity death
+        /// path, regardless of XML configuration or runtime severity manipulation.
+        /// </summary>
+        public override bool CauseDeathNow() => false;
 
         /// <summary>
         /// Returns true when the debt is cleared and the pawn is alive, signalling that the

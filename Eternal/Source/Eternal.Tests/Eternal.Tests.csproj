@@ -1,6 +1,6 @@
 <!-- Relative Path: Eternal/Source/Eternal.Tests/Eternal.Tests.csproj -->
 <!-- Creation Date: 24-02-2026 -->
-<!-- Last Edit: 24-02-2026 -->
+<!-- Last Edit: 26-03-2026 -->
 <!-- Author: 0Shard -->
 <!-- Description: xUnit 2.9 + NSubstitute test project targeting net472. -->
 <!--              References the production Eternal.csproj for testing all pure-logic surfaces. -->
@@ -32,6 +32,9 @@
     <PackageReference Include="Krafs.Rimworld.Ref" Version="1.6.4494-beta" />
     <!-- Harmony: patch attribute verification via reflection -->
     <PackageReference Include="Lib.Harmony" Version="2.4.2" />
+    <!-- System.Reflection.Metadata: PE metadata inspection for CauseDeathNow IL verification
+         (avoids Assembly-CSharp dependency that blocks CLR reflection on Verse.Hediff subclasses) -->
+    <PackageReference Include="System.Reflection.Metadata" Version="8.0.1" />
   </ItemGroup>
 
   <!-- Reference production project -->

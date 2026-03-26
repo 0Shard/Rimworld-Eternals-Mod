@@ -1,6 +1,6 @@
 // Relative Path: Eternal/Source/Eternal/InGameTests/EternalTestRunner.cs
 // Creation Date: 24-02-2026
-// Last Edit: 13-03-2026
+// Last Edit: 26-03-2026
 // Author: 0Shard
 // Description: Self-contained in-game test runner for Eternal mod integration tests.
 //              Invoked via dev-mode DebugAction buttons. Discovers and runs all test suites,
@@ -8,6 +8,7 @@
 //              13-03: Added per-suite DebugAction buttons, Stopwatch timing, named-suite
 //              failure grouping, and 3 new v1.0.1 suites (consciousness, mood, elixir/cap).
 //              Gated behind #if DEBUG to exclude from Release builds.
+//              26-03: Added ResurrectionSurvival suite (RSRV-01/02/03).
 
 #if DEBUG
 
@@ -59,7 +60,8 @@ namespace Eternal.InGameTests
             RunSuite("WorkPriority",       () => WorkPriorityTests.RunAll(map),      suiteResults);
             RunSuite("ConsciousnessBuff",  () => ConsciousnessBuffTests.RunAll(map), suiteResults);
             RunSuite("MoodBuff",           () => MoodBuffTests.RunAll(map),          suiteResults);
-            RunSuite("ElixirPopCap",       () => ElixirPopulationCapTests.RunAll(map), suiteResults);
+            RunSuite("ElixirPopCap",          () => ElixirPopulationCapTests.RunAll(map),    suiteResults);
+            RunSuite("ResurrectionSurvival", () => ResurrectionSurvivalTests.RunAll(map),   suiteResults);
 
             int totalPassed = suiteResults.Sum(r => r.Result.Passed);
             int totalFailed = suiteResults.Sum(r => r.Result.Failed);
@@ -144,6 +146,14 @@ namespace Eternal.InGameTests
             var map = Find.CurrentMap;
             if (map == null) { Log.Error("[EternalTests] No current map."); return; }
             RunSingleSuite("ElixirPopCap", () => ElixirPopulationCapTests.RunAll(map));
+        }
+
+        [DebugAction("Eternal Tests", "Run: ResurrectionSurvival", allowedGameStates = AllowedGameStates.PlayingOnMap)]
+        public static void RunResurrectionSurvivalOnly()
+        {
+            var map = Find.CurrentMap;
+            if (map == null) { Log.Error("[EternalTests] No current map."); return; }
+            RunSingleSuite("ResurrectionSurvival", () => ResurrectionSurvivalTests.RunAll(map));
         }
 
         // ─── Internal Helpers ────────────────────────────────────────────────

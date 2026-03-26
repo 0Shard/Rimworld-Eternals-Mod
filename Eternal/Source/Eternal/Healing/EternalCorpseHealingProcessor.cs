@@ -1,7 +1,7 @@
 /*
  * Relative Path: Eternal/Source/Eternal/Healing/EternalCorpseHealingProcessor.cs
  * Creation Date: 09-11-2025
- * Last Edit: 04-03-2026
+ * Last Edit: 26-03-2026
  * Author: 0Shard
  * Description: Processes healing and regrowth on Eternal corpses, accumulating debt and managing resurrection completion.
  *              Integrates with EternalRegrowthState for proper 4-phase body part regrowth.
@@ -33,6 +33,8 @@
  *                       receives the Pawn object and correctly generates PAWN_nameFull, PAWN_pronoun, etc.
  *                       Passing pawn.Name (a Name object) caused grammar token resolution to fail silently.
  *              09-03: Apply Metabolic Recovery hediff to corpse during StartCorpseHealing for debt visibility.
+ *              26-03: Added SanitizeHediffSetBeforeRestore — removes stale regrowth hediffs, MetabolicRecovery,
+ *                     and residual injuries from saved HediffSet BEFORE swap-back (RSRV-01/02/03).
  */
 
 using System;
@@ -362,7 +364,8 @@ namespace Eternal.Healing
             {
                 if (item == null) continue;
 
-                if (item.Type != HealingType.Regrowth && item.Severity > 0.01f)
+                float itemSeverity = item.Hediff?.Severity ?? item.Severity;
+                if (item.Type != HealingType.Regrowth && itemSeverity > 0.01f)
                 {
                     _nonRegrowthBuffer.Add(item);
                 }
@@ -384,19 +387,29 @@ namespace Eternal.Healing
 
             foreach (var item in _nonRegrowthBuffer)
             {
-                float before = item.Severity;
-                float healAmount = Math.Min(perItemHeal, before);
+                // Read current severity from hediff if available, else from local copy (save/load fallback)
+                float currentSeverity = item.Hediff?.Severity ?? item.Severity;
+                if (item.Hediff == null && Eternal_Mod.settings?.debugMode == true)
+                    Log.Warning($"[Eternal] Stale hediff reference in healing queue for {corpseData.OriginalPawn?.Name} — using local severity fallback");
+
+                float healAmount = Math.Min(perItemHeal, currentSeverity);
                 if (healAmount <= 0f)
                     continue;
 
-                item.Severity -= healAmount;
+                float newSeverity = currentSeverity - healAmount;
+
+                // Write to real hediff (health tab sees the update) and local copy (save/load persistence)
+                if (item.Hediff != null)
+                    item.Hediff.Severity = newSeverity;
+                item.Severity = newSeverity;
 
                 // Debt accumulation proportional to healing performed
-                float fraction = before > 0f ? (healAmount / before) : 1f;
+                float fraction = currentSeverity > 0f ? (healAmount / currentSeverity) : 1f;
                 float debtCost = fraction * item.EnergyCost;
                 AddDebtCapped(corpseData.OriginalPawn, debtCost, resurrectionCostCap);
 
-                if (item.Severity <= 0.01f)
+                float finalSeverity = item.Hediff?.Severity ?? item.Severity;
+                if (finalSeverity <= 0.01f)
                 {
                     _completedBuffer.Add(item);
                     ApplyHealingEffect(corpseData, item);
@@ -463,7 +476,7 @@ namespace Eternal.Healing
             int nonRegrowthCount = 0;
             foreach (var item in corpseData.HealingQueue)
             {
-                if (item != null && item.Type != HealingType.Regrowth && item.Severity > 0.01f)
+                if (item != null && item.Type != HealingType.Regrowth && (item.Hediff?.Severity ?? item.Severity) > 0.01f)
                     nonRegrowthCount++;
             }
 
@@ -476,6 +489,9 @@ namespace Eternal.Healing
                 float regrowthHeal = totalHeal / (nonRegrowthCount + 1);
 
                 // Apply healing to the regrowth system (handles 4-phase progression internally)
+                // HVIS-02 VERIFIED: ApplyHealing delegates to EternalRegrowthManager.ProgressRegrowth()
+                // which writes hediff.Severity += severityIncrease directly — health tab shows progress.
+                // Path: regrowthState.ApplyHealing → ProgressRegrowth → EternalRegrowing_Hediff.Severity
                 regrowthState.ApplyHealing(regrowthHeal);
 
                 // Accumulate debt for regrowth healing, capped at resurrection cost limit
@@ -620,13 +636,31 @@ namespace Eternal.Healing
             {
                 if (healingItem.Type == HealingType.Regrowth && healingItem.Hediff is Hediff_MissingPart missingPart)
                 {
-                    // For regrowth, we'll handle this during resurrection
-                    // Missing parts will be restored when the pawn is resurrected
+                    // Regrowth: missing parts restored during resurrection, not here
                     return;
                 }
 
-                // For other healing types, the effects are applied during resurrection
-                // The healing queue completion indicates readiness for resurrection
+                // Remove completed injury hediffs from the pawn's health tab immediately.
+                // This prevents ghost entries (injuries showing at original severity after healing completes).
+                // Skip if: hediff ref is stale (null), pawn health is gone, or hediff is a MissingPart
+                // (MissingParts are restored by PartRestorer during resurrection, not removed here).
+                if (healingItem.Hediff != null
+                    && corpseData.OriginalPawn?.health?.hediffSet != null
+                    && !(healingItem.Hediff is Hediff_MissingPart)
+                    && corpseData.OriginalPawn.health.hediffSet.hediffs.Contains(healingItem.Hediff))
+                {
+                    try
+                    {
+                        corpseData.OriginalPawn.health.RemoveHediff(healingItem.Hediff);
+                    }
+                    catch (Exception removeEx)
+                    {
+                        // Dead pawn hediff removal can trigger unexpected callbacks in
+                        // Notify_HediffRemoved that assume living-pawn context
+                        EternalLogger.HandleException(EternalExceptionCategory.Resurrection,
+                            "RemoveHealedHediff", corpseData.OriginalPawn, removeEx);
+                    }
+                }
 
                 if (Eternal_Mod.settings?.debugMode == true)
                 {
@@ -914,6 +948,15 @@ namespace Eternal.Healing
                     }
                 }
 
+                // === Sanitize saved HediffSet BEFORE swap-back (RSRV-01/02/03) ===
+                // The savedHediffSet is detached from the pawn during the swap window.
+                // Direct list manipulation here is safe — no CheckForStateChange fires because
+                // pawn.health.hediffSet still points to the clean HediffSet (not savedHediffSet).
+                // This prevents consciousness collapse from stale regrowth hediffs (RSRV-01),
+                // strips the purposeless MetabolicRecovery hediff (RSRV-02),
+                // and catches any residual injury severity above the lethal threshold (RSRV-03).
+                SanitizeHediffSetBeforeRestore(savedHediffSet, pawn);
+
                 // === Restore HediffSet and Immunity ===
                 // This preserves Eternal_Essence, food debt tracking, and other custom hediffs.
                 pawn.health.hediffSet = savedHediffSet;
@@ -1104,6 +1147,64 @@ namespace Eternal.Healing
         }
 
         /// <summary>
+        /// Sanitizes a saved HediffSet before restoring it to a resurrected pawn.
+        /// Removes stale regrowth hediffs (RSRV-01), MetabolicRecovery (RSRV-02),
+        /// and residual injuries above lethal threshold (RSRV-03).
+        /// Must be called BEFORE assigning hediffSet back to pawn.health.hediffSet
+        /// to avoid triggering CheckForStateChange during cleanup.
+        /// </summary>
+        /// <param name="hediffSet">The detached HediffSet to sanitize (not yet assigned to pawn)</param>
+        /// <param name="pawn">The pawn being resurrected (used for logging only)</param>
+        private void SanitizeHediffSetBeforeRestore(HediffSet hediffSet, Pawn pawn)
+        {
+            if (hediffSet == null)
+                return;
+
+            // Pass 1: Remove stale EternalRegrowing_Hediff instances (RSRV-01).
+            // Under normal flow these are all removed before resurrection completes.
+            // This guards against edge cases: floating-point precision, save/load desync,
+            // mod conflicts, or ResurrectImmediately running before regrowth hediffs were cleaned.
+            // A regrowing hediff on brain/skull/head at stage 0-1 has partEfficiencyOffset -1.0,
+            // which zeroes consciousness → instant death on the first CheckForStateChange.
+            int regrowthRemoved = hediffSet.hediffs.RemoveAll(h => h is EternalRegrowing_Hediff);
+            if (regrowthRemoved > 0 && Eternal_Mod.settings?.debugMode == true)
+            {
+                Log.Message($"[Eternal] SanitizeHediffSet: Removed {regrowthRemoved} stale regrowth hediff(s) from {pawn?.Name}");
+            }
+
+            // Pass 2: Remove MetabolicRecovery (RSRV-02).
+            // The pawn was dead during healing and didn't eat, so hunger rate acceleration
+            // on the corpse is meaningless. After resurrection the debt system re-applies it
+            // correctly based on the transferred debt amount.
+            int metabolicRemoved = hediffSet.hediffs.RemoveAll(h => h.def == EternalDefOf.Eternal_MetabolicRecovery);
+            if (metabolicRemoved > 0 && Eternal_Mod.settings?.debugMode == true)
+            {
+                Log.Message($"[Eternal] SanitizeHediffSet: Stripped MetabolicRecovery from {pawn?.Name}");
+            }
+
+            // Pass 3: Check and remove residual injury hediffs (RSRV-03).
+            // Injuries should be fully healed before resurrection completes.
+            // Any remaining injury severity is an edge case (floating-point, mod conflict, etc.)
+            // that would kill the pawn via ShouldBeDeadFromLethalDamageThreshold().
+            float totalInjurySeverity = 0f;
+            foreach (var hediff in hediffSet.hediffs)
+            {
+                if (hediff is Hediff_Injury)
+                    totalInjurySeverity += hediff.Severity;
+            }
+            if (totalInjurySeverity > 0f)
+            {
+                Log.Warning($"[Eternal] SanitizeHediffSet: Found {totalInjurySeverity:F2} residual injury severity on {pawn?.Name} — removing injuries");
+                hediffSet.hediffs.RemoveAll(h => h is Hediff_Injury);
+            }
+
+            // Force recalculation of all cached capacity values (part efficiency, consciousness, etc.).
+            // Direct list manipulation bypasses RimWorld's normal cache-dirty path, so we
+            // must call DirtyCache() explicitly before the hediffSet becomes the pawn's active set.
+            hediffSet.DirtyCache();
+        }
+
+        /// <summary>
         /// Resurrects a pawn immediately when no healing is needed.
         /// Uses HediffSet swap pattern from Immortals mod to preserve custom hediffs.
         /// SAFE-03: Atomic swap via try/finally + swapActive flag — HediffSet is always restored
@@ -1205,6 +1306,11 @@ namespace Eternal.Healing
                         throw;
                     }
                 }
+
+                // === Sanitize saved HediffSet BEFORE swap-back (RSRV-01/02/03) ===
+                // Same pattern as CompleteResurrection — detached hediffset is safe to
+                // manipulate directly without triggering CheckForStateChange.
+                SanitizeHediffSetBeforeRestore(savedHediffSet, pawn);
 
                 // === Restore HediffSet and Immunity ===
                 // This preserves Eternal_Essence, food debt tracking, and other custom hediffs.
