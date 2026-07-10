@@ -1,8 +1,11 @@
 // Relative Path: Eternal/Source/Eternal/UI/Settings/SettingsDrawer.cs
 // Creation Date: 01-01-2025
-// Last Edit: 12-03-2026
+// Last Edit: 11-07-2026
 // Author: 0Shard
 // Description: UI drawing methods for Eternal mod settings. Features tab-based layout,
+//              10-07: Status tab nutrition formulas now include severityToNutritionRatio (were 250x off vs engine).
+//              11-07: Regrowth status rows are HP-scaled for a reference arm (30 HP); added full-arm
+//              regrowth cost row; default healing rate is 1.2 (Apex pacing).
 //              styled section headers with reset buttons, info boxes, live preview stats,
 //              inline-editable slider values (click to type), and comprehensive tooltips.
 //              Healing rate displayed in ratio format: 250 : 1 (severity : nutrition).
@@ -106,44 +109,61 @@ namespace Eternal.UI.Settings
         }
 
         /// <summary>
-        /// Disease heal time with stage multiplier.
-        /// Source: HealingConstants.cs - STAGE_SPEED_MULTIPLIERS
+        /// Disease heal time with stage multiplier, for a standard disease (maxSeverity 1.0).
+        /// Source: UnifiedHediffHealingCalculator.CalculateHediffHealing —
+        /// rate × stageMultiplier × severityScaling(maxSev=1.0) × autoMultiplier(0.1 for maxSev ≤ 1.0)
         /// </summary>
         public static string DiseaseHealTime(float baseRate, int normalTickRate, int stage)
         {
+            const float lowMaxSeverityMultiplier = 0.1f; // HediffExtensions.LOW_MAX_SEVERITY_MULTIPLIER
             float[] stageMultipliers = { 1.0f, 0.8f, 0.6f, 0.4f, 0.2f };
             float mult = stageMultipliers[Math.Min(stage, 4)];
-            // Unified formula: cycles = severity / (baseRate × stageMultiplier)
-            float cycles = 1.0f / (baseRate * mult);
+            float cycles = 1.0f / (baseRate * mult * lowMaxSeverityMultiplier);
             float gameTicks = cycles * normalTickRate;
             float hours = gameTicks / 2500f;
             return FormatTime(hours);
         }
 
         /// <summary>
-        /// Regrowth phase time. Each phase progresses from 0→1.0 using baseRate per rare tick.
-        /// Formula: 1.0 / baseRate rare ticks per phase.
+        /// Reference part for regrowth status rows: a human arm (30 HP).
+        /// Regrowth progress is HP-scaled, so times/costs are shown for this example part.
+        /// </summary>
+        public const float ReferenceArmHP = 30f;
+
+        /// <summary>
+        /// Regrowth phase time for the reference arm. Each of the 4 phases spans 0.25 severity;
+        /// progress per rare tick = baseRate / (partHP × RegrowthWorkPerPartHP).
+        /// Source: EternalRegrowthManager.ProgressRegrowth
         /// </summary>
         public static string RegrowthPhaseTime(float baseRate, int rareTickRate)
         {
-            // Each phase requires progress from 0 to 1.0
-            // At baseRate per rare tick, cycles = 1.0 / baseRate
-            float rareTicks = 1.0f / baseRate;
+            float rareTicks = 0.25f * ReferenceArmHP * SettingsDefaults.RegrowthWorkPerPartHP / baseRate;
             float gameTicks = rareTicks * rareTickRate;
             float hours = gameTicks / 2500f;
             return FormatTime(hours);
         }
 
         /// <summary>
-        /// Full limb regrowth = 4 phases × (1.0 / baseRate) each.
+        /// Full regrowth time for the reference arm (all 4 phases, severity 0→1.0):
+        /// partHP × RegrowthWorkPerPartHP / baseRate rare ticks.
         /// </summary>
         public static string FullLimbRegrowth(float baseRate, int rareTickRate)
         {
-            // 4 phases, each requiring 1.0 / baseRate rare ticks
-            float rareTicks = 4.0f / baseRate;
+            float rareTicks = ReferenceArmHP * SettingsDefaults.RegrowthWorkPerPartHP / baseRate;
             float gameTicks = rareTicks * rareTickRate;
             float hours = gameTicks / 2500f;
             return FormatTime(hours);
+        }
+
+        /// <summary>
+        /// Total nutrition cost to regrow the reference arm.
+        /// Effort-based: partHP × RegrowthWorkPerPartHP severity-equivalent × ratio × multiplier.
+        /// Source: TickOrchestrator.ProgressLivingPawnRegrowth (effort × severityToNutritionRatio)
+        /// </summary>
+        public static string FullLimbRegrowthCost(float nutritionMult, float severityToNutritionRatio)
+        {
+            float total = ReferenceArmHP * SettingsDefaults.RegrowthWorkPerPartHP * severityToNutritionRatio * nutritionMult;
+            return $"~{total:F2} nutrition";
         }
 
         #endregion
@@ -152,12 +172,13 @@ namespace Eternal.UI.Settings
 
         /// <summary>
         /// Nutrition cost per normal tick (injuries).
-        /// Source: EternalHediffHealer.cs - cost proportional to healing performed
+        /// Source: EternalHediffHealer.cs:249-251 + FoodCostProcessor.cs:82 —
+        /// cost = severityHealed × severityToNutritionRatio × nutritionCostMultiplier
         /// </summary>
-        public static string NormalTickCost(float baseRate, float nutritionMult)
+        public static string NormalTickCost(float baseRate, float nutritionMult, float severityToNutritionRatio)
         {
-            // Cost = healing amount × nutritionMultiplier
-            float cost = baseRate * nutritionMult;
+            // Severity healed per cycle = baseRate (injuries: severityScaling = 1)
+            float cost = baseRate * severityToNutritionRatio * nutritionMult;
             return $"{cost:F4} nutrition";
         }
 
@@ -165,36 +186,32 @@ namespace Eternal.UI.Settings
         /// Nutrition cost per rare tick (scars, regrowth).
         /// Same formula as injuries (unified system).
         /// </summary>
-        public static string RareTickCost(float baseRate, float nutritionMult)
+        public static string RareTickCost(float baseRate, float nutritionMult, float severityToNutritionRatio)
         {
             // Unified formula: same cost calculation as injuries
-            float cost = baseRate * nutritionMult;
+            float cost = baseRate * severityToNutritionRatio * nutritionMult;
             return $"{cost:F4} nutrition";
         }
 
         /// <summary>
         /// Full injury heal cost (severity 1.0).
+        /// Total cost depends only on total severity healed, not on the rate:
+        /// 1.0 severity × ratio × multiplier.
         /// </summary>
-        public static string FullInjuryCost(float baseRate, float nutritionMult)
+        public static string FullInjuryCost(float nutritionMult, float severityToNutritionRatio)
         {
-            // Cost per tick × number of ticks
-            float costPerTick = baseRate * nutritionMult;
-            float cycles = 1.0f / baseRate;
-            float total = cycles * costPerTick;
-            return $"~{total:F2} nutrition";
+            float total = 1.0f * severityToNutritionRatio * nutritionMult;
+            return $"~{total:F4} nutrition";
         }
 
         /// <summary>
         /// Full scar heal cost (severity 1.0).
-        /// Same as injury (unified system).
+        /// Same as injury (unified system) — the 0.5x scar healing speed changes duration, not total cost.
         /// </summary>
-        public static string FullScarCost(float baseRate, float nutritionMult)
+        public static string FullScarCost(float nutritionMult, float severityToNutritionRatio)
         {
-            // Unified formula: same cost calculation as injuries
-            float costPerTick = baseRate * nutritionMult;
-            float cycles = 1.0f / baseRate;
-            float total = cycles * costPerTick;
-            return $"~{total:F2} nutrition";
+            float total = 1.0f * severityToNutritionRatio * nutritionMult;
+            return $"~{total:F4} nutrition";
         }
 
         /// <summary>
@@ -221,10 +238,13 @@ namespace Eternal.UI.Settings
 
         /// <summary>
         /// Full injuries that can be covered by max debt.
+        /// Cost per severity-1.0 injury = ratio × multiplier (matches FullInjuryCost).
         /// </summary>
-        public static string InjuriesCoveredByDebt(float maxDebt, float nutritionMult)
+        public static string InjuriesCoveredByDebt(float maxDebt, float nutritionMult, float severityToNutritionRatio)
         {
-            float costPerInjury = 1.0f * nutritionMult;
+            float costPerInjury = 1.0f * severityToNutritionRatio * nutritionMult;
+            if (costPerInjury <= 0f)
+                return "unlimited";
             float count = maxDebt / costPerInjury;
             return $"~{count:F0} injuries";
         }
@@ -232,9 +252,11 @@ namespace Eternal.UI.Settings
         /// <summary>
         /// Full scars that can be covered by max debt.
         /// </summary>
-        public static string ScarsCoveredByDebt(float maxDebt, float nutritionMult)
+        public static string ScarsCoveredByDebt(float maxDebt, float nutritionMult, float severityToNutritionRatio)
         {
-            float costPerScar = 1.0f * nutritionMult;
+            float costPerScar = 1.0f * severityToNutritionRatio * nutritionMult;
+            if (costPerScar <= 0f)
+                return "unlimited";
             float count = maxDebt / costPerScar;
             return $"~{count:F0} scars";
         }
@@ -452,7 +474,7 @@ namespace Eternal.UI.Settings
                 $"Cost formula: {SettingsDefaults.GetSeverityToNutritionRatioDisplay()} (severity : nutrition)\n\n" +
                 "• 0.01 = Very slow\n" +
                 "• 0.5 = Moderate\n" +
-                "• 1.8 = Fast (default)\n" +
+                "• 1.2 = Apex pacing (default)\n" +
                 "• 3.0 = Very fast\n\n" +
                 "Individual hediffs can override this.";
 
@@ -623,17 +645,17 @@ namespace Eternal.UI.Settings
 
             // Section 1: Healing Times
             DrawSectionHeaderNoReset(listing, "Healing Times");
-            DrawStatusRow(listing, "Injury (100% damage)",
+            DrawStatusRow(listing, "Injury (per 1 severity)",
                 StatusCalculator.InjuryHealTime(settings.baseHealingRate, settings.normalTickRate));
-            DrawStatusRow(listing, "Scar (100% severity)",
+            DrawStatusRow(listing, "Scar (per 1 severity)",
                 StatusCalculator.ScarHealTime(settings.baseHealingRate, settings.rareTickRate));
             DrawStatusRow(listing, "Disease (stage 0)",
                 StatusCalculator.DiseaseHealTime(settings.baseHealingRate, settings.normalTickRate, 0));
             DrawStatusRow(listing, "Disease (stage 3)",
                 StatusCalculator.DiseaseHealTime(settings.baseHealingRate, settings.normalTickRate, 3));
-            DrawStatusRow(listing, "Regrowth (per phase)",
+            DrawStatusRow(listing, "Regrowth (arm, per phase)",
                 StatusCalculator.RegrowthPhaseTime(settings.baseHealingRate, settings.rareTickRate));
-            DrawStatusRow(listing, "Full Limb Regrowth",
+            DrawStatusRow(listing, "Full Arm Regrowth",
                 StatusCalculator.FullLimbRegrowth(settings.baseHealingRate, settings.rareTickRate));
 
             listing.GapLine();
@@ -641,13 +663,15 @@ namespace Eternal.UI.Settings
             // Section 2: Nutrition Costs
             DrawSectionHeaderNoReset(listing, "Nutrition Costs");
             DrawStatusRow(listing, "Per normal tick",
-                StatusCalculator.NormalTickCost(settings.baseHealingRate, settings.nutritionCostMultiplier));
+                StatusCalculator.NormalTickCost(settings.baseHealingRate, settings.nutritionCostMultiplier, settings.severityToNutritionRatio));
             DrawStatusRow(listing, "Per rare tick",
-                StatusCalculator.RareTickCost(settings.baseHealingRate, settings.nutritionCostMultiplier));
+                StatusCalculator.RareTickCost(settings.baseHealingRate, settings.nutritionCostMultiplier, settings.severityToNutritionRatio));
             DrawStatusRow(listing, "Full injury heal",
-                StatusCalculator.FullInjuryCost(settings.baseHealingRate, settings.nutritionCostMultiplier));
+                StatusCalculator.FullInjuryCost(settings.nutritionCostMultiplier, settings.severityToNutritionRatio));
             DrawStatusRow(listing, "Full scar heal",
-                StatusCalculator.FullScarCost(settings.baseHealingRate, settings.nutritionCostMultiplier));
+                StatusCalculator.FullScarCost(settings.nutritionCostMultiplier, settings.severityToNutritionRatio));
+            DrawStatusRow(listing, "Full arm regrowth",
+                StatusCalculator.FullLimbRegrowthCost(settings.nutritionCostMultiplier, settings.severityToNutritionRatio));
             DrawStatusRow(listing, "Full resurrection",
                 StatusCalculator.ResurrectionCost(humanNutritionCap));
 
@@ -660,9 +684,9 @@ namespace Eternal.UI.Settings
             DrawStatusRow(listing, $"Maximum debt (x{settings.maxDebtMultiplier:F0})",
                 StatusCalculator.MaxDebt(humanNutritionCap, settings.maxDebtMultiplier));
             DrawStatusRow(listing, "Can heal injuries",
-                StatusCalculator.InjuriesCoveredByDebt(maxDebt, settings.nutritionCostMultiplier));
+                StatusCalculator.InjuriesCoveredByDebt(maxDebt, settings.nutritionCostMultiplier, settings.severityToNutritionRatio));
             DrawStatusRow(listing, "Can heal scars",
-                StatusCalculator.ScarsCoveredByDebt(maxDebt, settings.nutritionCostMultiplier));
+                StatusCalculator.ScarsCoveredByDebt(maxDebt, settings.nutritionCostMultiplier, settings.severityToNutritionRatio));
 
         }
 

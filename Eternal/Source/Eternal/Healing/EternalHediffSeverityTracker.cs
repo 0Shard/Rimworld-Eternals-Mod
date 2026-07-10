@@ -1,10 +1,13 @@
 /*
  * Relative Path: Eternal/Source/Eternal/Healing/EternalHediffSeverityTracker.cs
  * Creation Date: 12-11-2025
- * Last Edit: 21-02-2026
+ * Last Edit: 10-07-2026
  * Author: 0Shard
  * Description: Tracks hediff severity changes to detect "stuck" hediffs that RimWorld protects from
  *              being fully removed. When detected, these hediffs are forcibly removed.
+ *              BUGFIX: Stuck detection is def.minSeverity-aware — hediffs that regen between healing
+ *              cycles (e.g. mechanites +0.25/day) oscillate at the clamp floor with a per-attempt
+ *              severity change above MIN_CHANGE_THRESHOLD; landing at the floor now counts as stuck.
  *              PERF-04: Replaced string dictionary keys with HealingDictionaryKey composite struct
  *              to eliminate per-tick string allocation. ClearPawnTracking now uses integer comparison
  *              instead of string.StartsWith prefix scanning.
@@ -109,8 +112,11 @@ namespace Eternal
             if (pawn == null || hediff == null)
                 return false;
 
-            // Check if severity is below threshold
-            if (hediff.Severity > SEVERITY_THRESHOLD)
+            // Check if severity is below threshold.
+            // def.minSeverity is the lowest value the Severity setter allows, so the
+            // "very low" band sits on top of that floor, not on absolute zero.
+            float severityFloor = Math.Max(0f, hediff.def.minSeverity);
+            if (hediff.Severity > severityFloor + SEVERITY_THRESHOLD)
                 return false;
 
             var key = new HealingDictionaryKey(pawn, hediff);
@@ -131,9 +137,11 @@ namespace Eternal
             {
                 var attempt = attempts[i];
 
-                // Check if this attempt shows the hediff is stuck
-                // (healing was applied but severity didn't decrease meaningfully)
-                if (attempt.HealingApplied > 0f && attempt.SeverityChange < MIN_CHANGE_THRESHOLD)
+                // Check if this attempt shows the hediff is stuck: healing was applied but
+                // severity didn't decrease meaningfully, OR it landed on the clamp floor
+                // (regen-oscillating hediffs show a "real" change yet never leave the floor)
+                bool pinnedAtFloor = attempt.SeverityAfter <= severityFloor + MIN_CHANGE_THRESHOLD;
+                if (attempt.HealingApplied > 0f && (attempt.SeverityChange < MIN_CHANGE_THRESHOLD || pinnedAtFloor))
                 {
                     stuckCount++;
                 }

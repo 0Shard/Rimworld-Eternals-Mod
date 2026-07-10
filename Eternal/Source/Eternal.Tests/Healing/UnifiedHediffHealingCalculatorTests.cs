@@ -109,7 +109,7 @@ namespace Eternal.Tests.Healing
         [Fact]
         public void Constructor_NullSettings_DoesNotThrow()
         {
-            // Calculator supports null settings with fallback to 1.8f
+            // Calculator supports null settings with fallback to SettingsDefaults.BaseHealingRate
             var calc = new UnifiedHediffHealingCalculator(null);
             Assert.NotNull(calc);
         }
@@ -133,7 +133,7 @@ namespace Eternal.Tests.Healing
         //   Stage multipliers: 0->1.0, 1->0.8, 2->0.6, 3->0.4, 4+->0.2
         //   Severity scaling: Hediff_Injury->1.0, maxSev in (0,100)->maxSev, else->1.0
         //   Body size: pawn.BodySize ?? 1.0f (confirmed via IPawnData overload tests above)
-        //   Effective rate: setting?.GetEffectiveHealingRate() ?? _settings?.BaseHealingRate ?? 1.8f
+        //   Effective rate: setting?.GetEffectiveHealingRate() ?? _settings?.BaseHealingRate ?? SettingsDefaults.BaseHealingRate
         // -----------------------------------------------------------------
     }
 }

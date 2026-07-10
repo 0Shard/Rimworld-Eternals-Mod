@@ -1,7 +1,7 @@
 /*
  * Relative Path: Eternal/Source/Eternal/Components/TickOrchestrator.cs
  * Creation Date: 29-12-2025
- * Last Edit: 06-03-2026
+ * Last Edit: 11-07-2026
  * SAFE-09: ProcessTick() early-returns when EternalModState.IsDisabled to prevent NRE floods
  *          when critical defs are missing.
  * Author: 0Shard
@@ -10,7 +10,8 @@
  *              Manages timing intervals and delegates to specialized processors.
  *              PERF-08: Replaced 1000-tick cached settings with per-batch ImmutableSettingsSnapshot.
  *              Settings changes now apply immediately (next ProcessTick call) instead of after 1000 ticks.
- *              Regrowth uses uniform severity rate (all parts regrow at same speed).
+ *              Regrowth progress scales with part max HP (see EternalRegrowthManager);
+ *              food cost stays effort-based (healAmount per regrowing part per pass).
  *              Corpse injury healing now runs at normalTickRate (60 ticks) for parity with living pawns.
  *              05-02: Added healing history sweep timer and SweepStaleHealingHistory for SAFE-07 bounded cleanup.
  *              09-03: Added ProcessDebtRepayment() — syncs Metabolic Recovery hediff lifecycle and repays debt
@@ -345,23 +346,20 @@ namespace Eternal.Components
             // Calculate heal amount: baseRate * bodySize
             float healAmount = baseHealRate * pawn.BodySize;
 
-            // Calculate total severity increase for food cost
-            // Uniform severity rate: all parts regrow at same speed regardless of HP
-            float totalSeverityIncrease = 0f;
-            foreach (var hediff in regrowingHediffs)
-            {
-                // All parts use the same healAmount (no partHp division)
-                totalSeverityIncrease += healAmount;
-            }
+            // Food cost is effort-based: each regrowing part consumes the full healAmount of
+            // healing effort per pass (regrowth PROGRESS is divided by part HP in
+            // EternalRegrowthManager, but the biological effort — and thus nutrition — is not).
+            // Total cost of a part therefore scales with its HP: ~1.2 nutrition for an arm.
+            float totalHealingEffort = regrowingHediffs.Count * healAmount;
 
-            // Progress regrowth (advances severity on all regrowing hediffs)
+            // Progress regrowth (advances severity on all regrowing hediffs, HP-scaled)
             _regrowthManager.ProgressRegrowth(pawn, healAmount);
 
             // Process food cost for regrowth (configurable ratio, default 250:1)
-            if (totalSeverityIncrease > 0f)
+            if (totalHealingEffort > 0f)
             {
                 float severityToNutritionRatio = _settings.SeverityToNutritionRatio;
-                float nutritionCost = totalSeverityIncrease * severityToNutritionRatio;
+                float nutritionCost = totalHealingEffort * severityToNutritionRatio;
                 EternalServiceContainer.Instance.FoodCostProcessor?.ProcessHealingCost(pawn, nutritionCost);
             }
 
@@ -369,7 +367,7 @@ namespace Eternal.Components
             {
                 float severityToNutritionRatio = _settings.SeverityToNutritionRatio;
                 Log.Message($"[Eternal] Progressed regrowth for {pawn.Name}: " +
-                           $"{regrowingHediffs.Count} parts, heal={healAmount:F4}, cost={totalSeverityIncrease * severityToNutritionRatio:F4}");
+                           $"{regrowingHediffs.Count} parts, heal={healAmount:F4}, cost={totalHealingEffort * severityToNutritionRatio:F4}");
             }
         }
 

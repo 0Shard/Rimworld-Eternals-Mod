@@ -1,7 +1,7 @@
 /*
  * Relative Path: Eternal/Source/Eternal/Healing/HediffHealingThresholdTracker.cs
  * Creation Date: 29-12-2025
- * Last Edit: 19-02-2026
+ * Last Edit: 10-07-2026
  * Author: 0Shard
  * Description: Tracks per-hediff-instance healing activation thresholds for debuff hediffs.
  *              When a debuff (infection, disease, blood loss, etc.) is added to a living Eternal
@@ -146,6 +146,32 @@ namespace Eternal.Healing
             }
 
             return false; // Not yet reached threshold - don't heal yet
+        }
+
+        /// <summary>
+        /// Read-only threshold lookup for UI display (tooltip). Unlike HasReachedThreshold,
+        /// this never lazy-registers a threshold — no side effects.
+        /// </summary>
+        /// <param name="pawn">The pawn with the hediff</param>
+        /// <param name="hediff">The hediff to look up</param>
+        /// <param name="threshold">The registered severity threshold, if any</param>
+        /// <param name="reached">Whether the threshold latch has fired</param>
+        /// <returns>True if a threshold entry exists for this hediff instance</returns>
+        public bool TryGetThreshold(Pawn pawn, Hediff hediff, out float threshold, out bool reached)
+        {
+            threshold = 0f;
+            reached = false;
+
+            if (pawn == null || hediff == null)
+                return false;
+
+            var key = new HealingDictionaryKey(pawn, hediff);
+            if (!_thresholds.TryGetValue(key, out var entry))
+                return false;
+
+            threshold = entry.threshold;
+            reached = entry.hasBeenReached;
+            return true;
         }
 
         /// <summary>

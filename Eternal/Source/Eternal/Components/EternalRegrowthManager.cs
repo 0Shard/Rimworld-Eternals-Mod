@@ -1,15 +1,17 @@
 /*
  * Relative Path: Eternal/Source/Eternal/Components/EternalRegrowthManager.cs
  * Creation Date: 28-10-2025
- * Last Edit: 20-02-2026
+ * Last Edit: 11-07-2026
  * Author: 0Shard
  * Description: Refactored regrowth manager using hediff-per-part approach (Immortals pattern).
  *              Adds Eternal_Regrowing hediff to each missing body part with partEfficiencyOffset stages.
  *              Severity progresses 0->1, when complete hediff is removed and part becomes functional.
  *              Critical part order (Neck->Head->Skull->Brain) is enforced to prevent death loops.
  *              AddRegrowthHediff removes Hediff_MissingPart before adding regrowth to prevent AddDirect block.
- *              Flat severity rate: all parts regrow in same time regardless of HP.
- *              Non-critical parts wait for parent to fully complete before starting.
+ *              Progress scales with part max HP (arm ~1 in-game day at defaults).
+ *              Children start at parent phase 3 (severity >= 0.5); Brain waits for fully-regrown
+ *              prerequisites. Completion is gated on the parent part existing so regrowth
+ *              overlaps in progress but stays strictly ordered in completion.
  */
 
 using System;
@@ -49,7 +51,14 @@ namespace Eternal
             if (pawn?.health?.hediffSet == null)
                 return;
 
-            var missingParts = pawn.health.hediffSet.GetMissingPartsCommonAncestors().ToList();
+            // Iterate ALL missing-part hediffs, not just common ancestors: RimWorld adds an
+            // explicit Hediff_MissingPart to every descendant of a lost part
+            // (Hediff_MissingPart.PostAdd), so children of a still-regrowing part are visible
+            // here and can start early once the parent passes the phase-3 threshold.
+            // CanStartRegrowthForPart decides eligibility.
+            var missingParts = pawn.health.hediffSet.hediffs
+                .OfType<Hediff_MissingPart>()
+                .ToList();
 
             foreach (var missingHediff in missingParts)
             {
@@ -76,10 +85,13 @@ namespace Eternal
 
         /// <summary>
         /// Progresses regrowth for all regrowing hediffs on a pawn.
-        /// All parts regrow at the same severity rate regardless of HP (matches injury healing pattern).
+        /// Progress scales inversely with part max HP: larger parts take proportionally longer
+        /// (severityIncrease = healAmount / (partMaxHP × RegrowthWorkPerPartHP)).
+        /// A part at 100% whose parent is still missing holds until the parent completes,
+        /// so overlapped regrowth stays strictly ordered in completion.
         /// </summary>
         /// <param name="pawn">The pawn to progress regrowth for.</param>
-        /// <param name="healAmount">The healing amount to apply (used directly as severity increase).</param>
+        /// <param name="healAmount">The healing effort to apply this pass (baseRate × bodySize).</param>
         public void ProgressRegrowth(Pawn pawn, float healAmount)
         {
             if (pawn?.health?.hediffSet == null || healAmount <= 0f)
@@ -92,11 +104,15 @@ namespace Eternal
 
             foreach (var hediff in regrowingHediffs)
             {
-                // Flat severity rate: all parts regrow at same speed (same TIME to complete)
-                // Unlike injuries, regrowth goes 0->1 for all parts, so flat rate = equal time
-                float severityIncrease = healAmount;
+                float partMaxHP = hediff.forPart != null
+                    ? EBFCompat.GetMaxHealth(hediff.forPart, pawn)
+                    : 1f;
+                if (partMaxHP <= 0f)
+                    partMaxHP = 1f;
+
+                float severityIncrease = healAmount / (partMaxHP * SettingsDefaults.RegrowthWorkPerPartHP);
                 float beforeSeverity = hediff.Severity;
-                hediff.Severity += severityIncrease;
+                hediff.Severity = Math.Min(hediff.Severity + severityIncrease, 1.0f);
 
                 if (Eternal_Mod.settings?.debugMode == true)
                 {
@@ -108,15 +124,18 @@ namespace Eternal
                                $"Severity: {beforeSeverity:F4} -> {hediff.Severity:F4} (+{severityIncrease:F4})");
                 }
 
-                // Check for completion
-                if (hediff.Severity >= 1.0f)
+                // Complete only when the parent part exists again; a finished child under a
+                // still-missing parent holds at 100% (completing it early would let RimWorld
+                // re-add its Hediff_MissingPart when the parent completes, erasing the regrowth)
+                if (hediff.Severity >= 1.0f && CanCompleteRegrowth(pawn, hediff.forPart))
                 {
                     CompleteRegrowth(pawn, hediff);
                 }
             }
 
             // After progressing, check if new parts can start regrowing
-            // (e.g., neck completed, now head can start)
+            // (parents past the phase-3 threshold release their children, completed
+            // prerequisites release the next critical part)
             StartRegrowth(pawn);
         }
 
@@ -138,7 +157,7 @@ namespace Eternal
 
             var completedHediffs = pawn.health.hediffSet.hediffs
                 .OfType<EternalRegrowing_Hediff>()
-                .Where(h => h.Severity >= 1.0f)
+                .Where(h => h.Severity >= 1.0f && CanCompleteRegrowth(pawn, h.forPart))
                 .ToList();
 
             foreach (var hediff in completedHediffs)
@@ -219,8 +238,10 @@ namespace Eternal
 
         /// <summary>
         /// Checks if regrowth can start for a part (critical part order enforcement).
-        /// Critical parts must regrow in order: Neck -> Head -> Skull -> Brain
-        /// Non-critical parts can start when their parent exists.
+        /// Critical parts regrow in order: Neck -> Head -> Skull -> Brain.
+        /// A part may start once its parent/prerequisite reaches phase 3
+        /// (severity >= RegrowthChildStartThreshold) — except the Brain, whose
+        /// prerequisites must be fully regrown (death-loop safety).
         /// </summary>
         /// <param name="pawn">The pawn to check.</param>
         /// <param name="part">The body part to check.</param>
@@ -230,44 +251,76 @@ namespace Eternal
             // Use CriticalPartConstants as single source of truth
             int partIndex = CriticalPartConstants.GetSequenceIndex(part);
 
-            // Non-critical parts can start when parent is fully regrown
+            // Non-critical parts can start when parent is fully regrown or past phase 3
             if (partIndex < 0)
             {
-                if (part.parent != null)
-                {
-                    // Check parent is not missing
-                    if (pawn.health.hediffSet.PartIsMissing(part.parent))
-                        return false;
-
-                    // Check parent is not still regrowing (must be 100% complete)
-                    if (HasRegrowthHediff(pawn, part.parent))
-                        return false;
-                }
+                if (part.parent != null && !PartAvailableForChildRegrowth(pawn, part.parent))
+                    return false;
                 return true;
             }
 
-            // Critical part: check all prerequisites are complete
+            // Brain (last in sequence) requires FULLY regrown prerequisites
+            bool requireFullyRegrown = partIndex == CriticalPartConstants.RegrowthSequence.Count - 1;
+
+            // Critical part: check all prerequisites in sequence
             for (int i = 0; i < partIndex; i++)
             {
                 string prereqName = CriticalPartConstants.RegrowthSequence[i];
 
-                // Check if any part matching this prereq is still missing or regrowing
                 var prereqParts = pawn.RaceProps.body.AllParts
                     .Where(p => p.def.defName.Equals(prereqName, StringComparison.OrdinalIgnoreCase));
 
                 foreach (var prereqPart in prereqParts)
                 {
-                    // If prereq is missing, cannot start this critical part
-                    if (pawn.health.hediffSet.PartIsMissing(prereqPart))
+                    bool prereqComplete = !pawn.health.hediffSet.PartIsMissing(prereqPart)
+                                          && !HasRegrowthHediff(pawn, prereqPart);
+                    if (prereqComplete)
+                        continue;
+
+                    if (requireFullyRegrown)
                         return false;
 
-                    // If prereq is still regrowing (has regrowing hediff), cannot start
-                    if (HasRegrowthHediff(pawn, prereqPart))
+                    if (GetRegrowthSeverity(pawn, prereqPart) < SettingsDefaults.RegrowthChildStartThreshold)
                         return false;
                 }
             }
 
             return true;
+        }
+
+        /// <summary>
+        /// True when a parent part is complete, or regrowing past the phase-3 threshold,
+        /// so its children may start regrowing.
+        /// </summary>
+        private bool PartAvailableForChildRegrowth(Pawn pawn, BodyPartRecord parent)
+        {
+            bool parentComplete = !pawn.health.hediffSet.PartIsMissing(parent)
+                                  && !HasRegrowthHediff(pawn, parent);
+            if (parentComplete)
+                return true;
+
+            return GetRegrowthSeverity(pawn, parent) >= SettingsDefaults.RegrowthChildStartThreshold;
+        }
+
+        /// <summary>
+        /// Gets the regrowth severity for a part, or 0 if it has no regrowth hediff.
+        /// </summary>
+        private float GetRegrowthSeverity(Pawn pawn, BodyPartRecord part)
+        {
+            var regrowth = pawn.health.hediffSet.hediffs
+                .OfType<EternalRegrowing_Hediff>()
+                .FirstOrDefault(h => h.forPart == part || h.Part == part);
+            return regrowth?.Severity ?? 0f;
+        }
+
+        /// <summary>
+        /// A regrowing part may complete only when its parent part exists again.
+        /// Completing a child under a still-missing parent would let RimWorld re-add the
+        /// child's Hediff_MissingPart when the parent completes, erasing the regrowth.
+        /// </summary>
+        private bool CanCompleteRegrowth(Pawn pawn, BodyPartRecord part)
+        {
+            return part?.parent == null || !pawn.health.hediffSet.PartIsMissing(part.parent);
         }
 
         #endregion

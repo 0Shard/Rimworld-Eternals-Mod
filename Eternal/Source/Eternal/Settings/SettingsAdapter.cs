@@ -1,6 +1,6 @@
 // Relative Path: Eternal/Source/Eternal/Settings/SettingsAdapter.cs
 // Creation Date: 29-12-2025
-// Last Edit: 04-03-2026
+// Last Edit: 11-07-2026
 // Author: 0Shard
 // Description: Adapter that wraps Eternal_Mod.settings to provide ISettingsProvider interface.
 //              Eliminates direct static dependencies on Eternal_Mod.settings throughout codebase.
@@ -27,7 +27,7 @@ namespace Eternal.Settings
 
         #region Healing Settings
 
-        public float BaseHealingRate => Settings?.baseHealingRate ?? 1.8f;
+        public float BaseHealingRate => Settings?.baseHealingRate ?? SettingsDefaults.BaseHealingRate;
         public bool ShowRegrowthEffects => Settings?.showRegrowthEffects ?? true;
         public bool ShowRegrowthProgress => Settings?.showRegrowthProgress ?? true;
 

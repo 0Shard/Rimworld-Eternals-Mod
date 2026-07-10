@@ -1,8 +1,10 @@
 // Relative Path: Eternal/Source/Eternal/UI/Management/ManagementTabModel.cs
 // Creation Date: 01-01-2026
-// Last Edit: 08-01-2026
+// Last Edit: 11-07-2026
 // Author: 0Shard
 // Description: Model layer for Eternal management tab. Handles data access and calculations.
+//              11-07: CalculateEstimatedHealingTime delegates to EternalHealingPriority so the
+//              displayed ETA uses the real engine formula instead of an ad-hoc estimate.
 
 using System.Collections.Generic;
 using System.Linq;
@@ -207,23 +209,16 @@ namespace Eternal.UI.Management
         }
 
         /// <summary>
-        /// Calculates estimated healing time for a hediff.
+        /// Calculates estimated healing time (in ticks) for a hediff using the actual
+        /// engine formula via EternalHealingPriority — never an ad-hoc estimate.
         /// </summary>
         public float CalculateEstimatedHealingTime(Hediff hediff)
         {
             if (hediff == null)
                 return 0f;
 
-            float baseTime = 60000f; // 1 day in ticks
-            float severityMultiplier = hediff.Severity * 2f;
-            float complexityMultiplier = 1f;
-
-            if (hediff.def.injuryProps != null)
-            {
-                complexityMultiplier = hediff.IsPermanent() ? 3f : 1.5f;
-            }
-
-            return baseTime * severityMultiplier * complexityMultiplier;
+            var healingItem = EternalHealingPriority.CreateHealingItem(hediff, pawn);
+            return healingItem?.EstimatedHealingTime ?? 0f;
         }
 
         #endregion

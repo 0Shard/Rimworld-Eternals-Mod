@@ -1,11 +1,12 @@
 // Relative Path: Eternal/Source/Eternal/Healing/EternalResurrectionCalculator.cs
 // Creation Date: 09-11-2025
-// Last Edit: 04-03-2026
+// Last Edit: 11-07-2026
 // Author: 0Shard
 // Description: Calculates healing requirements, costs, and time estimates for Eternal corpse resurrection.
 //              Delegates to EternalHealingPriority for HealingItem creation to ensure EnergyCost is set.
 //              Resurrection debt is capped at RESURRECTION_DEBT_CAP (2.0) × pawn nutrition capacity.
 //              Time estimates use actual healing rates: severity / (baseHealingRate * bodySize) * tickInterval.
+//              Total ETA is the MAX over items (parallel healing model), not the sum.
 
 using System;
 using System.Collections.Generic;
@@ -133,7 +134,8 @@ namespace Eternal.Healing
 
         /// <summary>
         /// Calculates estimated time to complete healing in ticks.
-        /// Uses actual healing rates from HealingItem.EstimatedHealingTime (already calculated correctly).
+        /// All items heal in PARALLEL (per-item full rate, no shared pool), so the
+        /// slowest single item determines total time — max, not sum.
         /// </summary>
         /// <param name="healingItems">The healing items to calculate time for</param>
         /// <returns>Estimated time in ticks</returns>
@@ -143,8 +145,8 @@ namespace Eternal.Healing
                 return 0f;
 
             // HealingItems already have EstimatedHealingTime calculated using actual healing rates
-            // via EternalHealingPriority.CalculateHealingTime()
-            return healingItems.Sum(item => item?.EstimatedHealingTime ?? 0f);
+            // via EternalHealingPriority (injuries: severity/rate; regrowth: overlap-aware subtree time)
+            return healingItems.Max(item => item?.EstimatedHealingTime ?? 0f);
         }
 
         /// <summary>

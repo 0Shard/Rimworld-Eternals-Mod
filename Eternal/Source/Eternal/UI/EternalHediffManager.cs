@@ -1,11 +1,14 @@
 // Relative Path: Eternal/Source/Eternal/UI/EternalHediffManager.cs
 // Creation Date: 01-01-2025
-// Last Edit: 19-02-2026
+// Last Edit: 10-07-2026
 // Author: 0Shard
 // Description: Coordinator for hediff settings management. Delegates to specialized
 //              classes for storage, filtering, selection, and bulk operations.
 //              Statistics now track HealingHediffs (canHeal=true) instead of enabled count.
-//              PERF-02: Added filter result cache with dirty flag + 200ms debounce.
+//              PERF-02: Filter result cache with dirty flag. The 200ms debounce was removed —
+//              it reset per keystroke, so rapid typing showed stale results indefinitely
+//              ("filters not taking effect"). With HediffDefTextCache the rebuild is cheap
+//              enough to run on the frame the filter changes.
 
 using System.Collections.Generic;
 using System.Linq;
@@ -26,11 +29,9 @@ namespace Eternal
         public HediffFilterState FilterState { get; } = new HediffFilterState();
         public HediffSelectionManager Selection { get; } = new HediffSelectionManager();
 
-        // PERF-02: Filter result cache with debounce
+        // PERF-02: Filter result cache with dirty flag (rebuild only when something changed)
         private List<KeyValuePair<string, EternalHediffSetting>> _filteredCache;
         private bool _filterDirty = true;
-        private float _filterChangedAt = -0.2f; // Negative offset ensures immediate first build
-        private const float FILTER_DEBOUNCE_SECONDS = 0.2f;
 
         #region Filtered Hediffs
 
@@ -44,28 +45,24 @@ namespace Eternal
         }
 
         /// <summary>
-        /// Gets cached filtered results. Rebuilds after debounce period when dirty.
+        /// Gets cached filtered results. Rebuilds on the frame the filter was marked dirty.
         /// Call from render loop instead of GetFilteredHediffs().
         /// </summary>
         public IReadOnlyList<KeyValuePair<string, EternalHediffSetting>> GetFilteredHediffsCached()
         {
-            bool debounceElapsed = (Time.realtimeSinceStartup - _filterChangedAt) >= FILTER_DEBOUNCE_SECONDS;
-
-            if (_filterDirty && debounceElapsed)
+            if (_filterDirty || _filteredCache == null)
             {
                 _filteredCache = HediffFilterEngine.FilterToList(Store, FilterState);
                 _filterDirty = false;
             }
 
-            // Null-coalescing initial build (handles first call before debounce fires)
-            return _filteredCache ?? (_filteredCache = HediffFilterEngine.FilterToList(Store, FilterState));
+            return _filteredCache;
         }
 
         /// <summary>Marks filter cache dirty. Call when filter state or hediff settings change.</summary>
         public void MarkFilterDirty()
         {
             _filterDirty = true;
-            _filterChangedAt = Time.realtimeSinceStartup;
         }
 
         #endregion

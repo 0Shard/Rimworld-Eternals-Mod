@@ -1,10 +1,12 @@
 // Relative Path: Eternal/Source/Eternal/Settings/HediffFilterEngine.cs
 // Creation Date: 01-01-2025
-// Last Edit: 01-01-2026
+// Last Edit: 10-07-2026
 // Author: 0Shard
 // Description: Applies filters to hediff settings.
 //              Stateless - takes inputs, returns filtered output.
 //              Includes beneficial filter for filtering beneficial (non-bad) hediffs.
+//              PERF: Labels/descriptions come from HediffDefTextCache — no DefDatabase
+//              lookups or LabelCap translations during sort or search.
 
 using System;
 using System.Collections.Generic;
@@ -49,20 +51,8 @@ namespace Eternal.Settings
             HediffFilterState filterState)
         {
             return Filter(store, filterState)
-                .OrderBy(kvp => GetDisplayLabel(kvp.Key))
+                .OrderBy(kvp => HediffDefTextCache.GetLabel(kvp.Key))
                 .ToList();
-        }
-
-        /// <summary>
-        /// Gets the human-readable display label for a hediff.
-        /// Falls back to defName if hediff can't be resolved.
-        /// </summary>
-        private static string GetDisplayLabel(string defName)
-        {
-            var hediffDef = DefDatabase<HediffDef>.GetNamedSilentFail(defName);
-            if (hediffDef == null)
-                return defName;
-            return hediffDef.LabelCap.ToString();
         }
 
         /// <summary>
@@ -113,10 +103,9 @@ namespace Eternal.Settings
             if (string.IsNullOrEmpty(searchTerm))
                 return true;
 
-            // Get hediff definition for label and description
-            var hediffDef = DefDatabase<HediffDef>.GetNamedSilentFail(defName);
-            string label = hediffDef?.LabelCap ?? string.Empty;
-            string description = hediffDef?.description ?? string.Empty;
+            // Cached label/description — search runs over every stored hediff per rebuild
+            string label = HediffDefTextCache.GetLabel(defName);
+            string description = HediffDefTextCache.GetDescription(defName);
             string modSource = setting.modSource ?? string.Empty;
 
             // Case-insensitive matches

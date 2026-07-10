@@ -221,8 +221,8 @@ namespace Eternal.UI.HediffSettings
         /// </summary>
         public string GetHediffDisplayLabel(string hediffName)
         {
-            var hediffDef = DefDatabase<HediffDef>.GetNamedSilentFail(hediffName);
-            return hediffDef?.LabelCap ?? hediffName;
+            // Cached: called once per visible row per frame
+            return Eternal.Settings.HediffDefTextCache.GetLabel(hediffName);
         }
 
         /// <summary>
@@ -230,8 +230,8 @@ namespace Eternal.UI.HediffSettings
         /// </summary>
         public string GetHediffDescription(string hediffName)
         {
-            var hediffDef = DefDatabase<HediffDef>.GetNamedSilentFail(hediffName);
-            return hediffDef?.description;
+            // Cached: called once per visible row per frame (tooltip)
+            return Eternal.Settings.HediffDefTextCache.GetDescription(hediffName);
         }
 
         #endregion

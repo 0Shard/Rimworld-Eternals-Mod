@@ -1,6 +1,6 @@
 // Relative Path: Eternal/Source/Eternal/InGameTests/EternalTestRunner.cs
 // Creation Date: 24-02-2026
-// Last Edit: 26-03-2026
+// Last Edit: 10-07-2026
 // Author: 0Shard
 // Description: Self-contained in-game test runner for Eternal mod integration tests.
 //              Invoked via dev-mode DebugAction buttons. Discovers and runs all test suites,
@@ -9,6 +9,7 @@
 //              failure grouping, and 3 new v1.0.1 suites (consciousness, mood, elixir/cap).
 //              Gated behind #if DEBUG to exclude from Release builds.
 //              26-03: Added ResurrectionSurvival suite (RSRV-01/02/03).
+//              10-07: Added HealingGate suite (threshold bypass + minSeverity floor removal).
 
 #if DEBUG
 
@@ -62,6 +63,7 @@ namespace Eternal.InGameTests
             RunSuite("MoodBuff",           () => MoodBuffTests.RunAll(map),          suiteResults);
             RunSuite("ElixirPopCap",          () => ElixirPopulationCapTests.RunAll(map),    suiteResults);
             RunSuite("ResurrectionSurvival", () => ResurrectionSurvivalTests.RunAll(map),   suiteResults);
+            RunSuite("HealingGate",          () => HealingGateTests.RunAll(map),            suiteResults);
 
             int totalPassed = suiteResults.Sum(r => r.Result.Passed);
             int totalFailed = suiteResults.Sum(r => r.Result.Failed);

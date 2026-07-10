@@ -1,8 +1,11 @@
 // Relative Path: Eternal/Source/Eternal/Healing/EternalScarHealing.cs
 // Creation Date: 01-01-2025
-// Last Edit: 29-12-2025
+// Last Edit: 10-07-2026
 // Author: 0Shard
 // Description: Accelerated scar healing system coordinator. Delegates to focused components.
+//              Processing interval now honors the configured rareTickRate (was hardcoded 60).
+//              Rate is unchanged — ScarCostCalculator normalizes by deltaTime/rareTickRate —
+//              but cadence now matches the documented tick table and the Status tab.
 
 using System.Collections.Generic;
 using System.Linq;
@@ -51,8 +54,9 @@ namespace Eternal
         {
             var currentTick = Find.TickManager.TicksGame;
 
-            // Check if it's time to process (every 60 ticks)
-            if (currentTick - lastProcessingTick < 60)
+            // Check if it's time to process (configured rare tick interval — matches
+            // the Status tab's ScarHealTime display, which assumes rareTickRate)
+            if (currentTick - lastProcessingTick < Eternal_Mod.GetSettings().rareTickRate)
                 return;
 
             lastProcessingTick = currentTick;

@@ -1,6 +1,6 @@
 // Relative Path: Eternal/Source/Eternal/UI/Eternal_Settings.cs
 // Creation Date: 01-01-2025
-// Last Edit: 12-03-2026
+// Last Edit: 11-07-2026
 // Author: 0Shard
 // Description: Settings data class for Eternal mod configuration. Contains all
 //              mod-specific settings and user preferences. UI drawing is delegated
@@ -30,11 +30,26 @@ namespace Eternal
 
         // Healing
         /// <summary>
-        /// Base healing rate: severity reduction per tick.
-        /// Default 1.8f provides fast healing speed for living pawns.
+        /// Base healing rate: severity reduction per healing pass (normalTickRate ticks).
+        /// Default 1.2f = 0.02 severity/tick per wound, matching the Apex Immortal rate
+        /// from the Immortals mod (0.002 baseHealSpeed x severity 10).
         /// Range: 0.01 - 3.0
         /// </summary>
-        public const float BaseHealingRate = 1.8f;
+        public const float BaseHealingRate = 1.2f;
+
+        /// <summary>
+        /// Severity-equivalent work required per body part hit point during regrowth.
+        /// Regrowth progress per pass = healAmount / (partMaxHP x this).
+        /// At defaults (rate 1.2, rareTickRate 250) an arm (30 HP) regrows in ~1 in-game day.
+        /// </summary>
+        public const float RegrowthWorkPerPartHP = 10f;
+
+        /// <summary>
+        /// Regrowth severity at which a part's children may start regrowing in parallel
+        /// (phase 3, NerveIntegration). The Brain is exempt: its critical-sequence
+        /// prerequisites must be fully regrown before it starts.
+        /// </summary>
+        public const float RegrowthChildStartThreshold = 0.5f;
         public const bool ShowRegrowthEffects = true;
         public const bool ShowRegrowthProgress = true;
 
@@ -168,10 +183,10 @@ namespace Eternal
 
         /// <summary>
         /// Base healing rate applied to all hediffs (unless overridden per-hediff).
-        /// Range: 0.01 - 3.0 (default 1.8)
+        /// Range: 0.01 - 3.0 (default 1.2)
         /// UI displays as ratio format: 250 : 1 (severity : nutrition)
         /// </summary>
-        public float baseHealingRate = 1.8f;
+        public float baseHealingRate = 1.2f;
 
         public bool showRegrowthEffects = true;
         public bool showRegrowthProgress = true;
@@ -512,7 +527,7 @@ namespace Eternal
             Scribe_Values.Look(ref loggingLevel, "loggingLevel", 1);
 
             // Healing settings
-            Scribe_Values.Look(ref baseHealingRate, "baseHealingRate", 1.8f);
+            Scribe_Values.Look(ref baseHealingRate, "baseHealingRate", 1.2f);
             Scribe_Values.Look(ref showRegrowthEffects, "showRegrowthEffects", true);
             Scribe_Values.Look(ref showRegrowthProgress, "showRegrowthProgress", true);
 

@@ -1,0 +1,20 @@
+# Normalize all text files to LF in the repository and working tree.
+# Prevents the CRLF/LF churn that flags every file as modified on Linux checkouts.
+* text=auto eol=lf
+
+# Binary files — never apply EOL conversion.
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.bmp   binary
+*.ico   binary
+*.dll   binary
+*.pdb   binary
+*.exe   binary
+*.zip   binary
+*.so    binary
+*.ttf   binary
+*.otf   binary
+*.wav   binary
+*.ogg   binary

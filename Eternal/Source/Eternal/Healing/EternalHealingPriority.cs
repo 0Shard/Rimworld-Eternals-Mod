@@ -1,11 +1,13 @@
 // Relative Path: Eternal/Source/Eternal/Healing/EternalHealingPriority.cs
 // Creation Date: 03-12-2025
-// Last Edit: 24-02-2026
+// Last Edit: 11-07-2026
 // Author: 0Shard
 // Description: Time-based priority system for Eternal healing with uniform healing speed.
 //              Uses extension methods from Eternal.Extensions for hediff classification.
 //              Uses configurable severity-to-nutrition ratio (default 250:1).
-//              Regrowth cost scales by body part HP (larger parts cost more nutrition).
+//              Regrowth work/cost covers the whole missing subtree (part + descendants), scaled by
+//              RegrowthWorkPerPartHP so cost matches the effort the engine actually charges.
+//              Regrowth ETA models the phase-3 overlap (children start at parent 50%).
 //              Healing time calculation uses actual healing rates: severity / (baseHealingRate * bodySize) * tickInterval.
 //              RC4-FIX: HealingItem implements IExposable for save/load persistence in PreCalculatedHealingQueue.
 //              Scalar fields (Severity, Type, EnergyCost, etc.) are saved via Scribe_Values.
@@ -177,6 +179,77 @@ namespace Eternal
         }
 
         /// <summary>
+        /// Total regrowth work (severity-equivalent) for a missing part and all its
+        /// descendants: Σ subtree part HP × RegrowthWorkPerPartHP.
+        /// Descendants are included because RimWorld tracks each with its own
+        /// Hediff_MissingPart and every one must regrow (with effort-based cost).
+        /// Uses EBFCompat for Elite Bionics Framework compatibility (soft dependency).
+        /// </summary>
+        public static float CalculateRegrowthWork(BodyPartRecord part, Pawn pawn)
+        {
+            if (part == null)
+                return SettingsDefaults.RegrowthWorkPerPartHP; // 1 HP fallback
+
+            return SubtreeMaxHealth(part, pawn) * SettingsDefaults.RegrowthWorkPerPartHP;
+        }
+
+        private static float SubtreeMaxHealth(BodyPartRecord part, Pawn pawn)
+        {
+            float totalHP = EBFCompat.GetMaxHealth(part, pawn);
+            if (part.parts != null)
+            {
+                foreach (var child in part.parts)
+                {
+                    totalHP += SubtreeMaxHealth(child, pawn);
+                }
+            }
+            return totalHP;
+        }
+
+        /// <summary>
+        /// Estimated ticks to regrow a missing part and its subtree, modelling the phase-3
+        /// overlap: children start when the parent reaches RegrowthChildStartThreshold, and a
+        /// subtree never finishes before its root (completion is parent-gated in the engine).
+        /// The Brain's stricter start rule (waits for fully regrown prerequisites) is
+        /// approximated by the generic child model.
+        /// </summary>
+        public static float CalculateRegrowthTimeTicks(BodyPartRecord part, Pawn pawn)
+        {
+            if (part == null)
+                return 0f;
+
+            var s = Eternal_Mod.GetSettings();
+            float bodySize = pawn?.BodySize ?? 1.0f;
+            float healPerPass = Math.Max(s.baseHealingRate * bodySize, 0.0001f);
+
+            return RegrowthSubtreeTicks(part, pawn, healPerPass, s.rareTickRate);
+        }
+
+        private static float RegrowthSubtreeTicks(BodyPartRecord part, Pawn pawn, float healPerPass, int rareTickRate)
+        {
+            float ownWork = EBFCompat.GetMaxHealth(part, pawn) * SettingsDefaults.RegrowthWorkPerPartHP;
+            float ownTicks = ownWork / healPerPass * rareTickRate;
+
+            float deepestChildTicks = 0f;
+            if (part.parts != null)
+            {
+                foreach (var child in part.parts)
+                {
+                    deepestChildTicks = Math.Max(deepestChildTicks,
+                        RegrowthSubtreeTicks(child, pawn, healPerPass, rareTickRate));
+                }
+            }
+
+            if (deepestChildTicks <= 0f)
+                return ownTicks;
+
+            // Children start at the parent's phase-3 mark; the subtree cannot finish
+            // before the parent itself (completion gate)
+            return Math.Max(ownTicks,
+                ownTicks * SettingsDefaults.RegrowthChildStartThreshold + deepestChildTicks);
+        }
+
+        /// <summary>
         /// Calculates energy cost for a healing item.
         /// Uses configurable severity-to-nutrition ratio (default 250:1).
         /// No type-specific multipliers - all healing costs the same per severity.
@@ -265,7 +338,10 @@ namespace Eternal
 
         /// <summary>
         /// Creates a healing item for a missing body part.
-        /// Regrowth cost scales by body part HP (larger parts cost more nutrition).
+        /// Severity is the total regrowth WORK for the whole missing subtree
+        /// (Σ subtree part HP × RegrowthWorkPerPartHP) so EnergyCost matches the
+        /// effort-based nutrition the engine actually charges while regrowing
+        /// the part and all its descendants.
         /// </summary>
         public static HealingItem CreateMissingPartHealingItem(Hediff_MissingPart missingPart, Pawn pawn)
         {
@@ -273,23 +349,22 @@ namespace Eternal
 
             try
             {
-                // Regrowth severity equals partMaxHP so cost scales with body part size
-                // Uses EBFCompat for Elite Bionics Framework compatibility (soft dependency)
-                float partMaxHP = missingPart.Part != null
-                    ? EBFCompat.GetMaxHealth(missingPart.Part, pawn)
-                    : 1.0f;
+                float regrowthWork = CalculateRegrowthWork(missingPart.Part, pawn);
 
                 var healingItem = new HealingItem
                 {
                     Hediff = missingPart,
                     Pawn = pawn,
-                    Severity = partMaxHP, // Larger parts = higher severity = higher cost
+                    Severity = regrowthWork, // Larger subtrees = more work = higher cost
                     Type = HealingType.Regrowth,
                     IsCritical = missingPart.Part.IsCritical(),
                     IsHarmful = true
                 };
 
-                healingItem.EstimatedHealingTime = CalculateHealingTime(healingItem);
+                // ETA uses the overlap-aware recursion, not the generic severity/rate formula:
+                // children start at the parent's phase-3 mark, so subtree time is far less
+                // than the serial sum the generic formula would produce.
+                healingItem.EstimatedHealingTime = CalculateRegrowthTimeTicks(missingPart.Part, pawn);
                 healingItem.EnergyCost = CalculateEnergyCost(healingItem);
                 healingItem.HealingPriority = CalculatePriority(healingItem);
 

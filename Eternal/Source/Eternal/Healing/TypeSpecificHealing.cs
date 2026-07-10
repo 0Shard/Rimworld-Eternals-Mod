@@ -1,13 +1,17 @@
 // Relative Path: Eternal/Source/Eternal/Healing/TypeSpecificHealing.cs
 // Creation Date: 09-11-2025
-// Last Edit: 13-01-2026
+// Last Edit: 10-07-2026
 // Author: 0Shard
 // Description: Extensible type-specific healing dispatch using dictionary pattern.
 //              All injury types heal at uniform linear rate.
+//              BUGFIX: Removal treats def.minSeverity as the fully-healed floor — RimWorld's
+//              Severity setter clamps to it (Verse/Hediff.cs:357), so hediffs like mechanites
+//              (minSeverity 0.001) could never reach the old "Severity <= 0" removal check.
 
 using System;
 using System.Collections.Generic;
 using RimWorld;
+using UnityEngine;
 using Verse;
 using Eternal.Utils;
 
@@ -183,6 +187,8 @@ namespace Eternal.Healing
 
         /// <summary>
         /// Applies standard healing to a hediff.
+        /// A def with minSeverity > 0 can never reach zero (the Severity setter clamps to it),
+        /// so reaching that floor counts as fully healed.
         /// </summary>
         public static void ApplyStandardHealing(Hediff hediff, float amount)
         {
@@ -191,8 +197,9 @@ namespace Eternal.Healing
 
             hediff.Severity -= amount;
 
-            // Remove if fully healed
-            if (hediff.Severity <= 0f && hediff.pawn != null)
+            // Remove if fully healed (def.minSeverity is the lowest reachable value)
+            float removalFloor = Mathf.Max(0f, hediff.def.minSeverity);
+            if (hediff.Severity <= removalFloor + 0.0001f && hediff.pawn != null)
             {
                 hediff.pawn.health.RemoveHediff(hediff);
                 EternalLogger.Debug($"Removed {hediff.def.LabelCap} from {hediff.pawn.Name?.ToStringShort ?? "Unknown"}");

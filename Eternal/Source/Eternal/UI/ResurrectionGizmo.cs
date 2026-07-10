@@ -1,6 +1,6 @@
 // Relative Path: Eternal/Source/Eternal/UI/ResurrectionGizmo.cs
 // Creation Date: 29-10-2025
-// Last Edit: 24-02-2026
+// Last Edit: 26-06-2026
 // Author: 0Shard
 // Description: Enhanced ResurrectionGizmo for corpse-based Eternal resurrection system with cost calculation and progress tracking.
 //              Fixed: Now properly assigns base Command class fields (icon, disabled, hotKey, Order) for RimWorld UI rendering.
@@ -9,6 +9,10 @@
 //              Fixed: ResurrectImmediately now delegates to EternalCorpseHealingProcessor.StartCorpseHealing instead of calling
 //              ResurrectionUtility.TryResurrect directly — the direct call crashed with WorkTab's SetPriority transpiler
 //              (IndexOutOfRangeException in DefMap) and also failed to preserve Eternal_Essence via the HediffSet swap.
+//              Fixed: StartResurrection now delegates to EternalCorpseHealingProcessor.StartCorpseHealing,
+//              ensuring pre-calculated death-time queue, regrowth init, and Metabolic Recovery hediff are applied on the primary path.
+//              Cleanup: removed the now-orphaned private ResurrectImmediately() — StartResurrection absorbed its delegation logic
+//              (StartCorpseHealing already calls its own ResurrectImmediately(corpseData) when the queue is empty).
 
 using System;
 using System.Collections.Generic;
@@ -367,7 +371,10 @@ namespace Eternal.UI
         }
 
         /// <summary>
-        /// Starts the resurrection process by initiating healing on the corpse.
+        /// Starts the resurrection process by delegating to EternalCorpseHealingProcessor.StartCorpseHealing.
+        /// Re-fetches fresh corpse data, null-guards the processor, then delegates all healing-setup
+        /// responsibility (pre-calculated queue, regrowth init, Metabolic Recovery hediff, HediffSet swap,
+        /// WorkTab compat, debt transfer) to the processor.
         /// </summary>
         private void StartResurrection()
         {
@@ -379,26 +386,25 @@ namespace Eternal.UI
                     return;
                 }
 
-                // Calculate healing queue
-                var healingQueue = resurrectionCalculator.CalculateHealingQueue(originalPawn);
-                if (healingQueue.Count == 0)
+                var healingProcessor = EternalServiceContainer.Instance?.CorpseHealingProcessor;
+                if (healingProcessor == null)
                 {
-                    // Nothing to heal - resurrect immediately
-                    ResurrectImmediately();
+                    Log.Error("[Eternal] StartResurrection: CorpseHealingProcessor not available");
                     return;
                 }
 
-                // Initialize healing process
-                corpseData.IsHealingActive = true;
-                corpseData.HealingQueue = healingQueue;
-                corpseData.HealingStartTick = Find.TickManager.TicksGame;
-                corpseData.TotalHealingCost = totalHealingCost;
-                corpseData.IsRegisteredForResurrection = true;
+                // Re-fetch fresh data — may have changed since gizmo was constructed
+                var freshCorpseData = EternalServiceContainer.Instance.CorpseManager?.GetCorpseData(originalPawn);
+                if (freshCorpseData == null)
+                {
+                    Log.Error($"[Eternal] StartResurrection: No corpse data for {originalPawn?.Name?.ToStringShort ?? "null"}");
+                    return;
+                }
 
-                // Add initial debt
-                // Debt will accumulate as healing progresses
-
-                Log.Message($"[Eternal] Started resurrection process for {originalPawn.Name} - {healingQueue.Count} healing items, {totalHealingCost:F1} total cost");
+                // Delegate to the processor — it uses the pre-calculated death-time queue, starts regrowth,
+                // applies the Metabolic Recovery debt hediff, and calls its own ResurrectImmediately when
+                // the queue is empty (no healing needed).
+                healingProcessor.StartCorpseHealing(freshCorpseData);
 
                 // Show notification
                 Messages.Message(
@@ -416,49 +422,6 @@ namespace Eternal.UI
                 Messages.Message(
                     new Message("Failed to start resurrection process. See log for details.",
                                MessageTypeDefOf.NegativeEvent));
-            }
-        }
-
-        /// <summary>
-        /// Resurrects a pawn immediately when no healing is needed.
-        /// Delegates to EternalCorpseHealingProcessor.StartCorpseHealing which correctly handles
-        /// the HediffSet swap pattern, WorkTab compatibility, and debt tracking.
-        /// Never calls ResurrectionUtility.TryResurrect directly — that path crashes with WorkTab.
-        /// </summary>
-        private void ResurrectImmediately()
-        {
-            try
-            {
-                if (corpse == null || originalPawn == null)
-                {
-                    Log.Error("[Eternal] Cannot resurrect immediately - corpse or pawn is null");
-                    return;
-                }
-
-                var healingProcessor = EternalServiceContainer.Instance?.CorpseHealingProcessor;
-                if (healingProcessor == null)
-                {
-                    Log.Error("[Eternal] ResurrectImmediately: CorpseHealingProcessor not available");
-                    return;
-                }
-
-                // Re-fetch corpse data (may have changed since gizmo was constructed)
-                var freshCorpseData = EternalServiceContainer.Instance.CorpseManager?.GetCorpseData(originalPawn);
-                if (freshCorpseData == null)
-                {
-                    Log.Error($"[Eternal] ResurrectImmediately: No corpse data for {originalPawn.Name}");
-                    return;
-                }
-
-                // Delegate to the processor's StartCorpseHealing — it handles the hediff swap,
-                // WorkTab compatibility, caravan detection, debt transfer, and assignment snapshot restore.
-                // When HealingQueue is empty, StartCorpseHealing calls its own ResurrectImmediately(corpseData).
-                healingProcessor.StartCorpseHealing(freshCorpseData);
-            }
-            catch (Exception ex)
-            {
-                EternalLogger.HandleException(EternalExceptionCategory.Resurrection,
-                    "ResurrectImmediately", originalPawn, ex);
             }
         }
     }

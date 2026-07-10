@@ -60,7 +60,7 @@ namespace Eternal.Healing
             }
 
             // Fall back to global baseHealingRate
-            return _settings?.BaseHealingRate ?? 1.8f;
+            return _settings?.BaseHealingRate ?? SettingsDefaults.BaseHealingRate;
         }
 
         /// <inheritdoc/>

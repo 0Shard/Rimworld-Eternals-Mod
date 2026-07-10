@@ -1,8 +1,9 @@
 // Relative Path: Eternal/Source/Eternal/Hediffs/Eternal_Hediff.cs
 // Creation Date: 28-10-2025
-// Last Edit: 26-03-2026
+// Last Edit: 10-07-2026
 // Author: 0Shard
 // Description: Core hediff class for Eternal mod, manages Eternal Essence hediff with enhanced validation, error handling, and healing system integration.
+//              10-07: TipStringExtra lists pending healing-activation thresholds so players can see why a default-healed hediff has not started healing yet.
 //              Added GetGizmos() override to show resurrection gizmo on corpses using RimWorld's native showGizmosOnCorpse mechanism.
 //              Added Notify_PawnDied() override as PRIMARY corpse registration path (matches Immortals mod pattern for reliability).
 //              Added caravan death handling - delegates to EternalCaravanDeathHandler when pawn dies in caravan.
@@ -119,8 +120,49 @@ namespace Eternal
                     ? $"\nConsciousness: {multiplier:F1}x"
                     : "\nConsciousness: Disabled";
 
-                return (baseText ?? string.Empty) + buffLine;
+                return (baseText ?? string.Empty) + buffLine + BuildThresholdTip();
             }
+        }
+
+        /// <summary>
+        /// Lists the pawn's hediffs whose Eternal healing is waiting on a severity activation
+        /// threshold. Only the default heal path is threshold-gated — hediffs with an explicit
+        /// user setting either heal immediately (canHeal) or not at all, so they are skipped.
+        /// </summary>
+        private string BuildThresholdTip()
+        {
+            var thresholdTracker = EternalServiceContainer.Instance?.ThresholdTracker;
+            var hediffSet = pawn?.health?.hediffSet;
+            if (thresholdTracker == null || hediffSet == null)
+                return string.Empty;
+
+            var settingsStore = Eternal_Mod.GetSettings()?.hediffManager?.Store;
+            System.Text.StringBuilder gatedLines = null;
+
+            foreach (var hediff in hediffSet.hediffs)
+            {
+                if (hediff == this)
+                    continue;
+
+                // Explicit user settings bypass the threshold — nothing to report.
+                // Store.Get (NOT GetOrCreate): a tooltip must never mutate the store.
+                if (settingsStore?.Get(hediff.def.defName) != null)
+                    continue;
+
+                // The default (no-setting) path only ever heals lethal bad hediffs — a
+                // threshold line for anything else would promise healing that never comes
+                if (!(hediff.def.lethalSeverity > 0f && hediff.def.isBad))
+                    continue;
+
+                if (!thresholdTracker.TryGetThreshold(pawn, hediff, out float threshold, out bool reached) || reached)
+                    continue;
+
+                if (gatedLines == null)
+                    gatedLines = new System.Text.StringBuilder("\n\nHealing thresholds:");
+                gatedLines.Append($"\n  {hediff.LabelCap}: activates at severity {threshold:F2} (current {hediff.Severity:F2})");
+            }
+
+            return gatedLines == null ? string.Empty : gatedLines.ToString();
         }
 
         /// <summary>

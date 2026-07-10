@@ -1,6 +1,6 @@
 <!-- Relative Path: Eternal/Source/Eternal.Tests/Eternal.Tests.csproj -->
 <!-- Creation Date: 24-02-2026 -->
-<!-- Last Edit: 26-03-2026 -->
+<!-- Last Edit: 26-06-2026 -->
 <!-- Author: 0Shard -->
 <!-- Description: xUnit 2.9 + NSubstitute test project targeting net472. -->
 <!--              References the production Eternal.csproj for testing all pure-logic surfaces. -->
@@ -26,6 +26,9 @@
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.13.0" />
+    <!-- xUnit console runner: lets the net472 suite run under Mono on Linux/macOS
+         (the .NET SDK ships no testhost.net472.exe, so `dotnet test` can't host it). Dev-only. -->
+    <PackageReference Include="xunit.runner.console" Version="2.9.3" PrivateAssets="all" />
     <!-- NSubstitute: interface mocking for ISettingsProvider, IPawnData -->
     <PackageReference Include="NSubstitute" Version="5.3.0" />
     <!-- RimWorld reference assemblies: compile-time type safety, no game runtime needed -->
@@ -35,6 +38,8 @@
     <!-- System.Reflection.Metadata: PE metadata inspection for CauseDeathNow IL verification
          (avoids Assembly-CSharp dependency that blocks CLR reflection on Verse.Hediff subclasses) -->
     <PackageReference Include="System.Reflection.Metadata" Version="8.0.1" />
+    <!-- net472 reference assemblies via NuGet so the build works on Linux/macOS (no system Developer Pack). -->
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
   </ItemGroup>
 
   <!-- Reference production project -->

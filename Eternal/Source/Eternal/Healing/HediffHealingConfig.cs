@@ -1,12 +1,14 @@
 // Relative Path: Eternal/Source/Eternal/Healing/HediffHealingConfig.cs
 // Creation Date: 28-10-2025
-// Last Edit: 03-01-2026
+// Last Edit: 10-07-2026
 // Author: 0Shard
 // Description: Creates default healing configurations for hediffs.
 //              Determines if hediffs should be healed by default and with what parameters.
 //              Includes threshold checking for debuff hediffs on living Eternal pawns.
 //              Simplified healing check: only canHeal matters (enabled is always true for visibility).
 //              BUGFIX: Removed HasCustomSettings() gate that was preventing user settings from being respected.
+//              BUGFIX: Explicit user setting now bypasses the activation threshold (enabled = heals, always).
+//              Default heal flags unified through EternalHediffSetting.ConfigureDefaultFlags (single source of truth).
 
 using Eternal.DI;
 using Eternal.Extensions;
@@ -29,10 +31,14 @@ namespace Eternal.Healing
             if (hediff == null)
                 return CreateNeutralSetting();
 
-            if (hediff.def.isBad || hediff.IsDefaultHarmful())
-                return CreateHarmfulSetting(hediff);
+            var setting = (hediff.def.isBad || hediff.IsDefaultHarmful())
+                ? CreateHarmfulSetting(hediff)
+                : CreateNeutralSetting();
 
-            return CreateNeutralSetting();
+            // Heal flags come from ONE source of truth so transient defaults
+            // (healing pipeline) and menu defaults (EternalHediffManager) agree.
+            setting.ConfigureDefaultFlags(hediff.def);
+            return setting;
         }
 
         /// <summary>
@@ -81,26 +87,6 @@ namespace Eternal.Healing
             if (def == EternalDefOf.Eternal_Essence)
                 return false;
 
-            // For living pawns with debuff hediffs, check if healing threshold has been reached
-            // This adds gameplay variety: some infections heal early, others must progress further
-            // EXCEPTION: Bloodloss, injuries, scars, and regrowth ALWAYS bypass threshold
-            if (!pawnIsDead && hediff.IsDebuffWithStages())
-            {
-                // Skip threshold for hardcoded categories (bloodloss, injuries, scars, regrowth)
-                if (!hediff.ShouldBypassThreshold())
-                {
-                    // Check per-hediff "noThreshold" (Instant Healing) setting
-                    bool userNoThreshold = setting?.noThreshold ?? false;
-
-                    if (!userNoThreshold)
-                    {
-                        var tracker = EternalServiceContainer.Instance?.ThresholdTracker;
-                        if (tracker != null && !tracker.HasReachedThreshold(hediff.pawn, hediff))
-                            return false; // Threshold not yet reached - don't heal yet
-                    }
-                }
-            }
-
             // Injuries: heal non-permanent ones by default
             if (def.injuryProps != null && def != HediffDefOf.MissingBodyPart)
             {
@@ -109,11 +95,20 @@ namespace Eternal.Healing
                 return true;
             }
 
-            // BUGFIX: Always honor user's explicit canHeal setting
-            // Removed HasCustomSettings() gate that was incorrectly blocking user settings
-            // when defaultCanHeal wasn't properly initialized
+            // Explicit user control is authoritative and bypasses the activation
+            // threshold entirely: a hediff the user enabled in the menu MUST heal.
             if (setting != null)
                 return setting.canHeal;
+
+            // Default path (no setting): staged debuffs wait for their random activation
+            // threshold. Gameplay variety: some infections heal early, others progress further.
+            // Bloodloss, injuries, scars, regrowth, and stationary hediffs always bypass.
+            if (!pawnIsDead && hediff.IsDebuffWithStages() && !hediff.ShouldBypassThreshold())
+            {
+                var tracker = EternalServiceContainer.Instance?.ThresholdTracker;
+                if (tracker != null && !tracker.HasReachedThreshold(hediff.pawn, hediff))
+                    return false; // Threshold not yet reached - don't heal yet
+            }
 
             // Dangerous diseases/conditions: default to healing lethal bad hediffs on living pawns
             if (!pawnIsDead && def.lethalSeverity > 0f && def.isBad)
@@ -126,18 +121,18 @@ namespace Eternal.Healing
         /// <summary>
         /// Creates a setting configured for harmful hediffs.
         /// All hediffs default to using global baseHealingRate.
+        /// Heal flags (enabled/canHeal/requireCureToResurrect) are NOT set here —
+        /// CreateDefaultSetting applies ConfigureDefaultFlags as the single source of truth.
         /// </summary>
         public static EternalHediffSetting CreateHarmfulSetting(Hediff hediff)
         {
             return new EternalHediffSetting
             {
-                enabled = true,
                 allowAutoHeal = true,
                 requiresResources = true,
                 resourceCostMultiplier = 1.0f,
                 nutritionCost = hediff.GetHealingNutritionCost(),
                 medicineRequirement = GetMedicineRequirement(hediff),
-                canHeal = true,
                 healingInterval = 250f,
                 healingRate = EternalHediffSetting.USE_GLOBAL_RATE  // Use global rate by default
             };
@@ -146,18 +141,18 @@ namespace Eternal.Healing
         /// <summary>
         /// Creates a neutral setting for non-harmful hediffs.
         /// All hediffs default to using global baseHealingRate.
+        /// Heal flags (enabled/canHeal/requireCureToResurrect) are NOT set here —
+        /// CreateDefaultSetting applies ConfigureDefaultFlags as the single source of truth.
         /// </summary>
         public static EternalHediffSetting CreateNeutralSetting()
         {
             return new EternalHediffSetting
             {
-                enabled = false,
                 allowAutoHeal = false,
                 requiresResources = false,
                 resourceCostMultiplier = 1.0f,
                 nutritionCost = 0f,
                 medicineRequirement = MedicineRequirement.None,
-                canHeal = true,
                 healingInterval = 250f,
                 healingRate = EternalHediffSetting.USE_GLOBAL_RATE  // Use global rate by default
             };

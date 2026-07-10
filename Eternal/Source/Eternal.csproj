@@ -52,8 +52,12 @@
   <ItemGroup>
     <PackageReference Include="Krafs.Rimworld.Ref" Version="1.6.4494-beta" />
     <PackageReference Include="Lib.Harmony" Version="2.4.2" />
+    <!-- net472 reference assemblies as a NuGet package so the build works on Linux/macOS
+         (Arch has no .NET Framework Developer Pack). Build-time only via PrivateAssets;
+         no-op on Windows where the system targeting pack is used. -->
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
   </ItemGroup>
-  
+
   <!-- Exclude test project from production compilation -->
   <ItemGroup>
     <Compile Remove="Eternal.Tests\**" />

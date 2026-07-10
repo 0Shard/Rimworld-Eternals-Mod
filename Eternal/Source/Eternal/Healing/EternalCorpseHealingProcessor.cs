@@ -1,7 +1,7 @@
 /*
  * Relative Path: Eternal/Source/Eternal/Healing/EternalCorpseHealingProcessor.cs
  * Creation Date: 09-11-2025
- * Last Edit: 26-03-2026
+ * Last Edit: 11-07-2026
  * Author: 0Shard
  * Description: Processes healing and regrowth on Eternal corpses, accumulating debt and managing resurrection completion.
  *              Integrates with EternalRegrowthState for proper 4-phase body part regrowth.
@@ -16,7 +16,10 @@
  *              for healing speed parity with living pawns.
  *              Enhanced: IsHealingComplete now verifies actual pawn state (missing parts, regrowth status).
  *              Fixed: Added Part sync after resurrection (Immortals pattern) - hediff.Part = hediff.forPart.
- *              Fixed: Fallback regrowth now heals actual hediff.Severity, not HealingItem.Severity.
+ *              11-07: Parallel healing model (parity with living pawns): per-item full rate, no shared-pool
+ *                     division; debt cap clamps charging (AddDebtCapped) instead of stalling healing;
+ *                     regrowth debt is effort-based like the living path; fallback only starts regrowth
+ *                     (primary path heals it next pass with HP-scaled progression).
  *              03-02: All catch sites converted to EternalLogger.HandleException with correct categories.
  *              03-04: CompleteResurrection and ResurrectImmediately use try/finally + swapActive flag.
  *                     AttemptHediffRestore helper: retry once then re-kill — no hybrid-state pawn possible.
@@ -342,18 +345,9 @@ namespace Eternal.Healing
             float totalHeal = CalculateHealingPerTick(corpseData.OriginalPawn);
 
             // Get resurrection cost cap for this pawn (2.0 × nutrition capacity)
+            // Healing never stalls on the cap: AddDebtCapped stops CHARGING there instead,
+            // so heavily mutilated corpses (total cost > cap) can still finish resurrecting.
             float resurrectionCostCap = resurrectionCalculator.GetResurrectionCostCap(corpseData.OriginalPawn);
-
-            // Check if debt has reached resurrection cap - stop healing if maxed out
-            float currentDebt = DebtSystem?.GetDebt(corpseData.OriginalPawn) ?? 0f;
-            if (currentDebt >= resurrectionCostCap)
-            {
-                if (Eternal_Mod.settings?.debugMode == true)
-                {
-                    Log.Message($"[Eternal] Corpse injury healing paused for {corpseData.OriginalPawn?.Name}: debt at resurrection cap ({currentDebt:F1}/{resurrectionCostCap:F1})");
-                }
-                return;
-            }
 
             // PERF-01: Use pre-allocated instance buffers — zero allocation on the hot path.
             _nonRegrowthBuffer.Clear();
@@ -374,16 +368,9 @@ namespace Eternal.Healing
             if (_nonRegrowthBuffer.Count == 0)
                 return;
 
-            // Count regrowth items for heal distribution (they get a share even though not processed here)
-            int regrowthCount = 0;
-            foreach (var item in corpseData.HealingQueue)
-            {
-                if (item != null && item.Type == HealingType.Regrowth)
-                    regrowthCount++;
-            }
-
-            // Distribute healing across all items (injuries get processed, regrowth share is skipped)
-            float perItemHeal = totalHeal / (_nonRegrowthBuffer.Count + (regrowthCount > 0 ? 1 : 0));
+            // Parallel model (parity with living pawns): every queue item heals at the full
+            // per-pass rate simultaneously — no shared-pool division across the queue.
+            float perItemHeal = totalHeal;
 
             foreach (var item in _nonRegrowthBuffer)
             {
@@ -441,18 +428,9 @@ namespace Eternal.Healing
             float totalHeal = CalculateHealingPerTick(corpseData.OriginalPawn);
 
             // Get resurrection cost cap for this pawn (2.0 × nutrition capacity)
+            // Healing never stalls on the cap: AddDebtCapped stops CHARGING there instead,
+            // so heavily mutilated corpses (total cost > cap) can still finish resurrecting.
             float resurrectionCostCap = resurrectionCalculator.GetResurrectionCostCap(corpseData.OriginalPawn);
-
-            // Check if debt has reached resurrection cap - stop healing if maxed out
-            float currentDebt = DebtSystem?.GetDebt(corpseData.OriginalPawn) ?? 0f;
-            if (currentDebt >= resurrectionCostCap)
-            {
-                if (Eternal_Mod.settings?.debugMode == true)
-                {
-                    Log.Message($"[Eternal] Corpse regrowth paused for {corpseData.OriginalPawn?.Name}: debt at resurrection cap ({currentDebt:F1}/{resurrectionCostCap:F1})");
-                }
-                return;
-            }
 
             // PERF-01: Use pre-allocated instance buffers — zero allocation on the hot path.
             // Safe to share _completedBuffer with ProcessCorpseInjuryTick because these methods
@@ -472,21 +450,14 @@ namespace Eternal.Healing
             if (_regrowthBuffer.Count == 0)
                 return;
 
-            // Count non-regrowth items for heal distribution
-            int nonRegrowthCount = 0;
-            foreach (var item in corpseData.HealingQueue)
-            {
-                if (item != null && item.Type != HealingType.Regrowth && (item.Hediff?.Severity ?? item.Severity) > 0.01f)
-                    nonRegrowthCount++;
-            }
-
             var regrowthManager = Eternal_Component.Current?.RegrowthManager;
             var regrowthState = regrowthManager?.GetRegrowthState(corpseData.OriginalPawn);
 
             if (regrowthState != null)
             {
-                // Calculate healing amount for regrowth (shares pool with injuries)
-                float regrowthHeal = totalHeal / (nonRegrowthCount + 1);
+                // Parallel model (parity with living pawns): regrowth receives the full per-pass
+                // healing effort — no shared-pool division against the injury queue.
+                float regrowthHeal = totalHeal;
 
                 // Apply healing to the regrowth system (handles 4-phase progression internally)
                 // HVIS-02 VERIFIED: ApplyHealing delegates to EternalRegrowthManager.ProgressRegrowth()
@@ -494,13 +465,11 @@ namespace Eternal.Healing
                 // Path: regrowthState.ApplyHealing → ProgressRegrowth → EternalRegrowing_Hediff.Severity
                 regrowthState.ApplyHealing(regrowthHeal);
 
-                // Accumulate debt for regrowth healing, capped at resurrection cost limit
-                float totalRegrowthCost = 0f;
-                foreach (var item in _regrowthBuffer)
-                {
-                    totalRegrowthCost += item.EnergyCost;
-                }
-                float regrowthDebtPerTick = regrowthHeal * totalRegrowthCost;
+                // Effort-based debt, identical to the living-pawn regrowth path:
+                // each regrowing part consumes the full healAmount of effort per pass.
+                int regrowingPartCount = regrowthManager.GetRegrowingHediffs(corpseData.OriginalPawn).Count();
+                float severityToNutritionRatio = Eternal_Mod.GetSettings().severityToNutritionRatio;
+                float regrowthDebtPerTick = regrowingPartCount * regrowthHeal * severityToNutritionRatio;
                 AddDebtCapped(corpseData.OriginalPawn, regrowthDebtPerTick, resurrectionCostCap);
 
                 // Check if regrowth is complete (all body parts restored)
@@ -523,7 +492,9 @@ namespace Eternal.Healing
             {
                 // Fallback: regrowthState is null, meaning no regrowing hediffs exist.
                 // This shouldn't happen if StartCorpseHealing() ran correctly.
-                // Try to recover by starting regrowth (adding hediffs) and healing them directly.
+                // Recover by starting regrowth; the primary path picks the new hediffs up on the
+                // next rare tick with the correct HP-scaled progression (healing them directly
+                // here would bypass EternalRegrowthManager's rate and completion gating).
 
                 if (Eternal_Mod.settings?.debugMode == true)
                 {
@@ -531,54 +502,12 @@ namespace Eternal.Healing
                                $"No regrowing hediffs found but {_regrowthBuffer.Count} regrowth items in queue. Attempting recovery.");
                 }
 
-                // Try to start regrowth (adds hediffs if missing)
                 regrowthManager?.StartRegrowth(corpseData.OriginalPawn);
 
-                // Now try to get the regrowing hediffs directly and heal them
-                var pawnRegrowingHediffs = corpseData.OriginalPawn?.health?.hediffSet?.hediffs
-                    .OfType<EternalRegrowing_Hediff>()
-                    .ToList();
+                bool recoveryStartedRegrowth = regrowthManager != null
+                    && regrowthManager.IsPawnInRegrowth(corpseData.OriginalPawn);
 
-                if (pawnRegrowingHediffs != null && pawnRegrowingHediffs.Count > 0)
-                {
-                    // Heal the actual hediffs on the pawn (not HealingItem.Severity)
-                    float perHediffHeal = totalHeal / pawnRegrowingHediffs.Count;
-                    foreach (var hediff in pawnRegrowingHediffs)
-                    {
-                        if (hediff == null || hediff.Severity >= 1.0f)
-                            continue;
-
-                        float beforeSeverity = hediff.Severity;
-                        hediff.Severity += perHediffHeal;
-
-                        // Accumulate debt for regrowth healing
-                        float totalRegrowthCost = 0f;
-                        foreach (var item in _regrowthBuffer)
-                        {
-                            totalRegrowthCost += item.EnergyCost;
-                        }
-                        float debtPerHeal = (perHediffHeal / pawnRegrowingHediffs.Count) * totalRegrowthCost;
-                        AddDebtCapped(corpseData.OriginalPawn, debtPerHeal, resurrectionCostCap);
-
-                        if (Eternal_Mod.settings?.debugMode == true)
-                        {
-                            Log.Message($"[Eternal] Fallback healed regrowth hediff: " +
-                                       $"{hediff.forPart?.Label ?? "unknown"} {beforeSeverity:F4} -> {hediff.Severity:F4}");
-                        }
-
-                        // Check for completion
-                        if (hediff.Severity >= 1.0f)
-                        {
-                            // Mark corresponding HealingItems as complete
-                            foreach (var item in _regrowthBuffer)
-                            {
-                                _completedBuffer.Add(item);
-                            }
-                            regrowthManager?.RemoveCompletedRegrowth(corpseData.OriginalPawn);
-                        }
-                    }
-                }
-                else
+                if (!recoveryStartedRegrowth)
                 {
                     // No hediffs could be created - log error but don't crash
                     Log.Error($"[Eternal] Failed to create regrowing hediffs for {corpseData.OriginalPawn?.Name}. " +

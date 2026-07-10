@@ -1,12 +1,14 @@
 /*
  * Relative Path: Eternal/Source/Eternal/Corpse/EternalCorpsePreservation.cs
  * Creation Date: 09-11-2025
- * Last Edit: 20-02-2026
+ * Last Edit: 26-06-2026
  * Author: 0Shard
  * Description: Manages preservation of Eternal corpses, preventing decay, deterioration, and destruction.
  *              Optimized with cached component references to avoid GetComp() lookups per tick.
  *              Fixed: MaintainPreservation() now processes removals in finally block for exception safety.
  *              03-02: All catch sites converted to EternalLogger.HandleException(CorpseTracking, ...).
+ *              PERF-01: Replaced ListPool<Verse.Corpse> in MaintainPreservation() with pre-allocated
+ *              instance buffer (_toRemoveBuffer), matching the EternalCorpseHealingProcessor pattern.
  */
 
 using System;
@@ -19,7 +21,6 @@ using MapType = Verse.Map; // Alias to avoid namespace conflict
 using Eternal.Exceptions;
 using Eternal.Extensions;
 using Eternal.Utils;
-using Eternal.Utilities;
 
 namespace Eternal.Corpse
 {
@@ -35,6 +36,10 @@ namespace Eternal.Corpse
 
         // PERF: Cached component references to avoid GetComp() lookup per tick
         private readonly Dictionary<Verse.Corpse, CompRottable> _rottableCache = new Dictionary<Verse.Corpse, CompRottable>();
+
+        // PERF-01: Pre-allocated removal buffer — reused every MaintainPreservation() call, zero allocation.
+        // RimWorld game logic is single-threaded — no lock required (mirrors EternalCorpseHealingProcessor).
+        private readonly List<Verse.Corpse> _toRemoveBuffer = new List<Verse.Corpse>(4);
 
         /// <summary>
         /// Applies preservation effects to an Eternal corpse.
@@ -157,8 +162,9 @@ namespace Eternal.Corpse
 
             lastPreservationCheck = currentTick;
 
-            // PERF: Use pooled list for removal tracking
-            var toRemove = ListPool<Verse.Corpse>.Get();
+            // PERF-01: Use pre-allocated instance buffer for removal tracking (zero allocation)
+            var toRemove = _toRemoveBuffer;
+            toRemove.Clear();
 
             try
             {
@@ -191,8 +197,7 @@ namespace Eternal.Corpse
                     preservedCorpses.Remove(corpse);
                     _rottableCache.Remove(corpse);
                 }
-
-                ListPool<Verse.Corpse>.Return(toRemove);
+                // Buffer is reused — do not clear here; it will be cleared at the start of the next call
             }
         }
 

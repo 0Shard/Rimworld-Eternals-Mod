@@ -11,5 +11,6 @@
             </li>
         </degreeDatas>
         <commonality>0.0</commonality> <!-- Never spawns naturally -->
+        <allowOnHostileSpawn>false</allowOnHostileSpawn> <!-- Vanilla filter: never on hostile-faction pawn generation -->
     </TraitDef>
 </Defs>

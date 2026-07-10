@@ -1,6 +1,6 @@
 // Relative Path: Eternal/Source/Eternal.Tests/TestData.cs
 // Creation Date: 24-02-2026
-// Last Edit: 24-02-2026
+// Last Edit: 11-07-2026
 // Author: 0Shard
 // Description: Single source of truth for all expected constants used in tests.
 //              Values must match their production counterparts in SettingsDefaults,
@@ -28,7 +28,7 @@ namespace Eternal.Tests
         // -----------------------------------------------------------------
         // Settings defaults — must match SettingsDefaults
         // -----------------------------------------------------------------
-        public const float DefaultBaseHealingRate = 1.8f;
+        public const float DefaultBaseHealingRate = 1.2f;
         public const float DefaultMaxDebtMultiplier = 5.0f;
         public const float DefaultNutritionCostMultiplier = 1.0f;
         public const float DefaultSeverityToNutritionRatio = 0.004f; // 250:1

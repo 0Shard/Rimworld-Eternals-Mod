@@ -1,8 +1,10 @@
 // Relative Path: Eternal/Source/Eternal/UI/HediffSettings/EternalHediffView.cs
 // Creation Date: 09-11-2025
-// Last Edit: 21-02-2026
+// Last Edit: 10-07-2026
 // Author: 0Shard
 // Description: View layer for hediff settings UI. Pure UI rendering, delegates to Presenter.
+//              PERF: List is virtualized — only rows inside the viewport (plus a small preload
+//              buffer) are drawn each frame; off-screen row Y offsets are pure arithmetic.
 //              SIMPLIFIED: Single compact row per hediff with only 3 options:
 //              - Heal toggle
 //              - Healing rate slider + input
@@ -182,41 +184,51 @@ namespace Eternal.UI.HediffSettings
             DrawHediffListWithInnerScroll(hediffViewport);
         }
 
+        /// <summary>Rows pre-drawn above/below the viewport so fast scrolling never reveals a gap.</summary>
+        private const int VIRTUALIZATION_BUFFER_ROWS = 5;
+
         private void DrawHediffListWithInnerScroll(Rect viewport)
         {
             GUI.color = new Color(0.2f, 0.2f, 0.2f, 1f);
             GUI.DrawTexture(viewport, BaseContent.WhiteTex);
             GUI.color = Color.white;
 
-            var scrollPos = presenter.ScrollPosition;
-            Widgets.BeginScrollView(viewport, ref scrollPos,
-                new Rect(0, 0, viewport.width - 16f, presenter.ScrollViewHeight));
-            presenter.ScrollPosition = scrollPos;
-
-            float curY = 0f;
             // PERF-02: Use cached results — FilterToList already sorts by label, no per-frame rescan
             var filteredHediffs = presenter.GetFilteredHediffsCached();
+
+            // Full-height view rect keeps the scrollbar proportional even though only
+            // the visible slice of rows is actually drawn (virtualization)
+            const float rowStride = ENTRY_HEIGHT + 2f;
+            float totalHeight = filteredHediffs.Count * rowStride;
+
+            var scrollPos = presenter.ScrollPosition;
+            Widgets.BeginScrollView(viewport, ref scrollPos,
+                new Rect(0, 0, viewport.width - 16f, totalHeight));
+            presenter.ScrollPosition = scrollPos;
 
             if (filteredHediffs.Count == 0)
             {
                 Text.Anchor = TextAnchor.MiddleCenter;
                 GUI.color = new Color(0.6f, 0.6f, 0.6f, 1f);
-                Widgets.Label(new Rect(0, curY, viewport.width - 16f, 30f), "No matching hediffs");
+                Widgets.Label(new Rect(0, 0, viewport.width - 16f, 30f), "No matching hediffs");
                 GUI.color = Color.white;
                 Text.Anchor = TextAnchor.UpperLeft;
             }
             else
             {
-                foreach (var kvp in filteredHediffs)
+                // Draw only the rows inside the viewport plus a preload buffer —
+                // off-screen rows cost nothing (their Y offsets are pure arithmetic)
+                var (first, last) = ListVirtualization.GetVisibleRange(
+                    scrollPos.y, viewport.height, rowStride, filteredHediffs.Count, VIRTUALIZATION_BUFFER_ROWS);
+
+                for (int i = first; i <= last; i++)
                 {
-                    // Simplified: fixed height for all entries (no expanded state)
-                    Rect entryRect = new Rect(0, curY, viewport.width - 16f, ENTRY_HEIGHT);
-                    DrawHediffEntry(entryRect, kvp.Key, kvp.Value);
-                    curY += ENTRY_HEIGHT + 2f;
+                    Rect entryRect = new Rect(0, i * rowStride, viewport.width - 16f, ENTRY_HEIGHT);
+                    DrawHediffEntry(entryRect, filteredHediffs[i].Key, filteredHediffs[i].Value);
                 }
             }
 
-            presenter.ScrollViewHeight = curY;
+            presenter.ScrollViewHeight = totalHeight;
             Widgets.EndScrollView();
         }
 
