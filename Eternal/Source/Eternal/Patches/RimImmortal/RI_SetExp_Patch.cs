@@ -1,8 +1,8 @@
-// Relative Path: Eternal/Source/Eternal/Patches/RimImmortal/RI_SetEnergy_Patch.cs
-// Creation Date: 28-12-2025
+// Relative Path: Eternal/Source/Eternal/Patches/RimImmortal/RI_SetExp_Patch.cs
+// Creation Date: 11-07-2026
 // Last Edit: 11-07-2026
 // Author: 0Shard
-// Description: Harmony patch for RimImmortal's SetEnergy method to instantly fill Eternals' cultivation energy.
+// Description: Harmony patch for RimImmortal's SetExp method to instantly fill Eternals' cultivation progress.
 // Only active when RimImmortal mod is loaded. Uses reflection to avoid compile-time dependency.
 
 using System;
@@ -17,19 +17,19 @@ using Eternal.Utils;
 namespace Eternal.Patches.RimImmortal
 {
     /// <summary>
-    /// Patches Core.Pawn_EnergyTracker.SetEnergy so any positive energy gain instantly fills
-    /// an Eternal pawn's cultivation energy to the current level's MaxEnergy.
-    /// SetEnergy adds the delta then caps at CurrentDef.MaxEnergy, so passing MaxEnergy as the
-    /// delta guarantees the cap is reached regardless of the current energy value.
+    /// Patches Core.Pawn_EnergyTracker.SetExp so any positive exp gain instantly fills
+    /// an Eternal pawn's cultivation progress to the current realm's EXP cap.
+    /// SetExp adds the delta then caps at CurrentDef.EXP, so passing a huge delta
+    /// guarantees the cap is reached regardless of the current exp value.
     /// </summary>
     [HarmonyPatch]
-    public static class RI_SetEnergy_Patch
+    public static class RI_SetExp_Patch
     {
         /// <summary>
-        /// Fallback delta when the MaxEnergy reflection chain fails; SetEnergy's own cap
-        /// clamps the result to the level's MaxEnergy either way.
+        /// Delta large enough to exceed any realm's EXP cap; SetExp's own clamp
+        /// (CurrentDef.EXP) enforces the exact per-realm limit.
         /// </summary>
-        private const float FALLBACK_ENERGY_DELTA = 1_000_000f;
+        private const float EXP_FILL_DELTA = 1_000_000f;
 
         /// <summary>
         /// Guard: only apply this patch when RimImmortal is active.
@@ -45,14 +45,14 @@ namespace Eternal.Patches.RimImmortal
                 // Only log at debug level — absence of RimImmortal is the normal case
                 if (Eternal_Mod.settings?.debugMode == true)
                 {
-                    Log.Message("[Eternal] Skipping RimImmortal SetEnergy patch — mod not active");
+                    Log.Message("[Eternal] Skipping RimImmortal SetExp patch — mod not active");
                 }
                 return false;
             }
 
             if (Eternal_Mod.settings?.debugMode == true)
             {
-                Log.Message("[Eternal] RimImmortal detected - enabling instant-max cultivation energy patch");
+                Log.Message("[Eternal] RimImmortal detected - enabling instant-max cultivation progress patch");
             }
 
             return true;
@@ -65,27 +65,27 @@ namespace Eternal.Patches.RimImmortal
         /// </summary>
         public static MethodBase TargetMethod()
         {
-            var method = RimImmortalDetection.SetEnergyMethod;
+            var method = RimImmortalDetection.SetExpMethod;
 
             if (method == null)
             {
-                Log.Warning("[Eternal] Skipping RimImmortal SetEnergy patch — method not found (mod absent or API changed)");
+                Log.Warning("[Eternal] Skipping RimImmortal SetExp patch — method not found (mod absent or API changed)");
             }
 
             return method;
         }
 
         /// <summary>
-        /// Prefix: Replace positive energy gains with the level's MaxEnergy delta for Eternal pawns,
-        /// so a single gain tick fills the energy bar. Negative deltas (consumption, including the
-        /// meridian-damage punishment branch) are left untouched.
+        /// Prefix: Replace positive exp gains with a cap-exceeding delta for Eternal pawns,
+        /// so a single gain tick fills the realm progress bar. Non-positive deltas are
+        /// left untouched (SetExp ignores them anyway).
         /// </summary>
         /// <param name="__instance">The Pawn_EnergyTracker instance</param>
-        /// <param name="num">The energy delta (passed by ref to allow modification)</param>
+        /// <param name="num">The exp delta (passed by ref to allow modification)</param>
         [HarmonyPrefix]
         public static void Prefix(object __instance, ref float num)
         {
-            // Only boost positive energy gains (cultivation), not consumption
+            // Only boost positive exp gains
             if (num <= 0f)
                 return;
 
@@ -104,21 +104,20 @@ namespace Eternal.Patches.RimImmortal
                 // Store original value for debug logging
                 float originalNum = num;
 
-                // Jump straight to the current level's MaxEnergy (SetEnergy caps the sum there)
-                float maxEnergy = RimImmortalDetection.GetMaxEnergy(__instance);
-                num = maxEnergy > 0f ? maxEnergy : FALLBACK_ENERGY_DELTA;
+                // Jump straight to the current realm's EXP cap (SetExp clamps the sum there)
+                num = EXP_FILL_DELTA;
 
                 if (Eternal_Mod.settings?.debugMode == true)
                 {
-                    Log.Message($"[Eternal] RimImmortal: Filled cultivation energy for {pawn.Name} " +
+                    Log.Message($"[Eternal] RimImmortal: Filled cultivation progress for {pawn.Name} " +
                                $"(gain {originalNum:F2} replaced by delta {num:F2})");
                 }
             }
             catch (Exception ex)
             {
-                // Graceful degradation - if patch fails, original energy gain still applies
+                // Graceful degradation - if patch fails, original exp gain still applies
                 EternalLogger.HandleException(EternalExceptionCategory.CompatibilityFailure,
-                    "RI_SetEnergy_Patch.Prefix", null, ex);
+                    "RI_SetExp_Patch.Prefix", null, ex);
             }
         }
     }

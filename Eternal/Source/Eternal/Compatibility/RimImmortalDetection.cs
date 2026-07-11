@@ -3,7 +3,7 @@
 // Last Edit: 11-07-2026
 // Author: 0Shard
 // Description: Detects RimImmortal mod and provides type caching for reflection-based patching.
-// Grants Eternals instant max cultivation energy and 99.99% breakthrough chance when RimImmortal is active.
+// Grants Eternals instant max cultivation progress and 99.99% breakthrough chance when RimImmortal is active.
 
 using System;
 using System.Linq;
@@ -17,7 +17,7 @@ namespace Eternal.Compatibility
 {
     /// <summary>
     /// Detects RimImmortal mod and caches types for conditional Harmony patching.
-    /// Provides instant max cultivation energy and 99.99% breakthrough chance for Eternal pawns.
+    /// Provides instant max cultivation progress and 99.99% breakthrough chance for Eternal pawns.
     /// </summary>
     public static class RimImmortalDetection
     {
@@ -64,11 +64,8 @@ namespace Eternal.Compatibility
 
         // Core.Pawn_EnergyTracker
         private static Type _pawnEnergyTrackerType;
-        private static MethodInfo _setEnergyMethod;
+        private static MethodInfo _setExpMethod;
         private static FieldInfo _energyTrackerPawnField;
-        private static FieldInfo _currentRIField;      // Core.Pawn_EnergyTracker.currentRI (Core.RimImmortal)
-        private static FieldInfo _rimImmortalDefField; // Core.RimImmortal.def (Core.RimImmortalDef)
-        private static FieldInfo _maxEnergyField;      // Core.RimImmortalDef.MaxEnergy (float)
 
         // RIRitualFramework.MessageDialog
         private static Type _messageDialogType;
@@ -77,14 +74,14 @@ namespace Eternal.Compatibility
         private static FieldInfo _messageDialogPawnField;
 
         /// <summary>
-        /// Gets the SetEnergy method from Pawn_EnergyTracker.
+        /// Gets the SetExp method from Pawn_EnergyTracker.
         /// </summary>
-        public static MethodInfo SetEnergyMethod
+        public static MethodInfo SetExpMethod
         {
             get
             {
                 EnsureTypesInitialized();
-                return _setEnergyMethod;
+                return _setExpMethod;
             }
         }
 
@@ -155,30 +152,16 @@ namespace Eternal.Compatibility
 
             try
             {
-                // Core.Pawn_EnergyTracker - handles cultivation energy
+                // Core.Pawn_EnergyTracker - holds cultivation energy and realm progress (exp)
                 _pawnEnergyTrackerType = AccessTools.TypeByName("Core.Pawn_EnergyTracker");
                 if (_pawnEnergyTrackerType != null)
                 {
-                    _setEnergyMethod = AccessTools.Method(_pawnEnergyTrackerType, "SetEnergy", new[] { typeof(float) });
+                    _setExpMethod = AccessTools.Method(_pawnEnergyTrackerType, "SetExp", new[] { typeof(float) });
                     _energyTrackerPawnField = AccessTools.Field(_pawnEnergyTrackerType, "pawn");
-                    _currentRIField = AccessTools.Field(_pawnEnergyTrackerType, "currentRI");
 
-                    if (_currentRIField != null)
+                    if (_setExpMethod == null)
                     {
-                        _rimImmortalDefField = AccessTools.Field(_currentRIField.FieldType, "def");
-                        if (_rimImmortalDefField != null)
-                        {
-                            _maxEnergyField = AccessTools.Field(_rimImmortalDefField.FieldType, "MaxEnergy");
-                        }
-                    }
-
-                    if (_setEnergyMethod == null)
-                    {
-                        Log.Warning("[Eternal] RimImmortal: SetEnergy method not found on Pawn_EnergyTracker");
-                    }
-                    if (_maxEnergyField == null)
-                    {
-                        Log.Warning("[Eternal] RimImmortal: MaxEnergy chain (currentRI.def.MaxEnergy) not resolved on Pawn_EnergyTracker");
+                        Log.Warning("[Eternal] RimImmortal: SetExp method not found on Pawn_EnergyTracker");
                     }
                 }
                 else
@@ -212,7 +195,7 @@ namespace Eternal.Compatibility
                 {
                     Log.Message($"[Eternal] RimImmortal types initialized: " +
                         $"EnergyTracker={_pawnEnergyTrackerType != null}, " +
-                        $"SetEnergy={_setEnergyMethod != null}, " +
+                        $"SetExp={_setExpMethod != null}, " +
                         $"MessageDialog={_messageDialogType != null}, " +
                         $"GetFloatUpgrade={_getFloatUpgradeMethod != null}, " +
                         $"SucessRate={_sucessRateField != null}");
@@ -232,11 +215,8 @@ namespace Eternal.Compatibility
         {
             _typesInitialized = false;
             _pawnEnergyTrackerType = null;
-            _setEnergyMethod = null;
+            _setExpMethod = null;
             _energyTrackerPawnField = null;
-            _currentRIField = null;
-            _rimImmortalDefField = null;
-            _maxEnergyField = null;
             _messageDialogType = null;
             _getFloatUpgradeMethod = null;
             _sucessRateField = null;
@@ -284,37 +264,6 @@ namespace Eternal.Compatibility
                 EternalLogger.HandleException(EternalExceptionCategory.CompatibilityFailure,
                     "GetPawnFromMessageDialog", null, ex);
                 return null;
-            }
-        }
-
-        /// <summary>
-        /// Gets the current cultivation level's MaxEnergy from a Pawn_EnergyTracker instance
-        /// via the currentRI.def.MaxEnergy field chain. Returns -1f if the chain cannot be resolved.
-        /// </summary>
-        public static float GetMaxEnergy(object energyTracker)
-        {
-            EnsureTypesInitialized();
-
-            if (energyTracker == null || _currentRIField == null || _rimImmortalDefField == null || _maxEnergyField == null)
-                return -1f;
-
-            try
-            {
-                object currentRI = _currentRIField.GetValue(energyTracker);
-                if (currentRI == null)
-                    return -1f;
-
-                object rimImmortalDef = _rimImmortalDefField.GetValue(currentRI);
-                if (rimImmortalDef == null)
-                    return -1f;
-
-                return (float)_maxEnergyField.GetValue(rimImmortalDef);
-            }
-            catch (Exception ex)
-            {
-                EternalLogger.HandleException(EternalExceptionCategory.CompatibilityFailure,
-                    "GetMaxEnergy", null, ex);
-                return -1f;
             }
         }
 
@@ -372,7 +321,7 @@ namespace Eternal.Compatibility
             {
                 EnsureTypesInitialized();
                 Log.Message($"  - EnergyTracker Type: {(_pawnEnergyTrackerType != null ? "Found" : "Not Found")}");
-                Log.Message($"  - SetEnergy Method: {(_setEnergyMethod != null ? "Found" : "Not Found")}");
+                Log.Message($"  - SetExp Method: {(_setExpMethod != null ? "Found" : "Not Found")}");
                 Log.Message($"  - MessageDialog Type: {(_messageDialogType != null ? "Found" : "Not Found")}");
                 Log.Message($"  - GetFloatUpgrade Method: {(_getFloatUpgradeMethod != null ? "Found" : "Not Found")}");
                 Log.Message($"  - SucessRate Field: {(_sucessRateField != null ? "Found" : "Not Found")}");
