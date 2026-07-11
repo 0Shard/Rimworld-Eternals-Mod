@@ -1,10 +1,16 @@
 // Relative Path: Eternal/Source/Eternal/Healing/UnifiedHediffHealingCalculator.cs
 // Creation Date: 29-12-2025
-// Last Edit: 13-01-2026
+// Last Edit: 11-07-2026
 // Author: 0Shard
 // Description: Unified implementation of hediff-specific healing calculations.
 //              Consolidates logic from EternalHediffHealer and NutritionExtensions.
-//              Handles per-hediff rates, stage multipliers, and severity scaling.
+//              Handles per-hediff rates, stage multipliers, and the debuff rate factor.
+//              BALANCE: Removed maxSeverity-based severity scaling and the 0.1x low-maxSev
+//              auto multiplier. Together they made total heal TIME constant (~500 ticks for
+//              every staged debuff, instant for maxSeverity > 1) instead of proportional to
+//              severity — diseases healed 10x-200x faster than the Immortals mod reference.
+//              Staged debuffs now use DEBUFF_RATE_FACTOR for per-hediff parity with
+//              Immortals' slowHealSpeed (0.0002 severity/tick at default settings).
 
 using Verse;
 using Eternal.Compat;
@@ -23,6 +29,15 @@ namespace Eternal.Healing
     /// </summary>
     public class UnifiedHediffHealingCalculator : IHediffHealingCalculator
     {
+        /// <summary>
+        /// Rate factor for staged debuffs (diseases, infections, blood loss, parasites).
+        /// Calibrated for per-hediff parity with the Immortals mod's disease healing:
+        /// Immortals heals 0.002 (base) x 0.1 (slowHealSpeed) = 0.0002 severity/tick;
+        /// Eternal fires every normalTickRate (60) ticks at baseHealingRate 1.2, so
+        /// 1.2 x 0.01 = 0.012 severity per cycle = 0.0002 severity/tick.
+        /// </summary>
+        public const float DEBUFF_RATE_FACTOR = 0.01f;
+
         private readonly ISettingsProvider _settings;
 
         /// <summary>
@@ -40,14 +55,13 @@ namespace Eternal.Healing
             if (pawn == null || hediff == null)
                 return 0f;
 
-            // Formula: effectiveRate × stageMultiplier × bodySize × severityScaling × autoMultiplier
+            // Formula: effectiveRate × stageMultiplier × bodySize × debuffRateFactor
             float effectiveRate = GetEffectiveRate(setting);
             float stageMultiplier = GetStageMultiplier(hediff);
             float bodySize = GetBodySizeScaling(pawn);
-            float severityScaling = GetSeverityScaling(hediff, pawn);
-            float autoMultiplier = hediff.GetAutoSeverityMultiplier();
+            float debuffRateFactor = hediff.IsDebuffWithStages() ? DEBUFF_RATE_FACTOR : 1f;
 
-            return effectiveRate * stageMultiplier * bodySize * severityScaling * autoMultiplier;
+            return effectiveRate * stageMultiplier * bodySize * debuffRateFactor;
         }
 
         /// <inheritdoc/>
@@ -87,26 +101,14 @@ namespace Eternal.Healing
         }
 
         /// <inheritdoc/>
+        /// <remarks>
+        /// Always 1.0: all hediffs heal at a flat severity rate. The old maxSeverity-based
+        /// scaling made total heal time constant instead of proportional to severity
+        /// (a maxSeverity-5 disease healed its whole range as fast as a maxSeverity-1 one).
+        /// Kept on the interface so callers/UI can still display the factor.
+        /// </remarks>
         public float GetSeverityScaling(Hediff hediff, Pawn pawn)
         {
-            if (hediff == null)
-                return 1.0f;
-
-            // Injuries heal at flat rate (no partHP scaling) to match Immortal behavior
-            // This makes injury healing speed consistent regardless of body part HP
-            if (hediff is Hediff_Injury)
-            {
-                return 1.0f;
-            }
-
-            // For hediffs with defined maxSeverity (not infinite, reasonable range)
-            float maxSev = hediff.def.maxSeverity;
-            if (!float.IsInfinity(maxSev) && maxSev > 0f && maxSev < 100f)
-            {
-                return maxSev;
-            }
-
-            // Default: no scaling (conditions without clear max severity)
             return 1.0f;
         }
 
@@ -143,10 +145,9 @@ namespace Eternal.Healing
             float effectiveRate = GetEffectiveRate(setting);
             float stageMultiplier = GetStageMultiplier(hediff);
             float bodySize = GetBodySizeScaling(pawnData);
-            float severityScaling = GetSeverityScaling(hediff, null);
-            float autoMultiplier = hediff.GetAutoSeverityMultiplier();
+            float debuffRateFactor = hediff.IsDebuffWithStages() ? DEBUFF_RATE_FACTOR : 1f;
 
-            return effectiveRate * stageMultiplier * bodySize * severityScaling * autoMultiplier;
+            return effectiveRate * stageMultiplier * bodySize * debuffRateFactor;
         }
     }
 }

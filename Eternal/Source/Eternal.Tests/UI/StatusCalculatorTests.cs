@@ -6,9 +6,11 @@
 //              against drifting from the engine again: nutrition costs must include
 //              severityToNutritionRatio (cost = severity × ratio × multiplier, matching
 //              EternalHediffHealer + FoodCostProcessor), and disease times must include
-//              the 0.1x low-maxSeverity multiplier. Pure string/float methods — no Verse types.
+//              the debuff rate factor. Pure string/float methods — no Verse types.
 //              11-07: default rate is 1.2 (Apex pacing); regrowth rows are HP-scaled for the
 //              reference arm (30 HP x RegrowthWorkPerPartHP work).
+//              11-07: disease times use DEBUFF_RATE_FACTOR (0.01, Immortals parity) instead of
+//              the removed 0.1x low-maxSeverity multiplier.
 
 using Xunit;
 using Eternal.UI.Settings;
@@ -87,10 +89,11 @@ namespace Eternal.Tests.UI
         // -----------------------------------------------------------------
 
         [Fact]
-        public void DiseaseHealTime_Stage0_IncludesLowMaxSeverityMultiplier()
+        public void DiseaseHealTime_Stage0_UsesDebuffRateFactor()
         {
-            // cycles = 1 / (1.2 × 1.0 × 0.1) = 8.33 cycles × 60 ticks = 500 ticks = 12 in-game minutes
-            Assert.Equal("~12 minutes", StatusCalculator.DiseaseHealTime(DefaultRate, 60, 0));
+            // cycles = 1 / (1.2 × 1.0 × 0.01) = 83.3 cycles × 60 ticks = 5000 ticks = 2 in-game hours
+            // (Immortals parity: 0.0002 severity/tick)
+            Assert.Equal("~2.0 hours", StatusCalculator.DiseaseHealTime(DefaultRate, 60, 0));
         }
 
         [Fact]

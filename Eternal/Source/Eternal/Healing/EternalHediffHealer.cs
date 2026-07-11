@@ -1,7 +1,7 @@
 /*
  * Relative Path: Eternal/Source/Eternal/Healing/EternalHediffHealer.cs
  * Creation Date: 09-11-2025
- * Last Edit: 04-03-2026
+ * Last Edit: 11-07-2026
  *              BUGFIX: Fixed food cost calculation to use actual severity healed instead of scaled healingAmount.
  *              Previously, food cost was multiplied by severityScaling (body part HP, e.g., 30 for torso),
  *              causing food to drain ~30x faster than intended. Now uses 250:1 ratio on actual severity reduced.
@@ -12,7 +12,8 @@
  * Author: 0Shard
  * Description: Orchestrates hediff healing for Eternal pawns.
  *              Delegates to HediffHealingConfig for settings and TypeSpecificHealing for type-specific logic.
- *              Uses IHediffHealingCalculator for per-hediff rate, stage-based multipliers, and severity scaling.
+ *              Uses IHediffHealingCalculator for per-hediff rate, stage-based multipliers, and the debuff rate factor.
+ *              11-07: maxSeverity scaling + 0.1x auto multiplier replaced by DEBUFF_RATE_FACTOR (Immortals parity).
  *              Accumulates food debt proportional to healing performed via IDebtAccumulator.
  *              Simplified healing check: only canHeal matters (enabled is always true for visibility).
  *              PERF-04: Uses HealingDictionaryKey struct keys to avoid string allocations in hot paths.
@@ -55,7 +56,7 @@ namespace Eternal
 
         /// <summary>
         /// Gets the hediff healing calculator from the service container.
-        /// Provides per-hediff rates, stage-based multipliers, and severity scaling.
+        /// Provides per-hediff rates, stage-based multipliers, and the debuff rate factor.
         /// </summary>
         private IHediffHealingCalculator HediffCalculator => EternalServiceContainer.Instance.HediffHealingCalculator;
 
@@ -191,9 +192,9 @@ namespace Eternal
         /// - Effective healing rate (per-hediff override OR global baseHealingRate)
         /// - Stage-based multiplier for debuff hediffs (higher severity = slower healing)
         /// - Body size (larger pawns heal faster to compensate for larger body parts)
-        /// - Max severity scaling (injuries scale by body part HP, infections by maxSeverity)
+        /// - Debuff rate factor (staged debuffs heal at DEBUFF_RATE_FACTOR for Immortals parity)
         ///
-        /// Food cost is calculated from ACTUAL severity healed (configurable ratio), NOT the scaled healingAmount.
+        /// Food cost is calculated from ACTUAL severity healed (configurable ratio), NOT healingAmount.
         /// </summary>
         private void HealHediff(Pawn pawn, HealingItem item)
         {
@@ -208,7 +209,7 @@ namespace Eternal
                 return;
 
             // Calculate healing amount using unified calculator
-            // Formula: effectiveRate × stageMultiplier × bodySize × severityScaling
+            // Formula: effectiveRate × stageMultiplier × bodySize × debuffRateFactor
             float healingAmount = HediffCalculator?.CalculateHediffHealing(pawn, hediff, setting) ?? 0f;
 
             if (healingAmount <= 0f)
@@ -238,9 +239,8 @@ namespace Eternal
             // Apply type-specific healing via centralized logic
             ApplyHealingWithTracking(pawn, item, healingAmount);
 
-            // BUGFIX: Calculate actual severity reduced (not the scaled healingAmount)
-            // healingAmount includes severityScaling (body part HP, e.g., 30 for torso)
-            // which was causing food to drain ~30x faster than intended
+            // Food cost uses actual severity reduced, not healingAmount — type-specific
+            // handlers (e.g. scars ×0.5) and severity clamps make them differ.
             float severityHealed = Math.Max(0f, severityBefore - hediff.Severity);
 
             // Process food cost based on ACTUAL severity healed (configurable ratio, default 250:1)
@@ -267,10 +267,10 @@ namespace Eternal
                 string rateSource = setting.HasCustomHealingRate ? "custom" : "global";
                 float effectiveRate = HediffCalculator?.GetEffectiveRate(setting) ?? 0f;
                 float stageMultiplier = HediffCalculator?.GetStageMultiplier(hediff) ?? 1f;
-                float severityScaling = HediffCalculator?.GetSeverityScaling(hediff, pawn) ?? 1f;
+                float debuffFactor = hediff.IsDebuffWithStages() ? UnifiedHediffHealingCalculator.DEBUFF_RATE_FACTOR : 1f;
                 EternalLogger.Debug($"Healed {pawn.Name?.ToStringShort ?? "Unknown"}'s {hediff.def.LabelCap} by {healingAmount:F3} " +
                     $"(rate: {effectiveRate:F3} [{rateSource}], stage: {hediff.CurStageIndex} [×{stageMultiplier:F1}], " +
-                    $"bodySize: {pawn.BodySize:F2}, severityScale: {severityScaling:F1})");
+                    $"bodySize: {pawn.BodySize:F2}, debuffFactor: {debuffFactor:F2})");
             }
         }
 

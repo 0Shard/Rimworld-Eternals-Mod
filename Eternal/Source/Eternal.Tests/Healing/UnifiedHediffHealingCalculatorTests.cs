@@ -129,9 +129,10 @@ namespace Eternal.Tests.Healing
         // - GetSeverityScaling(Hediff, Pawn) — both types trigger JIT load
         // - CalculateHediffHealing(Pawn, Hediff, EternalHediffSetting) — all three types
         //
-        // The formulas are verified by code inspection:
+        // The formulas are verified by code inspection and HealingGateTests (in-game):
         //   Stage multipliers: 0->1.0, 1->0.8, 2->0.6, 3->0.4, 4+->0.2
-        //   Severity scaling: Hediff_Injury->1.0, maxSev in (0,100)->maxSev, else->1.0
+        //   Severity scaling: always 1.0 (flat rate; old maxSeverity scaling removed 11-07-2026)
+        //   Debuff rate factor: DEBUFF_RATE_FACTOR (0.01) for IsDebuffWithStages() hediffs, else 1.0
         //   Body size: pawn.BodySize ?? 1.0f (confirmed via IPawnData overload tests above)
         //   Effective rate: setting?.GetEffectiveHealingRate() ?? _settings?.BaseHealingRate ?? SettingsDefaults.BaseHealingRate
         // -----------------------------------------------------------------

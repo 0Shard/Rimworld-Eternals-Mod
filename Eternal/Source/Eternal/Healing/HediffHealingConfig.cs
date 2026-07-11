@@ -1,13 +1,18 @@
 // Relative Path: Eternal/Source/Eternal/Healing/HediffHealingConfig.cs
 // Creation Date: 28-10-2025
-// Last Edit: 10-07-2026
+// Last Edit: 11-07-2026
 // Author: 0Shard
 // Description: Creates default healing configurations for hediffs.
 //              Determines if hediffs should be healed by default and with what parameters.
 //              Includes threshold checking for debuff hediffs on living Eternal pawns.
 //              Simplified healing check: only canHeal matters (enabled is always true for visibility).
 //              BUGFIX: Removed HasCustomSettings() gate that was preventing user settings from being respected.
-//              BUGFIX: Explicit user setting now bypasses the activation threshold (enabled = heals, always).
+//              BUGFIX: canHeal decides IF a hediff heals; the activation threshold decides WHEN.
+//              The 10-07 "enabled = heals, always" change made the threshold dead code (every
+//              hediff materializes a setting via GetOrCreate, so the setting != null early-return
+//              always fired). Threshold is now enforced for rising staged debuffs; the explicit
+//              bypasses are the "Instant Healing" (noThreshold) setting and ShouldBypassThreshold
+//              (bloodloss, stationary, naturally-decaying hediffs such as toxic buildup).
 //              Default heal flags unified through EternalHediffSetting.ConfigureDefaultFlags (single source of truth).
 
 using Eternal.DI;
@@ -74,7 +79,8 @@ namespace Eternal.Healing
 
         /// <summary>
         /// Checks if a hediff should be healed by default (Immortals-inspired rules).
-        /// For living pawns with debuff hediffs, checks healing activation threshold.
+        /// canHeal decides IF the hediff heals; for rising staged debuffs on living pawns,
+        /// the random activation threshold decides WHEN healing starts.
         /// </summary>
         public static bool ShouldHealByDefault(Hediff hediff, EternalHediffSetting setting, bool pawnIsDead)
         {
@@ -95,27 +101,27 @@ namespace Eternal.Healing
                 return true;
             }
 
-            // Explicit user control is authoritative and bypasses the activation
-            // threshold entirely: a hediff the user enabled in the menu MUST heal.
-            if (setting != null)
-                return setting.canHeal;
+            // canHeal gate: the setting decides IF this hediff heals at all.
+            // Without a setting, only lethal bad hediffs on living pawns heal by default.
+            bool allowedToHeal = setting != null
+                ? setting.canHeal
+                : (!pawnIsDead && def.lethalSeverity > 0f && def.isBad);
+            if (!allowedToHeal)
+                return false;
 
-            // Default path (no setting): staged debuffs wait for their random activation
-            // threshold. Gameplay variety: some infections heal early, others progress further.
-            // Bloodloss, injuries, scars, regrowth, and stationary hediffs always bypass.
-            if (!pawnIsDead && hediff.IsDebuffWithStages() && !hediff.ShouldBypassThreshold())
+            // Activation threshold: staged debuffs on living pawns wait for their random
+            // threshold before healing starts. Gameplay variety: some infections heal early,
+            // others progress further. Bypasses: "Instant Healing" (noThreshold) setting, and
+            // ShouldBypassThreshold (bloodloss, stationary, naturally-decaying hediffs).
+            if (!pawnIsDead && setting?.noThreshold != true
+                && hediff.IsDebuffWithStages() && !hediff.ShouldBypassThreshold())
             {
                 var tracker = EternalServiceContainer.Instance?.ThresholdTracker;
                 if (tracker != null && !tracker.HasReachedThreshold(hediff.pawn, hediff))
                     return false; // Threshold not yet reached - don't heal yet
             }
 
-            // Dangerous diseases/conditions: default to healing lethal bad hediffs on living pawns
-            if (!pawnIsDead && def.lethalSeverity > 0f && def.isBad)
-                return true;
-
-            // Everything else is not healed unless explicitly enabled
-            return false;
+            return true;
         }
 
         /// <summary>

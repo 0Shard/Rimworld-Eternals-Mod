@@ -1,11 +1,14 @@
 // Relative Path: Eternal/Source/Eternal/Extensions/HediffExtensions.cs
 // Creation Date: 28-10-2025
-// Last Edit: 13-01-2026
+// Last Edit: 11-07-2026
 // Author: 0Shard
 // Description: Extension methods for Hediff classification and analysis.
 //              Uses RimWorld's built-in properties first, with string matching only for edge cases.
 //              Includes IsDebuffWithStages() for identifying hediffs that use healing thresholds.
 //              Includes HasStationarySeverity() to detect hediffs with fixed severity that bypass thresholds.
+//              Includes HasNaturallyDecayingSeverity() for debuffs that can never rise to a threshold.
+//              GetAutoSeverityMultiplier removed — healing speed now uses a single debuff rate
+//              factor in UnifiedHediffHealingCalculator (Immortals parity).
 
 using RimWorld;
 using Verse;
@@ -18,21 +21,6 @@ namespace Eternal.Extensions
     /// </summary>
     public static class HediffExtensions
     {
-        #region Constants
-
-        /// <summary>
-        /// Multiplier applied to hediffs with low maxSeverity (&lt;= 1.0).
-        /// Slows healing to match high-severity injury healing speeds.
-        /// </summary>
-        private const float LOW_MAX_SEVERITY_MULTIPLIER = 0.1f;
-
-        /// <summary>
-        /// Threshold for maxSeverity below which the multiplier is applied.
-        /// </summary>
-        private const float LOW_MAX_SEVERITY_THRESHOLD = 1.0f;
-
-        #endregion
-
         /// <summary>
         /// Checks if a hediff is harmful and should be healed.
         /// Uses RimWorld's built-in isBad property first.
@@ -234,6 +222,12 @@ namespace Eternal.Extensions
                 return true;
             }
 
+            // Naturally-decaying debuffs (toxic buildup, immune-won diseases) - severity only
+            // falls, so it can never RISE to an activation threshold; gating on one would
+            // block healing forever (field bug: enabled toxic buildup never healed).
+            if (hediff.HasNaturallyDecayingSeverity())
+                return true;
+
             return false;
         }
 
@@ -350,28 +344,31 @@ namespace Eternal.Extensions
         }
 
         /// <summary>
-        /// Gets automatic severity scaling multiplier based on maxSeverity.
-        /// Hediffs with maxSeverity &lt;= 1.0 get 0.1x multiplier to slow healing,
-        /// making them heal at similar speeds to high-severity injuries.
+        /// Checks if a hediff's severity naturally FALLS over time, summed across its
+        /// severity-modifier comps via <c>SeverityChangePerDay()</c> (the authoritative
+        /// per-instance trend: Immunizable returns the immune/not-immune rate, SeverityPerDay
+        /// its fixed rate). A decaying debuff can never rise to an activation threshold.
+        /// Examples: toxic buildup (severityPerDayNotImmune -0.08), any disease after the
+        /// pawn turns fully immune.
         /// </summary>
-        /// <param name="hediff">The hediff to check.</param>
-        /// <returns>0.1 for low maxSeverity hediffs, 1.0 otherwise.</returns>
-        public static float GetAutoSeverityMultiplier(this Hediff hediff)
+        public static bool HasNaturallyDecayingSeverity(this Hediff hediff)
         {
-            if (hediff?.def == null)
-                return 1.0f;
+            if (!(hediff is HediffWithComps hwc) || hwc.comps == null || hediff.pawn == null)
+                return false;
 
-            // Injuries always heal at full speed
-            if (hediff is Hediff_Injury)
-                return 1.0f;
+            bool hasModifier = false;
+            float trendPerDay = 0f;
 
-            float maxSev = hediff.def.maxSeverity;
+            foreach (var comp in hwc.comps)
+            {
+                if (comp is HediffComp_SeverityModifierBase severityModifier)
+                {
+                    hasModifier = true;
+                    trendPerDay += severityModifier.SeverityChangePerDay();
+                }
+            }
 
-            // Only apply to hediffs with defined, finite maxSeverity <= threshold
-            if (!float.IsInfinity(maxSev) && maxSev > 0f && maxSev <= LOW_MAX_SEVERITY_THRESHOLD)
-                return LOW_MAX_SEVERITY_MULTIPLIER;
-
-            return 1.0f;
+            return hasModifier && trendPerDay < 0f;
         }
     }
 }

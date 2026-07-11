@@ -6,6 +6,8 @@
 //              10-07: Status tab nutrition formulas now include severityToNutritionRatio (were 250x off vs engine).
 //              11-07: Regrowth status rows are HP-scaled for a reference arm (30 HP); added full-arm
 //              regrowth cost row; default healing rate is 1.2 (Apex pacing).
+//              11-07: DiseaseHealTime uses DEBUFF_RATE_FACTOR (0.01, Immortals parity) — the old
+//              0.1 multiplier displayed disease heal times 10x shorter than the new engine rate.
 //              styled section headers with reset buttons, info boxes, live preview stats,
 //              inline-editable slider values (click to type), and comprehensive tooltips.
 //              Healing rate displayed in ratio format: 250 : 1 (severity : nutrition).
@@ -109,16 +111,15 @@ namespace Eternal.UI.Settings
         }
 
         /// <summary>
-        /// Disease heal time with stage multiplier, for a standard disease (maxSeverity 1.0).
+        /// Disease heal time with stage multiplier, for a standard disease (severity range 1.0).
         /// Source: UnifiedHediffHealingCalculator.CalculateHediffHealing —
-        /// rate × stageMultiplier × severityScaling(maxSev=1.0) × autoMultiplier(0.1 for maxSev ≤ 1.0)
+        /// rate × stageMultiplier × DEBUFF_RATE_FACTOR (Immortals parity rate)
         /// </summary>
         public static string DiseaseHealTime(float baseRate, int normalTickRate, int stage)
         {
-            const float lowMaxSeverityMultiplier = 0.1f; // HediffExtensions.LOW_MAX_SEVERITY_MULTIPLIER
             float[] stageMultipliers = { 1.0f, 0.8f, 0.6f, 0.4f, 0.2f };
             float mult = stageMultipliers[Math.Min(stage, 4)];
-            float cycles = 1.0f / (baseRate * mult * lowMaxSeverityMultiplier);
+            float cycles = 1.0f / (baseRate * mult * Healing.UnifiedHediffHealingCalculator.DEBUFF_RATE_FACTOR);
             float gameTicks = cycles * normalTickRate;
             float hours = gameTicks / 2500f;
             return FormatTime(hours);
