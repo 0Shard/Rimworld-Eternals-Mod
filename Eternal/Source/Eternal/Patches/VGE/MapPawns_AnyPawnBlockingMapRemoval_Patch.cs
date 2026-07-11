@@ -1,19 +1,21 @@
 // Relative Path: Eternal/Source/Eternal/Patches/VGE/MapPawns_AnyPawnBlockingMapRemoval_Patch.cs
 // Creation Date: 25-12-2025
-// Last Edit: 20-02-2026
+// Last Edit: 11-07-2026
 // Author: 0Shard
-// Description: Harmony patch for VGE compatibility. Extends the AnyPawnBlockingMapRemoval check
-//              to include tracked Eternal corpses, preventing map removal when Eternal corpses
-//              are present. This ensures corpses aren't lost when gravships leave or maps are abandoned.
+// Description: Harmony patch extending the AnyPawnBlockingMapRemoval check to tracked Eternal
+//              corpses and active Eternal anchors. Every MapParent.ShouldRemoveMapNow override
+//              (Site, Camp, CaravansBattlefield, Settlement, SpaceMapParent) consults this getter,
+//              making it the single effective chokepoint for holding maps open. Always applied
+//              (vanilla temporary maps need it as much as gravship/Odyssey scenarios).
 
 using System;
 using System.Reflection;
 using HarmonyLib;
 using Verse;
-using Eternal.Compatibility;
 using Eternal.Corpse;
 using Eternal.DI;
 using Eternal.Exceptions;
+using Eternal.Map;
 using Eternal.Utils;
 
 // Type alias to resolve namespace shadowing (Eternal.Map shadows Verse.Map)
@@ -22,14 +24,14 @@ using MapType = Verse.Map;
 namespace Eternal.Patches.VGE
 {
     /// <summary>
-    /// Patches MapPawns.AnyPawnBlockingMapRemoval to include Eternal corpses.
-    /// When a map contains tracked Eternal corpses, this patch ensures the map
-    /// cannot be automatically removed, protecting corpses from destruction.
+    /// Patches MapPawns.AnyPawnBlockingMapRemoval to include Eternal corpses and anchors.
+    /// When a map contains tracked Eternal corpses or active anchors, this patch ensures
+    /// the map cannot be automatically removed, protecting corpses from destruction.
     /// </summary>
     /// <remarks>
-    /// This patch is specifically designed for VGE (Vanilla Gravship Expanded) compatibility,
-    /// where gravship operations can trigger map removal that would destroy corpses.
-    /// The patch only activates when VGE or Odyssey is present to minimize overhead.
+    /// All MapParent.ShouldRemoveMapNow overrides check this getter first, so it protects
+    /// vanilla temporary maps (quest sites, camps, caravan battlefields) as well as
+    /// gravship/Odyssey scenarios. The postfix early-returns unless corpses/anchors are tracked.
     /// </remarks>
     [HarmonyPatch(typeof(MapPawns), nameof(MapPawns.AnyPawnBlockingMapRemoval), MethodType.Getter)]
     public static class MapPawns_AnyPawnBlockingMapRemoval_Patch
@@ -37,23 +39,6 @@ namespace Eternal.Patches.VGE
         // Cached field info for accessing private map field
         private static FieldInfo _mapField;
         private static bool _fieldCacheInitialized = false;
-
-        /// <summary>
-        /// Determines if this patch should be applied.
-        /// Only patches when VGE or Odyssey is active (gravship functionality present).
-        /// </summary>
-        public static bool Prepare()
-        {
-            bool shouldPatch = SpaceModDetection.VanillaGravshipExpandedActive ||
-                               SpaceModDetection.OdysseyActive;
-
-            if (shouldPatch && Eternal_Mod.settings?.debugMode == true)
-            {
-                Log.Message("[Eternal] MapPawns_AnyPawnBlockingMapRemoval_Patch enabled for VGE/Odyssey compatibility");
-            }
-
-            return shouldPatch;
-        }
 
         /// <summary>
         /// Initializes the field cache for accessing the private map field.
@@ -103,9 +88,9 @@ namespace Eternal.Patches.VGE
         }
 
         /// <summary>
-        /// Postfix that extends the pawn blocking check to include Eternal corpses.
+        /// Postfix that extends the pawn blocking check to include Eternal corpses and anchors.
         /// If the original result is already true, no action needed.
-        /// Otherwise, checks if the map contains tracked Eternal corpses.
+        /// Otherwise, checks tracked Eternal corpses, then active Eternal anchors.
         /// </summary>
         /// <param name="__instance">The MapPawns instance being checked</param>
         /// <param name="__result">The result to potentially modify</param>
@@ -129,18 +114,27 @@ namespace Eternal.Patches.VGE
 
                 // Check if this map contains any tracked Eternal corpses
                 var corpseManager = EternalServiceContainer.Instance.CorpseManager;
-                if (corpseManager == null)
-                {
-                    return;
-                }
-
-                if (corpseManager.HasEternalCorpses(map))
+                if (corpseManager != null && corpseManager.HasEternalCorpses(map))
                 {
                     __result = true;
 
                     if (Eternal_Mod.settings?.debugMode == true)
                     {
                         Log.Message($"[Eternal] Map {map} blocked from removal - contains Eternal corpses");
+                    }
+                    return;
+                }
+
+                // Check for active Eternal anchors (previously an unreachable prefix on
+                // MapParent.ShouldRemoveMapNow — its overrides never call the patched base)
+                var mapManager = map.GetComponent<EternalMapManager>();
+                if (mapManager != null && mapManager.ShouldRetainMap())
+                {
+                    __result = true;
+
+                    if (Eternal_Mod.settings?.debugMode == true)
+                    {
+                        Log.Message($"[Eternal] Map {map} blocked from removal - {mapManager.GetActiveAnchors().Count} active Eternal anchor(s)");
                     }
                 }
             }

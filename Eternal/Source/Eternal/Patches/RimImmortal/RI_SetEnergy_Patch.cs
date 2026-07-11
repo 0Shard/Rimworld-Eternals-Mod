@@ -1,8 +1,8 @@
 // Relative Path: Eternal/Source/Eternal/Patches/RimImmortal/RI_SetEnergy_Patch.cs
 // Creation Date: 28-12-2025
-// Last Edit: 04-03-2026
+// Last Edit: 11-07-2026
 // Author: 0Shard
-// Description: Harmony patch for RimImmortal's SetEnergy method to grant Eternals 5x cultivation speed.
+// Description: Harmony patch for RimImmortal's SetEnergy method to instantly fill Eternals' cultivation energy.
 // Only active when RimImmortal mod is loaded. Uses reflection to avoid compile-time dependency.
 
 using System;
@@ -17,16 +17,19 @@ using Eternal.Utils;
 namespace Eternal.Patches.RimImmortal
 {
     /// <summary>
-    /// Patches Core.Pawn_EnergyTracker.SetEnergy to multiply energy gains by 5x for Eternal pawns.
-    /// This boosts cultivation speed for Eternals when using RimImmortal's cultivation system.
+    /// Patches Core.Pawn_EnergyTracker.SetEnergy so any positive energy gain instantly fills
+    /// an Eternal pawn's cultivation energy to the current level's MaxEnergy.
+    /// SetEnergy adds the delta then caps at CurrentDef.MaxEnergy, so passing MaxEnergy as the
+    /// delta guarantees the cap is reached regardless of the current energy value.
     /// </summary>
     [HarmonyPatch]
     public static class RI_SetEnergy_Patch
     {
         /// <summary>
-        /// Cultivation speed multiplier for Eternal pawns.
+        /// Fallback delta when the MaxEnergy reflection chain fails; SetEnergy's own cap
+        /// clamps the result to the level's MaxEnergy either way.
         /// </summary>
-        private const float CULTIVATION_MULTIPLIER = 5f;
+        private const float FALLBACK_ENERGY_DELTA = 1_000_000f;
 
         /// <summary>
         /// Guard: only apply this patch when RimImmortal is active.
@@ -49,7 +52,7 @@ namespace Eternal.Patches.RimImmortal
 
             if (Eternal_Mod.settings?.debugMode == true)
             {
-                Log.Message("[Eternal] RimImmortal detected - enabling cultivation speed patch (5x)");
+                Log.Message("[Eternal] RimImmortal detected - enabling instant-max cultivation energy patch");
             }
 
             return true;
@@ -73,7 +76,9 @@ namespace Eternal.Patches.RimImmortal
         }
 
         /// <summary>
-        /// Prefix: Multiply positive energy gains by 5x for Eternal pawns.
+        /// Prefix: Replace positive energy gains with the level's MaxEnergy delta for Eternal pawns,
+        /// so a single gain tick fills the energy bar. Negative deltas (consumption, including the
+        /// meridian-damage punishment branch) are left untouched.
         /// </summary>
         /// <param name="__instance">The Pawn_EnergyTracker instance</param>
         /// <param name="num">The energy delta (passed by ref to allow modification)</param>
@@ -99,13 +104,14 @@ namespace Eternal.Patches.RimImmortal
                 // Store original value for debug logging
                 float originalNum = num;
 
-                // Apply 5x cultivation multiplier
-                num *= CULTIVATION_MULTIPLIER;
+                // Jump straight to the current level's MaxEnergy (SetEnergy caps the sum there)
+                float maxEnergy = RimImmortalDetection.GetMaxEnergy(__instance);
+                num = maxEnergy > 0f ? maxEnergy : FALLBACK_ENERGY_DELTA;
 
                 if (Eternal_Mod.settings?.debugMode == true)
                 {
-                    Log.Message($"[Eternal] RimImmortal: Boosted cultivation for {pawn.Name} " +
-                               $"from {originalNum:F2} to {num:F2} ({CULTIVATION_MULTIPLIER}x)");
+                    Log.Message($"[Eternal] RimImmortal: Filled cultivation energy for {pawn.Name} " +
+                               $"(gain {originalNum:F2} replaced by delta {num:F2})");
                 }
             }
             catch (Exception ex)

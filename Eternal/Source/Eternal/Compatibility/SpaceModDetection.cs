@@ -1,6 +1,6 @@
 // Relative Path: Eternal/Source/Eternal/Compatibility/SpaceModDetection.cs
 // Creation Date: 12-11-2025
-// Last Edit: 21-02-2026
+// Last Edit: 11-07-2026
 // Author: 0Shard
 // Description: Thin facade for space-mod compatibility detection. Delegates all SOS2 reflection
 //              lookups to SOS2ReflectionCache (managed by EternalServiceContainer) instead of
@@ -43,6 +43,7 @@ namespace Eternal.Compatibility
 
         private static readonly string[] ODYSSEY_VARIANTS = new[]
         {
+            "ludeon.rimworld.odyssey", // official DLC packageId (verified in ModsConfig.xml)
             "Odyssey",
             "VanillaExpanded.VFESpace",
             "VFE.Space"

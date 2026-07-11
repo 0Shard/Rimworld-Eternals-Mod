@@ -1,8 +1,8 @@
 // Relative Path: Eternal/Source/Eternal/Patches/RimImmortal/RI_GetFloatUpgrade_Patch.cs
 // Creation Date: 28-12-2025
-// Last Edit: 04-03-2026
+// Last Edit: 11-07-2026
 // Author: 0Shard
-// Description: Harmony patch for RimImmortal's GetFloatUpgrade method to grant Eternals 5x breakthrough chance.
+// Description: Harmony patch for RimImmortal's GetFloatUpgrade method to grant Eternals a flat 99.99% breakthrough chance.
 // Only active when RimImmortal mod is loaded. Uses reflection to avoid compile-time dependency.
 
 using System;
@@ -17,21 +17,17 @@ using Eternal.Utils;
 namespace Eternal.Patches.RimImmortal
 {
     /// <summary>
-    /// Patches RIRitualFramework.MessageDialog.GetFloatUpgrade to multiply breakthrough chance by 5x for Eternal pawns.
-    /// The breakthrough chance is capped at 100% after multiplication.
+    /// Patches RIRitualFramework.MessageDialog.GetFloatUpgrade to set a flat 99.99% breakthrough
+    /// chance for Eternal pawns, regardless of the computed base rate.
+    /// The success roll is Rand.Range(0, 99) against successRate, so 99.99 always succeeds.
     /// </summary>
     [HarmonyPatch]
     public static class RI_GetFloatUpgrade_Patch
     {
         /// <summary>
-        /// Breakthrough chance multiplier for Eternal pawns.
+        /// Breakthrough chance for Eternal pawns (percentage form, 0-100).
         /// </summary>
-        private const float BREAKTHROUGH_MULTIPLIER = 5f;
-
-        /// <summary>
-        /// Maximum breakthrough chance (100%).
-        /// </summary>
-        private const float MAX_SUCCESS_RATE = 100f;
+        private const float ETERNAL_SUCCESS_RATE = 99.99f;
 
         /// <summary>
         /// Guard: only apply this patch when RimImmortal is active.
@@ -54,7 +50,7 @@ namespace Eternal.Patches.RimImmortal
 
             if (Eternal_Mod.settings?.debugMode == true)
             {
-                Log.Message("[Eternal] RimImmortal detected - enabling breakthrough chance patch (5x)");
+                Log.Message("[Eternal] RimImmortal detected - enabling breakthrough chance patch (99.99%)");
             }
 
             return true;
@@ -78,9 +74,8 @@ namespace Eternal.Patches.RimImmortal
         }
 
         /// <summary>
-        /// Postfix: Multiply the final breakthrough chance by 5x for Eternal pawns.
-        /// The original method calculates the rate and caps it at 100%, so we read
-        /// the final value, multiply, and re-cap.
+        /// Postfix: Set the final breakthrough chance to a flat 99.99% for Eternal pawns.
+        /// The original method computes and caps the rate; we overwrite it after the fact.
         /// </summary>
         /// <param name="__instance">The MessageDialog instance</param>
         [HarmonyPostfix]
@@ -98,25 +93,16 @@ namespace Eternal.Patches.RimImmortal
                 if (!pawn.IsValidEternal())
                     return;
 
-                // Read current success rate (already in percentage form, 0-100)
+                // Read current success rate for debug logging (percentage form, 0-100)
                 float currentRate = RimImmortalDetection.GetSucessRate(__instance);
 
-                // Apply 5x multiplier
-                float boostedRate = currentRate * BREAKTHROUGH_MULTIPLIER;
-
-                // Cap at 100%
-                if (boostedRate > MAX_SUCCESS_RATE)
-                {
-                    boostedRate = MAX_SUCCESS_RATE;
-                }
-
-                // Write back the boosted rate
-                RimImmortalDetection.SetSucessRate(__instance, boostedRate);
+                // Overwrite with the flat Eternal rate
+                RimImmortalDetection.SetSucessRate(__instance, ETERNAL_SUCCESS_RATE);
 
                 if (Eternal_Mod.settings?.debugMode == true)
                 {
-                    Log.Message($"[Eternal] RimImmortal: Boosted breakthrough chance for {pawn.Name} " +
-                               $"from {currentRate:F1}% to {boostedRate:F1}% ({BREAKTHROUGH_MULTIPLIER}x)");
+                    Log.Message($"[Eternal] RimImmortal: Set breakthrough chance for {pawn.Name} " +
+                               $"from {currentRate:F1}% to {ETERNAL_SUCCESS_RATE}%");
                 }
             }
             catch (Exception ex)
