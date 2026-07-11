@@ -1,6 +1,6 @@
 // Relative Path: Eternal/Source/Eternal/UI/HediffSettings/EternalHediffPresenter.cs
 // Creation Date: 01-01-2025
-// Last Edit: 19-02-2026
+// Last Edit: 11-07-2026
 // Author: 0Shard
 // Description: Presenter layer for hediff settings UI. Manages UI state and handles events.
 //              Includes FilterBeneficial for filtering beneficial (non-bad) hediffs.
@@ -25,21 +25,23 @@ namespace Eternal.UI.HediffSettings
 
         #region Filter State
 
-        public string SearchTerm { get; private set; } = "";
-        public HediffCategory SelectedCategory { get; private set; } = HediffCategory.All;
-        public bool ShowOnlyEnabled { get; private set; } = false;
-        public bool ShowOnlyCustom { get; private set; } = true;  // Default to showing only custom hediffs
+        // Defaults live in HediffFilterState; the constructor rehydrates these
+        // mirrors from the manager's persisted instance.
+        public string SearchTerm { get; private set; }
+        public HediffCategory SelectedCategory { get; private set; }
+        public bool ShowOnlyEnabled { get; private set; }
+        public bool ShowOnlyCustom { get; private set; }
 
         // Advanced filter state
-        public string ModSourceFilter { get; private set; } = "";
-        public bool FilterBaseGame { get; private set; } = false;
-        public bool FilterDLC { get; private set; } = false;
-        public bool FilterMods { get; private set; } = false;
-        public bool FilterIsBad { get; private set; } = false;
-        public bool FilterIsLethal { get; private set; } = false;
-        public bool FilterTendable { get; private set; } = false;
-        public bool FilterChronic { get; private set; } = false;
-        public bool FilterBeneficial { get; private set; } = false;
+        public string ModSourceFilter { get; private set; }
+        public bool FilterBaseGame { get; private set; }
+        public bool FilterDLC { get; private set; }
+        public bool FilterMods { get; private set; }
+        public bool FilterIsBad { get; private set; }
+        public bool FilterIsLethal { get; private set; }
+        public bool FilterTendable { get; private set; }
+        public bool FilterChronic { get; private set; }
+        public bool FilterBeneficial { get; private set; }
 
         #endregion
 
@@ -61,6 +63,24 @@ namespace Eternal.UI.HediffSettings
         {
             this.model = model;
             BulkTemplate = new EternalHediffSetting();
+
+            // Rehydrate from the manager's persisted filter state: the manager outlives
+            // this presenter (a fresh presenter is built on every settings-window open),
+            // so hardcoded defaults here would desync the checkboxes from the active filter.
+            var persisted = model.FilterState;
+            SearchTerm = persisted.SearchTerm;
+            SelectedCategory = persisted.CategoryFilter;
+            ShowOnlyEnabled = persisted.ShowOnlyEnabled;
+            ShowOnlyCustom = persisted.ShowOnlyCustom;
+            ModSourceFilter = persisted.ModSourceFilter;
+            FilterBaseGame = persisted.FilterByBaseGame;
+            FilterDLC = persisted.FilterByDLC;
+            FilterMods = persisted.FilterByMods;
+            FilterIsBad = persisted.FilterIsBad;
+            FilterIsLethal = persisted.FilterIsLethal;
+            FilterTendable = persisted.FilterIsTendable;
+            FilterChronic = persisted.FilterIsChronic;
+            FilterBeneficial = persisted.FilterBeneficial;
         }
 
         #region Tab Events
@@ -166,6 +186,16 @@ namespace Eternal.UI.HediffSettings
             FilterBeneficial = false;
 
             model.ClearAllFilters();
+        }
+
+        /// <summary>
+        /// Notifies the presenter that a per-hediff setting mutated (row Heal toggle,
+        /// slider input) so it can mark the filter cache dirty and keep the filtered
+        /// list in sync with the new custom/heal state.
+        /// </summary>
+        public void NotifyHediffSettingChanged()
+        {
+            model.MarkFilterDirty();
         }
 
         #endregion

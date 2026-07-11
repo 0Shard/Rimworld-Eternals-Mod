@@ -1,7 +1,7 @@
 // file path: Eternal/Source/Eternal/Patches/TraitSet_Patch.cs
 // Author Name: 0Shard
 // Date Created: 29-10-2025
-// Date Last Modified: 21-02-2026
+// Date Last Modified: 11-07-2026
 // Description: Harmony patch for TraitSet to automatically add Eternal_Essence hediff when Eternal_GeneticMarker trait is added.
 //              Uses Harmony's Traverse for safer field access that adapts to RimWorld version changes.
 
@@ -57,9 +57,11 @@ namespace Eternal.Patches
         /// Checks if the added trait is Eternal_GeneticMarker and adds the Eternal_Essence hediff if needed.
         /// </summary>
         /// <param name="__instance">The TraitSet instance.</param>
-        /// <param name="t">The trait that was added.</param>
+        /// <param name="trait">The trait that was added. Parameter name MUST match the target
+        /// method's parameter (GainTrait(Trait trait, ...)) — Harmony binds by name and throws
+        /// at patch time on a mismatch, which aborts patching for this class.</param>
         [HarmonyPostfix]
-        public static void Postfix(TraitSet __instance, Trait t)
+        public static void Postfix(TraitSet __instance, Trait trait)
         {
             try
             {
@@ -68,7 +70,7 @@ namespace Eternal.Patches
                     return;
 
                 // Early exit if not the Eternal trait
-                if (t?.def != EternalDefOf.Eternal_GeneticMarker)
+                if (trait?.def != EternalDefOf.Eternal_GeneticMarker)
                 {
                     return;
                 }

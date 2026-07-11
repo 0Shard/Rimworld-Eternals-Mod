@@ -1,6 +1,6 @@
 // Relative Path: Eternal/Source/Eternal/UI/EternalHediffManager.cs
 // Creation Date: 01-01-2025
-// Last Edit: 10-07-2026
+// Last Edit: 11-07-2026
 // Author: 0Shard
 // Description: Coordinator for hediff settings management. Delegates to specialized
 //              classes for storage, filtering, selection, and bulk operations.
@@ -352,6 +352,8 @@ namespace Eternal
                     setting.consumeExtraResources = template.consumeExtraResources;
                 }
             }
+
+            MarkFilterDirty();
         }
 
         #endregion

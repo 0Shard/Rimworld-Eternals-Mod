@@ -1,6 +1,6 @@
 // Relative Path: Eternal/Source/Eternal/UI/HediffSettings/EternalHediffView.cs
 // Creation Date: 09-11-2025
-// Last Edit: 10-07-2026
+// Last Edit: 11-07-2026
 // Author: 0Shard
 // Description: View layer for hediff settings UI. Pure UI rendering, delegates to Presenter.
 //              PERF: List is virtualized — only rows inside the viewport (plus a small preload
@@ -441,6 +441,7 @@ namespace Eternal.UI.HediffSettings
             if (canHeal != setting.canHeal)
             {
                 setting.canHeal = canHeal;
+                presenter.NotifyHediffSettingChanged();
             }
             TooltipHandler.TipRegion(healRect, "Enable/disable healing for this hediff");
             curX += 28f;
@@ -496,6 +497,7 @@ namespace Eternal.UI.HediffSettings
             if (Math.Abs(newRate - displayRate) > 0.00001f)
             {
                 setting.healingRate = newRate;
+                presenter.NotifyHediffSettingChanged();
             }
             curX += rateSliderWidth + 10f;
 
@@ -509,6 +511,7 @@ namespace Eternal.UI.HediffSettings
             if (Math.Abs(newNutrition - setting.nutritionCostMultiplier) > 0.01f)
             {
                 setting.nutritionCostMultiplier = newNutrition;
+                presenter.NotifyHediffSettingChanged();
             }
 
             // Reset button
@@ -567,13 +570,17 @@ namespace Eternal.UI.HediffSettings
 
         private void DrawAdvancedTabContent(Rect rect)
         {
-            GUI.color = new Color(0.2f, 0.2f, 0.2f, 1f);
-            GUI.DrawTexture(rect, BaseContent.WhiteTex);
-            GUI.color = Color.white;
-
             float curY = rect.y + 10f;
 
+            // Content-fitted background: paint only where the controls are, not the
+            // entire content rect (avoids a large empty gray box on this sparse tab).
+            Rect bgRect = new Rect(rect.x + 10f, curY, rect.width - 20f, 70f);
+            GUI.color = new Color(0.2f, 0.2f, 0.2f, 1f);
+            GUI.DrawTexture(bgRect, BaseContent.WhiteTex);
+            GUI.color = Color.white;
+
             Widgets.Label(new Rect(rect.x + 10f, curY, rect.width - 20f, 25f), "Global Healing Settings:");
+
             curY += 35f;
 
             bool autoHeal = Eternal_Settings.instance.autoHealEnabled;
@@ -598,8 +605,8 @@ namespace Eternal.UI.HediffSettings
             Widgets.Label(new Rect(rect.x + 10f, curY, rect.width - 20f, 25f), "Bulk Operations Template:");
             curY += 35f;
 
-            DrawTemplateSettings(new Rect(rect.x + 10f, curY, rect.width - 20f, 250f));
-            curY += 270f;
+            DrawTemplateSettings(new Rect(rect.x + 10f, curY, rect.width - 20f, 145f));
+            curY += 160f;
 
             Rect applySelectedRect = new Rect(rect.x + 10f, curY, 200f, 30f);
             if (Widgets.ButtonText(applySelectedRect, "Apply to Selected"))
@@ -686,9 +693,11 @@ namespace Eternal.UI.HediffSettings
                     template.ResetToGlobalRate();
             }
 
-            // Right column
+            // Right column (header aligned with left; first control at +35 to match left's Heal)
             curX += columnWidth;
-            curY = rect.y + 35f;
+            curY = rect.y + 10f;
+            Widgets.Label(new Rect(curX, curY, columnWidth, 20f), "Scars & Permanent:");
+            curY += 25f;
 
             Rect permanentRect = new Rect(curX, curY, columnWidth, 20f);
             CheckboxLabeledWithTooltip(permanentRect, "Heal Permanent", ref template.healPermanentInjuries,

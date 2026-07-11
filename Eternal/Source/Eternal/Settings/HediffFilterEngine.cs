@@ -1,6 +1,6 @@
 // Relative Path: Eternal/Source/Eternal/Settings/HediffFilterEngine.cs
 // Creation Date: 01-01-2025
-// Last Edit: 10-07-2026
+// Last Edit: 11-07-2026
 // Author: 0Shard
 // Description: Applies filters to hediff settings.
 //              Stateless - takes inputs, returns filtered output.
@@ -83,7 +83,7 @@ namespace Eternal.Settings
                 return false;
 
             // Toggle filters
-            if (filterState.ShowOnlyEnabled && !setting.enabled)
+            if (filterState.ShowOnlyEnabled && !setting.canHeal)
                 return false;
 
             if (filterState.ShowOnlyCustom && !setting.HasCustomSettings())

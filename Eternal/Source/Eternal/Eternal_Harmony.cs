@@ -1,7 +1,7 @@
 // file path: Eternal/Source/Eternal/Eternal_Harmony.cs
 // Author Name: 0Shard
 // Date Created: 28-10-2025
-// Date Last Modified: 20-02-2026
+// Date Last Modified: 11-07-2026
 // Description: Harmony patch initialization and management for Eternal mod.
 
 using System;
@@ -36,12 +36,36 @@ namespace Eternal
             {
                 // Create Harmony instance for Eternal mod
                 var harmony = new Harmony("EternalTeam.Eternal");
-                 
-                // Apply all Harmony patches in assembly
-                harmony.PatchAll(Assembly.GetExecutingAssembly());
 
-                // Log successful initialization
-                Log.Message("[Eternal] Harmony patches initialized successfully");
+                // Apply patches per class instead of a single PatchAll: one invalid patch class
+                // must not abort patching for every class after it in metadata order.
+                // CreateClassProcessor(type).Patch() is exactly what PatchAll does per type;
+                // types without Harmony annotations are a no-op.
+                int appliedCount = 0;
+                var failedClasses = new System.Collections.Generic.List<string>();
+                foreach (var type in AccessTools.GetTypesFromAssembly(Assembly.GetExecutingAssembly()))
+                {
+                    try
+                    {
+                        harmony.CreateClassProcessor(type).Patch();
+                        appliedCount++;
+                    }
+                    catch (Exception ex)
+                    {
+                        failedClasses.Add(type.FullName);
+                        Log.Error($"[Eternal] Failed to apply patch class {type.FullName}: {ex}");
+                    }
+                }
+
+                if (failedClasses.Count == 0)
+                {
+                    Log.Message("[Eternal] Harmony patches initialized successfully");
+                }
+                else
+                {
+                    Log.Error($"[Eternal] Harmony patching partial failure: {appliedCount} classes processed, " +
+                        $"{failedClasses.Count} failed: {string.Join(", ", failedClasses)}");
+                }
 
                 // Verify critical patches were applied
                 VerifyCriticalPatches(harmony);

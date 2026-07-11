@@ -97,6 +97,12 @@ namespace Eternal.Patches.VGE
         [HarmonyPostfix]
         public static void Postfix(MapPawns __instance, ref bool __result)
         {
+            // SAFE-09: skip all processing when mod is disabled due to missing critical defs.
+            if (EternalModState.IsDisabled)
+            {
+                return;
+            }
+
             // If already blocking, no need to check further
             if (__result)
             {

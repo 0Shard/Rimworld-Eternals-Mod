@@ -1,6 +1,6 @@
 // Relative Path: Eternal/Source/Eternal/Settings/HediffFilterState.cs
 // Creation Date: 01-01-2025
-// Last Edit: 01-01-2026
+// Last Edit: 11-07-2026
 // Author: 0Shard
 // Description: Manages filter state for the hediff settings UI.
 //              Pure state container - no business logic.
@@ -22,7 +22,7 @@ namespace Eternal.Settings
 
         // Toggle filters
         public bool ShowOnlyEnabled { get; set; } = false;
-        public bool ShowOnlyCustom { get; set; } = false;
+        public bool ShowOnlyCustom { get; set; } = true;
 
         // Source filters
         public string ModSourceFilter { get; set; } = "";

@@ -1,6 +1,6 @@
 // Relative Path: Eternal/Source/Eternal/UI/HediffSettings/EternalHediffModel.cs
 // Creation Date: 01-01-2025
-// Last Edit: 19-02-2026
+// Last Edit: 11-07-2026
 // Author: 0Shard
 // Description: Data access and business logic layer for hediff settings UI.
 //              GetHediffTypeColor now returns green for beneficial hediffs.
@@ -27,6 +27,13 @@ namespace Eternal.UI.HediffSettings
         }
 
         #region Data Access
+
+        /// <summary>
+        /// Persisted filter state owned by the long-lived manager.
+        /// The presenter rehydrates from this on construction so a reopened
+        /// settings window reflects filters chosen earlier in the session.
+        /// </summary>
+        public Eternal.Settings.HediffFilterState FilterState => manager.FilterState;
 
         /// <summary>
         /// Gets filtered hediffs based on current filter settings.
@@ -170,6 +177,17 @@ namespace Eternal.UI.HediffSettings
         public void ClearAllFilters()
         {
             manager.ClearAllFilters();
+        }
+
+        /// <summary>
+        /// Marks the filter result cache dirty. Call when a per-hediff setting
+        /// mutates in a way that affects HasCustomSettings()/canHeal (row Heal
+        /// toggle, slider input, bulk apply) so GetFilteredHediffsCached()
+        /// rebuilds and the list stays in sync.
+        /// </summary>
+        public void MarkFilterDirty()
+        {
+            manager.MarkFilterDirty();
         }
 
         #endregion
