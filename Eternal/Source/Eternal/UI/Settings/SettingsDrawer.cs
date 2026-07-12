@@ -3,6 +3,9 @@
 // Last Edit: 12-07-2026
 // Author: 0Shard
 // Description: UI drawing methods for Eternal mod settings. Features tab-based layout,
+//              12-07: Added Thresholds tab — live per-pawn list of threshold-gated hediffs
+//              (severity/threshold, Waiting/Healing/Not-rolled status); replaces the removed
+//              Eternal Essence tooltip threshold lines.
 //              10-07: Status tab nutrition formulas now include severityToNutritionRatio (were 250x off vs engine).
 //              11-07: Regrowth status rows are HP-scaled for a reference arm (30 HP); added full-arm
 //              regrowth cost row; default healing rate is 1.2 (Apex pacing).
@@ -14,11 +17,13 @@
 //              v1.0.1: Added Effects tab with consciousness buff, mood buff, population cap sections.
 
 using System;
+using System.Collections.Generic;
 using UnityEngine;
 using Verse;
 using Eternal.UI.HediffSettings;
 using Eternal.Extensions;
 using Eternal.DI;
+using Eternal.Healing;
 
 namespace Eternal.UI.Settings
 {
@@ -32,7 +37,8 @@ namespace Eternal.UI.Settings
         Effects,     // Consciousness buff, mood buff, population cap
         Performance, // Tick rates and intervals
         Advanced,    // Hediff Manager + Map Protection
-        Status       // Calculated statistics & previews
+        Status,      // Calculated statistics & previews
+        Thresholds   // Live per-pawn healing-activation thresholds
     }
 
     /// <summary>
@@ -334,7 +340,7 @@ namespace Eternal.UI.Settings
         /// </summary>
         private void DrawSettingsTabs(Rect rect)
         {
-            float tabWidth = rect.width / 6f;
+            float tabWidth = rect.width / 7f;
             float x = rect.x;
 
             DrawTabButton(new Rect(x, rect.y, tabWidth, rect.height), "Core", SettingsTab.Core);
@@ -348,6 +354,8 @@ namespace Eternal.UI.Settings
             DrawTabButton(new Rect(x, rect.y, tabWidth, rect.height), "Advanced", SettingsTab.Advanced);
             x += tabWidth;
             DrawTabButton(new Rect(x, rect.y, tabWidth, rect.height), "Status", SettingsTab.Status);
+            x += tabWidth;
+            DrawTabButton(new Rect(x, rect.y, tabWidth, rect.height), "Thresholds", SettingsTab.Thresholds);
         }
 
         /// <summary>
@@ -421,6 +429,9 @@ namespace Eternal.UI.Settings
                     break;
                 case SettingsTab.Status:
                     DrawStatusTab(listing);
+                    break;
+                case SettingsTab.Thresholds:
+                    DrawThresholdsTab(listing);
                     break;
             }
         }
@@ -683,6 +694,138 @@ namespace Eternal.UI.Settings
             DrawStatusRow(listing, "Can heal scars",
                 StatusCalculator.ScarsCoveredByDebt(maxDebt, settings.nutritionCostMultiplier, settings.severityToNutritionRatio));
 
+        }
+
+        // Row constants shared by DrawThresholdsTab and CalculateThresholdsTabHeight so the
+        // scroll view height always matches what is drawn.
+        private const float THRESHOLD_PAWN_HEADER_HEIGHT = 30f;
+        private const float THRESHOLD_ROW_HEIGHT = 24f;
+        private const float THRESHOLD_PAWN_GAP = 10f;
+
+        /// <summary>
+        /// Collects, per living Eternal pawn, the hediffs whose healing is gated behind a
+        /// severity activation threshold (HediffHealingConfig.IsThresholdGated), with the
+        /// tracker's threshold state. Single data source for the Thresholds tab draw + height.
+        /// </summary>
+        private static List<(Pawn pawn, List<(Hediff hediff, float threshold, bool reached, bool hasEntry)> rows)> CollectThresholdRows()
+        {
+            var pawnRows = new List<(Pawn, List<(Hediff, float, bool, bool)>)>();
+            if (Current.Game == null)
+                return pawnRows;
+
+            var thresholdTracker = EternalServiceContainer.Instance?.ThresholdTracker;
+            var settingsStore = Eternal_Mod.GetSettings()?.hediffManager?.Store;
+
+            foreach (var pawn in PawnExtensions.GetAllLivingEternalPawnsCached())
+            {
+                var hediffSet = pawn?.health?.hediffSet;
+                if (hediffSet == null)
+                    continue;
+
+                List<(Hediff, float, bool, bool)> gatedRows = null;
+                foreach (var hediff in hediffSet.hediffs)
+                {
+                    // Store.Get (NOT GetOrCreate): the settings UI must never mutate the store.
+                    var setting = settingsStore?.Get(hediff.def.defName);
+                    if (!HediffHealingConfig.IsThresholdGated(hediff, setting))
+                        continue;
+
+                    float threshold = 0f;
+                    bool reached = false;
+                    bool hasEntry = thresholdTracker != null
+                        && thresholdTracker.TryGetThreshold(pawn, hediff, out threshold, out reached);
+
+                    if (gatedRows == null)
+                        gatedRows = new List<(Hediff, float, bool, bool)>();
+                    gatedRows.Add((hediff, threshold, reached, hasEntry));
+                }
+
+                if (gatedRows != null)
+                    pawnRows.Add((pawn, gatedRows));
+            }
+
+            return pawnRows;
+        }
+
+        private void DrawThresholdsTab(Listing_Standard listing)
+        {
+            DrawSectionHeaderNoReset(listing, "Healing Thresholds");
+
+            if (Current.Game == null)
+            {
+                DrawInfoBox(listing, "Load a save to see live thresholds. Each staged debuff on an Eternal pawn rolls a random severity threshold; Eternal healing starts once severity rises to it, then keeps going.");
+                return;
+            }
+
+            var pawnRows = CollectThresholdRows();
+            if (pawnRows.Count == 0)
+            {
+                DrawInfoBox(listing, "No threshold-gated hediffs on living Eternal pawns right now. Rows appear while a staged debuff (disease, infection, ...) that is allowed to heal is present. Eternals travelling in caravans are not listed.");
+                return;
+            }
+
+            foreach (var (pawn, rows) in pawnRows)
+            {
+                Rect headerRect = listing.GetRect(THRESHOLD_PAWN_HEADER_HEIGHT);
+                Text.Anchor = TextAnchor.MiddleLeft;
+                GUI.color = new Color(0.9f, 0.85f, 0.7f);
+                Widgets.Label(headerRect, $"{pawn.LabelShortCap} — {rows.Count} gated");
+                GUI.color = Color.white;
+                Text.Anchor = TextAnchor.UpperLeft;
+
+                foreach (var (hediff, threshold, reached, hasEntry) in rows)
+                    DrawThresholdRow(listing, hediff, threshold, reached, hasEntry);
+
+                listing.Gap(THRESHOLD_PAWN_GAP);
+            }
+        }
+
+        /// <summary>
+        /// One hediff row: label (+ body part — thresholds are per part), severity/threshold,
+        /// and status: Waiting (threshold pending), Healing (latch fired), or Not rolled yet
+        /// (threshold registers on hediff add or lazily at the first healing pass).
+        /// </summary>
+        private void DrawThresholdRow(Listing_Standard listing, Hediff hediff, float threshold, bool reached, bool hasEntry)
+        {
+            Rect rowRect = listing.GetRect(THRESHOLD_ROW_HEIGHT);
+            Text.Anchor = TextAnchor.MiddleLeft;
+
+            string label = hediff.Part != null
+                ? $"{hediff.LabelCap} ({hediff.Part.Label})"
+                : hediff.LabelCap.ToString();
+            GUI.color = Color.gray;
+            Widgets.Label(new Rect(rowRect.x + 10f, rowRect.y, rowRect.width * 0.5f - 10f, rowRect.height), label);
+
+            string severityText = hasEntry
+                ? $"{hediff.Severity:F2} / {threshold:F2}"
+                : $"{hediff.Severity:F2}";
+            GUI.color = new Color(0.6f, 0.8f, 0.6f);
+            Widgets.Label(new Rect(rowRect.x + rowRect.width * 0.5f, rowRect.y, rowRect.width * 0.3f, rowRect.height), severityText);
+
+            string statusText;
+            Color statusColor;
+            if (!hasEntry)
+            {
+                statusText = "Not rolled yet";
+                statusColor = Color.gray;
+            }
+            else if (reached)
+            {
+                statusText = "Healing";
+                statusColor = new Color(0.3f, 0.8f, 0.3f);
+            }
+            else
+            {
+                statusText = "Waiting";
+                statusColor = new Color(0.85f, 0.8f, 0.3f);
+            }
+
+            GUI.color = statusColor;
+            Text.Anchor = TextAnchor.MiddleRight;
+            Widgets.Label(new Rect(rowRect.x + rowRect.width * 0.8f, rowRect.y, rowRect.width * 0.2f - 5f, rowRect.height), statusText);
+
+            GUI.color = Color.white;
+            Text.Anchor = TextAnchor.UpperLeft;
         }
 
         private void DrawEffectsTab(Listing_Standard listing)
@@ -1071,6 +1214,7 @@ namespace Eternal.UI.Settings
                 SettingsTab.Performance => CalculatePerformanceTabHeight(),
                 SettingsTab.Advanced => CalculateAdvancedTabHeight(),
                 SettingsTab.Status => CalculateStatusTabHeight(),
+                SettingsTab.Thresholds => CalculateThresholdsTabHeight(),
                 _ => 500f
             };
         }
@@ -1148,6 +1292,24 @@ namespace Eternal.UI.Settings
 
             // Food Debt Capacity (header + 4 rows)
             height += 40f + (4 * 25f);
+
+            // Padding
+            height += 30f;
+
+            return height;
+        }
+
+        private float CalculateThresholdsTabHeight()
+        {
+            // Section header (gap + medium label + gap)
+            float height = 50f;
+
+            var pawnRows = CollectThresholdRows();
+            if (pawnRows.Count == 0)
+                return height + 80f; // Info box + padding
+
+            foreach (var (_, rows) in pawnRows)
+                height += THRESHOLD_PAWN_HEADER_HEIGHT + rows.Count * THRESHOLD_ROW_HEIGHT + THRESHOLD_PAWN_GAP;
 
             // Padding
             height += 30f;

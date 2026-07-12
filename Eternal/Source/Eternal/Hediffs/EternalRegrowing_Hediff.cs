@@ -1,6 +1,6 @@
 // Relative Path: Eternal/Source/Eternal/Hediffs/EternalRegrowing_Hediff.cs
 // Creation Date: 28-10-2025
-// Last Edit: 26-03-2026
+// Last Edit: 12-07-2026
 // Author: 0Shard
 // Description: Hediff for tracking body part regrowth using the Immortals pattern.
 //              Stores forPart and partMaxHp, severity progresses 0->1, uses partEfficiencyOffset stages.
@@ -32,7 +32,9 @@ namespace Eternal
         public float partMaxHp;
 
         /// <summary>
-        /// Shows regrowth progress as "15.0/30 (Left Arm)"
+        /// Shows regrowth progress as "15.0/30". The part name is appended only while
+        /// Part is null (pre-migration saves), since a set Part already puts the hediff
+        /// under that part's row in the health tab.
         /// </summary>
         public override string SeverityLabel
         {
@@ -44,6 +46,8 @@ namespace Eternal
                 if (forPart != null)
                 {
                     float currentHp = severityInt * partMaxHp;
+                    if (Part != null)
+                        return $"{currentHp:F1}/{partMaxHp:F0}";
                     return $"{currentHp:F1}/{partMaxHp:F0} ({forPart.Label})";
                 }
                 return $"{severityInt:P0}";

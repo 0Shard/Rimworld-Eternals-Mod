@@ -1,7 +1,7 @@
 /*
  * Relative Path: Eternal/Source/Eternal/Components/EternalRegrowthManager.cs
  * Creation Date: 28-10-2025
- * Last Edit: 11-07-2026
+ * Last Edit: 12-07-2026
  * Author: 0Shard
  * Description: Refactored regrowth manager using hediff-per-part approach (Immortals pattern).
  *              Adds Eternal_Regrowing hediff to each missing body part with partEfficiencyOffset stages.
@@ -104,6 +104,10 @@ namespace Eternal
 
             foreach (var hediff in regrowingHediffs)
             {
+                // Migrate pre-fix saves: hediffs created before Part was set post-add
+                if (hediff.Part == null && hediff.forPart != null)
+                    hediff.Part = hediff.forPart;
+
                 float partMaxHP = hediff.forPart != null
                     ? EBFCompat.GetMaxHealth(hediff.forPart, pawn)
                     : 1f;
@@ -329,8 +333,9 @@ namespace Eternal
 
         /// <summary>
         /// Adds a regrowing hediff to a body part using the Immortals pattern.
-        /// Creates hediff with Part = null to avoid RimWorld race condition where vital organs
-        /// get Hediff_MissingPart re-added immediately after removal.
+        /// The hediff is created and added with Part = null (HediffSet.AddDirect rejects
+        /// hediffs on missing parts), then Part is set post-add so the health tab groups
+        /// it under the body part instead of Whole Body.
         /// The Hediff_MissingPart is removed only at completion in CompleteRegrowth().
         /// </summary>
         /// <param name="pawn">The pawn to add the hediff to.</param>
@@ -339,19 +344,22 @@ namespace Eternal
         {
             try
             {
-                // IMMORTALS PATTERN: Create hediff with Part = null to avoid RimWorld validation
-                // This prevents the race condition where RimWorld re-adds Hediff_MissingPart
-                // for vital organs (brain, heart) immediately after we remove it.
+                // Part must be null AT ADD TIME: HediffSet.AddDirect rejects any hediff whose
+                // Part is a currently-missing body part, and the part stays missing until
+                // CompleteRegrowth(). The real part lives in forPart until the post-add sync below.
                 var hediff = (EternalRegrowing_Hediff)HediffMaker.MakeHediff(
-                    EternalDefOf.Eternal_Regrowing, pawn, null);  // Part = null!
+                    EternalDefOf.Eternal_Regrowing, pawn, null);
 
                 // Store the actual part in forPart field (used for display and completion)
                 hediff.Initialize(part, pawn);
                 hediff.Severity = 0.01f;
 
-                // Add hediff without specifying part (Part property stays null)
-                // This allows it to coexist with Hediff_MissingPart without conflict
                 pawn.health.AddHediff(hediff);
+
+                // Set Part only after AddDirect succeeded: the setter has no missing-part
+                // validation and base Hediff.ExposeData persists it. Groups the hediff under
+                // the body part in the health tab instead of Whole Body.
+                hediff.Part = part;
 
                 // DON'T remove Hediff_MissingPart here - it's removed in CompleteRegrowth()
                 // Both hediffs coexist during regrowth, preventing RimWorld from re-adding missing part

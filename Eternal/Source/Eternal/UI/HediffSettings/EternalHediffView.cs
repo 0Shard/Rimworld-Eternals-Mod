@@ -1,8 +1,11 @@
 // Relative Path: Eternal/Source/Eternal/UI/HediffSettings/EternalHediffView.cs
 // Creation Date: 09-11-2025
-// Last Edit: 11-07-2026
+// Last Edit: 12-07-2026
 // Author: 0Shard
 // Description: View layer for hediff settings UI. Pure UI rendering, delegates to Presenter.
+//              12-07: Advanced/Bulk tab visual cleanup — capped CheckboxLabeled widths (toggle
+//              beside label, not at the far window edge), one content-fitted background
+//              treatment for both tabs, 30f slider rows so HorizontalSlider labels fit.
 //              PERF: List is virtualized — only rows inside the viewport (plus a small preload
 //              buffer) are drawn each frame; off-screen row Y offsets are pure arithmetic.
 //              SIMPLIFIED: Single compact row per hediff with only 3 options:
@@ -568,23 +571,27 @@ namespace Eternal.UI.HediffSettings
 
         #region Advanced Tab
 
+        /// <summary>Capped control width so CheckboxLabeled draws its toggle beside the label
+        /// instead of at the far right edge of a near-window-wide rect.</summary>
+        private const float CHECKBOX_ROW_WIDTH = 280f;
+
         private void DrawAdvancedTabContent(Rect rect)
         {
             float curY = rect.y + 10f;
 
             // Content-fitted background: paint only where the controls are, not the
             // entire content rect (avoids a large empty gray box on this sparse tab).
-            Rect bgRect = new Rect(rect.x + 10f, curY, rect.width - 20f, 70f);
+            Rect bgRect = new Rect(rect.x + 10f, curY, rect.width - 20f, 75f);
             GUI.color = new Color(0.2f, 0.2f, 0.2f, 1f);
             GUI.DrawTexture(bgRect, BaseContent.WhiteTex);
             GUI.color = Color.white;
 
-            Widgets.Label(new Rect(rect.x + 10f, curY, rect.width - 20f, 25f), "Global Healing Settings:");
-
-            curY += 35f;
+            curY += 10f;
+            Widgets.Label(new Rect(rect.x + 20f, curY, rect.width - 40f, 25f), "Global Healing Settings:");
+            curY += 30f;
 
             bool autoHeal = Eternal_Settings.instance.autoHealEnabled;
-            Rect autoHealRect = new Rect(rect.x + 10f, curY, rect.width - 20f, 25f);
+            Rect autoHealRect = new Rect(rect.x + 20f, curY, CHECKBOX_ROW_WIDTH, 25f);
             CheckboxLabeledWithTooltip(autoHealRect, "Auto-heal on Resurrection", ref autoHeal,
                 "Automatically heal configured hediffs when an Eternal pawn resurrects.");
             Eternal_Settings.instance.autoHealEnabled = autoHeal;
@@ -596,19 +603,23 @@ namespace Eternal.UI.HediffSettings
 
         private void DrawBulkTabContent(Rect rect)
         {
-            GUI.color = new Color(0.2f, 0.2f, 0.2f, 1f);
-            GUI.DrawTexture(rect, BaseContent.WhiteTex);
-            GUI.color = Color.white;
-
             float curY = rect.y + 10f;
 
-            Widgets.Label(new Rect(rect.x + 10f, curY, rect.width - 20f, 25f), "Bulk Operations Template:");
-            curY += 35f;
+            // Content-fitted background (same treatment as the Advanced tab) instead of
+            // painting the entire tab.
+            Rect bgRect = new Rect(rect.x + 10f, curY, rect.width - 20f, 255f);
+            GUI.color = new Color(0.2f, 0.2f, 0.2f, 1f);
+            GUI.DrawTexture(bgRect, BaseContent.WhiteTex);
+            GUI.color = Color.white;
 
-            DrawTemplateSettings(new Rect(rect.x + 10f, curY, rect.width - 20f, 145f));
-            curY += 160f;
+            curY += 10f;
+            Widgets.Label(new Rect(rect.x + 20f, curY, rect.width - 40f, 25f), "Bulk Operations Template:");
+            curY += 30f;
 
-            Rect applySelectedRect = new Rect(rect.x + 10f, curY, 200f, 30f);
+            DrawTemplateSettings(new Rect(rect.x + 20f, curY, rect.width - 40f, 160f));
+            curY += 175f;
+
+            Rect applySelectedRect = new Rect(rect.x + 20f, curY, 200f, 30f);
             if (Widgets.ButtonText(applySelectedRect, "Apply to Selected"))
             {
                 int count = presenter.OnApplyToSelected();
@@ -622,14 +633,14 @@ namespace Eternal.UI.HediffSettings
                 }
             }
 
-            Rect applyAllRect = new Rect(rect.x + 220f, curY, 200f, 30f);
+            Rect applyAllRect = new Rect(rect.x + 230f, curY, 200f, 30f);
             if (Widgets.ButtonText(applyAllRect, "Apply to All"))
             {
                 int count = presenter.OnApplyToAll();
                 Messages.Message($"Applied template settings to {count} hediffs.", MessageTypeDefOf.PositiveEvent);
             }
 
-            Rect resetAllRect = new Rect(rect.x + 430f, curY, 150f, 30f);
+            Rect resetAllRect = new Rect(rect.x + 440f, curY, 150f, 30f);
             if (Widgets.ButtonText(resetAllRect, "Reset All to Default"))
             {
                 presenter.OnResetAllToDefaults();
@@ -651,17 +662,17 @@ namespace Eternal.UI.HediffSettings
             curY += 25f;
 
             // Single "Heal" toggle (simplified from dual Enable + Can Heal)
-            Rect healRect = new Rect(curX, curY, columnWidth, 20f);
+            Rect healRect = new Rect(curX, curY, CHECKBOX_ROW_WIDTH, 20f);
             CheckboxLabeledWithTooltip(healRect, "Heal", ref template.canHeal,
                 "Template setting for enabling healing. When applied, matched hediffs will heal.");
             curY += 25f;
 
-            Rect cureRect = new Rect(curX, curY, columnWidth, 20f);
+            Rect cureRect = new Rect(curX, curY, CHECKBOX_ROW_WIDTH, 20f);
             CheckboxLabeledWithTooltip(cureRect, "Require Cure", ref template.requireCureToResurrect,
                 "Template setting for requiring hediff cure before resurrection.");
             curY += 25f;
 
-            Rect noThresholdRect = new Rect(curX, curY, columnWidth, 20f);
+            Rect noThresholdRect = new Rect(curX, curY, CHECKBOX_ROW_WIDTH, 20f);
             CheckboxLabeledWithTooltip(noThresholdRect, "Instant Healing", ref template.noThreshold,
                 "Template setting for instant healing (no severity threshold).");
             curY += 25f;
@@ -674,8 +685,10 @@ namespace Eternal.UI.HediffSettings
                 ? $"Heal Rate: {templateRate:F3}"
                 : $"Heal Rate: Global ({templateRate:F3})";
 
+            // 30f-tall slider rows: HorizontalSlider draws its label above the rail
+            // and clips when the rect is shorter.
             float templateSliderWidth = template.HasCustomHealingRate ? columnWidth - 70f : columnWidth - 20f;
-            Rect healRateRect = new Rect(curX, curY, templateSliderWidth, 20f);
+            Rect healRateRect = new Rect(curX, curY, templateSliderWidth, 30f);
             float newTemplateRate = DrawSliderWithNumericInput(
                 healRateRect, templateRate, 0.001f, 0.1f,
                 templateRateLabel,
@@ -688,28 +701,28 @@ namespace Eternal.UI.HediffSettings
             // Reset button (only if custom)
             if (template.HasCustomHealingRate)
             {
-                Rect resetTemplateRect = new Rect(curX + templateSliderWidth + 5f, curY, 45f, 20f);
+                Rect resetTemplateRect = new Rect(curX + templateSliderWidth + 5f, curY + 5f, 45f, 20f);
                 if (Widgets.ButtonText(resetTemplateRect, "Reset"))
                     template.ResetToGlobalRate();
             }
 
-            // Right column (header aligned with left; first control at +35 to match left's Heal)
+            // Right column (header aligned with left; first control at +25 to match left's Heal)
             curX += columnWidth;
             curY = rect.y + 10f;
             Widgets.Label(new Rect(curX, curY, columnWidth, 20f), "Scars & Permanent:");
             curY += 25f;
 
-            Rect permanentRect = new Rect(curX, curY, columnWidth, 20f);
+            Rect permanentRect = new Rect(curX, curY, CHECKBOX_ROW_WIDTH, 20f);
             CheckboxLabeledWithTooltip(permanentRect, "Heal Permanent", ref template.healPermanentInjuries,
                 "Template setting for healing permanent injuries.");
             curY += 25f;
 
-            Rect scarsRect = new Rect(curX, curY, columnWidth, 20f);
+            Rect scarsRect = new Rect(curX, curY, CHECKBOX_ROW_WIDTH, 20f);
             CheckboxLabeledWithTooltip(scarsRect, "Heal Scars", ref template.healScars,
                 "Template setting for scar removal.");
             curY += 25f;
 
-            Rect nutritionRect = new Rect(curX, curY, columnWidth - 20f, 20f);
+            Rect nutritionRect = new Rect(curX, curY, columnWidth - 20f, 30f);
             template.nutritionCostMultiplier = DrawSliderWithNumericInput(
                 nutritionRect, template.nutritionCostMultiplier, 0.1f, 5f,
                 $"Nutrition: {template.nutritionCostMultiplier:F2}x",

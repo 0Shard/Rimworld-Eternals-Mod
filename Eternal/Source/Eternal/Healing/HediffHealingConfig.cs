@@ -1,6 +1,6 @@
 // Relative Path: Eternal/Source/Eternal/Healing/HediffHealingConfig.cs
 // Creation Date: 28-10-2025
-// Last Edit: 11-07-2026
+// Last Edit: 12-07-2026
 // Author: 0Shard
 // Description: Creates default healing configurations for hediffs.
 //              Determines if hediffs should be healed by default and with what parameters.
@@ -111,10 +111,8 @@ namespace Eternal.Healing
 
             // Activation threshold: staged debuffs on living pawns wait for their random
             // threshold before healing starts. Gameplay variety: some infections heal early,
-            // others progress further. Bypasses: "Instant Healing" (noThreshold) setting, and
-            // ShouldBypassThreshold (bloodloss, stationary, naturally-decaying hediffs).
-            if (!pawnIsDead && setting?.noThreshold != true
-                && hediff.IsDebuffWithStages() && !hediff.ShouldBypassThreshold())
+            // others progress further.
+            if (!pawnIsDead && IsThresholdGated(hediff, setting))
             {
                 var tracker = EternalServiceContainer.Instance?.ThresholdTracker;
                 if (tracker != null && !tracker.HasReachedThreshold(hediff.pawn, hediff))
@@ -122,6 +120,31 @@ namespace Eternal.Healing
             }
 
             return true;
+        }
+
+        /// <summary>
+        /// Single source of truth for whether a hediff's healing is gated behind a severity
+        /// activation threshold. Used by the healing pipeline (ShouldHealByDefault) and the
+        /// Thresholds settings tab so display and enforcement can never drift apart.
+        /// Gated = allowed to heal (canHeal, or lethal+bad fallback without a setting) AND
+        /// a rising staged debuff AND not bypassed ("Instant Healing" noThreshold setting,
+        /// bloodloss, stationary, or naturally-decaying hediffs).
+        /// </summary>
+        public static bool IsThresholdGated(Hediff hediff, EternalHediffSetting setting)
+        {
+            if (hediff?.def == null || hediff.def == EternalDefOf.Eternal_Essence)
+                return false;
+
+            bool allowedToHeal = setting != null
+                ? setting.canHeal
+                : (hediff.def.lethalSeverity > 0f && hediff.def.isBad);
+            if (!allowedToHeal)
+                return false;
+
+            if (setting?.noThreshold == true)
+                return false;
+
+            return hediff.IsDebuffWithStages() && !hediff.ShouldBypassThreshold();
         }
 
         /// <summary>

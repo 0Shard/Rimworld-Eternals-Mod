@@ -33,22 +33,22 @@
         <defaultLabelColor>(0.4, 0.8, 0.4)</defaultLabelColor>
         <stages>
             <li>
-                <label>forming</label>
+                <label>Stage 1</label>
                 <minSeverity>0</minSeverity>
                 <partEfficiencyOffset>-1.0</partEfficiencyOffset>
             </li>
             <li>
-                <label>developing</label>
+                <label>Stage 2</label>
                 <minSeverity>0.25</minSeverity>
                 <partEfficiencyOffset>-1.0</partEfficiencyOffset>
             </li>
             <li>
-                <label>integrating</label>
+                <label>Stage 3</label>
                 <minSeverity>0.5</minSeverity>
                 <partEfficiencyOffset>-0.75</partEfficiencyOffset>
             </li>
             <li>
-                <label>completing</label>
+                <label>Stage 4</label>
                 <minSeverity>0.75</minSeverity>
                 <partEfficiencyOffset>-0.5</partEfficiencyOffset>
             </li>
