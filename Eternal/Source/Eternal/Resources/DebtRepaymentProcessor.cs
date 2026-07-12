@@ -1,10 +1,11 @@
 // Relative Path: Eternal/Source/Eternal/Resources/DebtRepaymentProcessor.cs
 // Creation Date: 29-12-2025
-// Last Edit: 29-12-2025
+// Last Edit: 12-07-2026
 // Author: 0Shard
 // Description: Tick-based gradual debt repayment by draining food bar.
 //              Creates a "leaky food bar" effect when pawn has debt.
-//              Drain rate scales with debt level: higher debt = faster drain.
+//              Drain rate is CONSTANT per debt episode: peakDebt / (60000 × debtRepaymentDays)
+//              per tick, so any debt fully repays within the window when food is available.
 
 using System;
 using System.Linq;
@@ -20,11 +21,10 @@ namespace Eternal.Resources
     /// <remarks>
     /// Behavior:
     /// - When food bar is above threshold AND pawn has debt → drain food bar
-    /// - Drain rate scales with debt level (higher debt = faster drain)
-    /// - Min/max drain rate thresholds from settings
+    /// - Drain rate is constant per debt episode so repayment completes in a fixed window
     /// - Called from TickOrchestrator during rare tick processing
     ///
-    /// Formula: drainRate = minRate + (debtRatio × (maxRate - minRate))
+    /// Formula: drainRate = peakDebt / (60000 × debtRepaymentDays) per tick
     /// </remarks>
     public class DebtRepaymentProcessor
     {
@@ -105,31 +105,25 @@ namespace Eternal.Resources
         }
 
         /// <summary>
-        /// Calculates drain rate based on debt level.
-        /// Higher debt = faster drain rate.
+        /// Calculates the constant drain rate for the pawn's current debt episode.
         /// </summary>
         /// <param name="pawn">The pawn to calculate for</param>
         /// <param name="debt">Current debt amount</param>
         /// <returns>Drain rate per tick</returns>
         /// <remarks>
-        /// Formula: drainRate = minRate + (debtRatio × (maxRate - minRate))
+        /// Formula: drainRate = peakDebt / (60000 × debtRepaymentDays)
         ///
-        /// Examples (with default min=0.0001, max=0.001):
-        /// - 0% debt:   0.0001/tick (min rate)
-        /// - 50% debt:  0.00055/tick (midpoint)
-        /// - 100% debt: 0.001/tick (max rate)
+        /// The rate derives from the episode's PEAK debt (not the remaining debt) so it stays
+        /// constant as debt shrinks — a proportional rate would decay exponentially and never
+        /// finish. Any debt therefore fully repays within debtRepaymentDays of food availability.
         /// </remarks>
         private float CalculateDrainRate(Pawn pawn, float debt)
         {
-            float maxDebt = _debtSystem.GetMaxCapacity(pawn);
-            if (maxDebt <= 0f)
-                return _settings.MinDebtDrainRate;
+            // Peak can lag behind debt if it was never recorded (e.g. pre-update save) — use max.
+            float peakDebt = Math.Max(_debtSystem.GetPeakDebt(pawn), debt);
+            float repaymentTicks = 60000f * Math.Max(_settings.DebtRepaymentDays, 0.01f);
 
-            float debtRatio = Math.Min(1f, debt / maxDebt);
-            float minRate = _settings.MinDebtDrainRate;
-            float maxRate = _settings.MaxDebtDrainRate;
-
-            return minRate + (debtRatio * (maxRate - minRate));
+            return peakDebt / repaymentTicks;
         }
     }
 }

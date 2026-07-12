@@ -1,6 +1,6 @@
 // Relative Path: Eternal/Source/Eternal/UI/Eternal_Settings.cs
 // Creation Date: 01-01-2025
-// Last Edit: 11-07-2026
+// Last Edit: 12-07-2026
 // Author: 0Shard
 // Description: Settings data class for Eternal mod configuration. Contains all
 //              mod-specific settings and user preferences. UI drawing is delegated
@@ -62,22 +62,14 @@ namespace Eternal
         // Food Debt
         public const float MaxDebtMultiplier = 5.0f;
         public const float FoodDrainThreshold = 0.15f;     // Stop instant drain at 15% (UrgentlyHungry)
-        public const float MinDebtDrainRate = 0.0001f;     // Drain/tick at 0% debt
-        public const float MaxDebtDrainRate = 0.001f;      // Drain/tick at 100% debt
         public const float SeverityToNutritionRatio = 0.004f; // 250:1 ratio (250 severity = 1 nutrition)
 
         /// <summary>
-        /// Maximum hunger rate multiplier applied at full food debt.
-        /// Default: 2.0x — at 100% debt the pawn eats twice as fast, repaying debt sooner.
-        /// The XML HediffStage hungerRateFactor delivers this cap; this setting documents it.
+        /// In-game days a debt episode takes to fully repay via the food-bar drain.
+        /// Drain rate = peakDebt / (60000 × days) per tick — constant per episode, so any
+        /// debt fully repays within the window when food is available.
         /// </summary>
-        public const float HungerMultiplierCap = 2.0f;
-
-        /// <summary>
-        /// Whether the hunger rate boost from Metabolic Recovery is enabled.
-        /// When false, pawns still accumulate debt but the hediff is suppressed.
-        /// </summary>
-        public const bool HungerBoostEnabled = true;
+        public const float DebtRepaymentDays = 1.0f;
 
         /// <summary>
         /// Computes display ratio string from SeverityToNutritionRatio.
@@ -217,16 +209,10 @@ namespace Eternal
         public float foodDrainThreshold = 0.15f;
 
         /// <summary>
-        /// Minimum food drain rate per tick when debt is low.
-        /// At 0% debt, food drains at this rate.
+        /// In-game days a debt episode takes to fully repay via the food-bar drain.
+        /// Default: 1.0 (range 0.25 - 5).
         /// </summary>
-        public float minDebtDrainRate = 0.0001f;
-
-        /// <summary>
-        /// Maximum food drain rate per tick when debt is high.
-        /// At 100% debt, food drains at this rate.
-        /// </summary>
-        public float maxDebtDrainRate = 0.001f;
+        public float debtRepaymentDays = SettingsDefaults.DebtRepaymentDays;
 
         /// <summary>
         /// Ratio for converting severity healed to nutrition cost.
@@ -234,18 +220,6 @@ namespace Eternal
         /// Range: 0.001 - 0.1 (1000:1 to 10:1)
         /// </summary>
         public float severityToNutritionRatio = 0.004f;
-
-        /// <summary>
-        /// Maximum hunger rate multiplier applied at full food debt via Metabolic Recovery hediff.
-        /// Default: 2.0 (2× normal hunger at 100% debt)
-        /// </summary>
-        public float hungerMultiplierCap = SettingsDefaults.HungerMultiplierCap;
-
-        /// <summary>
-        /// Whether the hunger rate boost from the Metabolic Recovery hediff is enabled.
-        /// When false, pawns still accumulate debt but the hunger acceleration is suppressed.
-        /// </summary>
-        public bool hungerBoostEnabled = SettingsDefaults.HungerBoostEnabled;
 
         #endregion
 
@@ -340,11 +314,8 @@ namespace Eternal
         {
             maxDebtMultiplier = SettingsDefaults.MaxDebtMultiplier;
             foodDrainThreshold = SettingsDefaults.FoodDrainThreshold;
-            minDebtDrainRate = SettingsDefaults.MinDebtDrainRate;
-            maxDebtDrainRate = SettingsDefaults.MaxDebtDrainRate;
+            debtRepaymentDays = SettingsDefaults.DebtRepaymentDays;
             severityToNutritionRatio = SettingsDefaults.SeverityToNutritionRatio;
-            hungerMultiplierCap = SettingsDefaults.HungerMultiplierCap;
-            hungerBoostEnabled = SettingsDefaults.HungerBoostEnabled;
         }
 
         /// <summary>
@@ -453,11 +424,8 @@ namespace Eternal
                 {
                     MaxDebtMultiplier       = maxDebtMultiplier,
                     FoodDrainThreshold      = foodDrainThreshold,
-                    MinDebtDrainRate        = minDebtDrainRate,
-                    MaxDebtDrainRate        = maxDebtDrainRate,
+                    DebtRepaymentDays       = debtRepaymentDays,
                     SeverityToNutritionRatio = severityToNutritionRatio,
-                    HungerMultiplierCap     = hungerMultiplierCap,
-                    HungerBoostEnabled      = hungerBoostEnabled,
                 },
                 Perf = new ImmutableSettingsSnapshot.PerfSection
                 {
@@ -540,11 +508,8 @@ namespace Eternal
             // Food debt settings
             Scribe_Values.Look(ref maxDebtMultiplier, "maxDebtMultiplier", 5.0f);
             Scribe_Values.Look(ref foodDrainThreshold, "foodDrainThreshold", 0.15f);
-            Scribe_Values.Look(ref minDebtDrainRate, "minDebtDrainRate", 0.0001f);
-            Scribe_Values.Look(ref maxDebtDrainRate, "maxDebtDrainRate", 0.001f);
+            Scribe_Values.Look(ref debtRepaymentDays, "debtRepaymentDays", SettingsDefaults.DebtRepaymentDays);
             Scribe_Values.Look(ref severityToNutritionRatio, "severityToNutritionRatio", 0.004f);
-            Scribe_Values.Look(ref hungerMultiplierCap, "hungerMultiplierCap", SettingsDefaults.HungerMultiplierCap);
-            Scribe_Values.Look(ref hungerBoostEnabled, "hungerBoostEnabled", SettingsDefaults.HungerBoostEnabled);
 
             // Performance settings
             Scribe_Values.Look(ref normalTickRate, "normalTickRate", 60);

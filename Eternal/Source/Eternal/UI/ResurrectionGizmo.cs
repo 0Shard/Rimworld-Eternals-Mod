@@ -1,6 +1,6 @@
 // Relative Path: Eternal/Source/Eternal/UI/ResurrectionGizmo.cs
 // Creation Date: 29-10-2025
-// Last Edit: 26-06-2026
+// Last Edit: 12-07-2026
 // Author: 0Shard
 // Description: Enhanced ResurrectionGizmo for corpse-based Eternal resurrection system with cost calculation and progress tracking.
 //              Fixed: Now properly assigns base Command class fields (icon, disabled, hotKey, Order) for RimWorld UI rendering.
@@ -169,8 +169,8 @@ namespace Eternal.UI
                 totalHealingCost = resurrectionCalculator.CalculateTotalCost(healingItems);
                 estimatedTimeTicks = resurrectionCalculator.CalculateEstimatedTimeTicks(healingItems);
 
-                // Check if within debt capacity limits
-                canResurrect = CanAccumulateDebt(totalHealingCost);
+                // Resurrection debt is uncapped — cost never blocks resurrection.
+                canResurrect = true;
 
                 // Set disabled state for base Command class (RimWorld reads this field)
                 this.disabled = !canResurrect || isAlreadyResurrecting;
@@ -198,23 +198,6 @@ namespace Eternal.UI
                 this.disabled = true;
                 this.disabledReason = "Error calculating resurrection requirements";
             }
-        }
-
-        /// <summary>
-        /// Checks if the pawn can accumulate the required debt.
-        /// Uses body size fallback for dead pawns (whose needs.food is null).
-        /// </summary>
-        /// <param name="debtAmount">The debt amount to check.</param>
-        /// <returns>True if debt can be accumulated, false otherwise.</returns>
-        private bool CanAccumulateDebt(float debtAmount)
-        {
-            float maxDebt = GetMaxDebtCapacity();
-            if (maxDebt <= 0f)
-                return false;
-
-            float currentDebt = corpseData?.FoodDebt ?? 0f;
-
-            return (currentDebt + debtAmount) <= maxDebt;
         }
 
         /// <summary>
@@ -264,8 +247,7 @@ namespace Eternal.UI
                            $"Healing items: {totalHealingItems}\n" +
                            $"Total energy cost: {totalHealingCost:F1} nutrition\n" +
                            $"Estimated time: {EternalHealingPriority.FormatResurrectionTime(estimatedTimeTicks)}\n" +
-                           $"Current debt: {corpseData.FoodDebt:F1} nutrition\n" +
-                           $"Max debt capacity: {GetMaxDebtCapacity():F1} nutrition";
+                           $"Current debt: {corpseData.FoodDebt:F1} nutrition";
                 }
                 catch (Exception ex)
                 {
@@ -282,35 +264,7 @@ namespace Eternal.UI
         /// <returns>Reason string.</returns>
         private string GetCannotResurrectReason()
         {
-            if (!CanAccumulateDebt(totalHealingCost))
-            {
-                float maxDebt = GetMaxDebtCapacity();
-                float currentDebt = corpseData?.FoodDebt ?? 0f;
-                return $"Insufficient debt capacity. Required: {totalHealingCost:F1}, Available: {(maxDebt - currentDebt):F1}";
-            }
-
             return "Unknown reason";
-        }
-
-        /// <summary>
-        /// Gets the maximum debt capacity for the pawn.
-        /// Uses body size fallback for dead pawns (whose needs.food is null).
-        /// Matches logic in UnifiedFoodDebtManager.GetMaxCapacity().
-        /// </summary>
-        /// <returns>Maximum debt capacity.</returns>
-        private float GetMaxDebtCapacity()
-        {
-            float maxDebtMultiplier = Eternal_Mod.GetSettings().maxDebtMultiplier;
-
-            // For dead pawns, needs.food is typically null - use body size fallback
-            if (originalPawn?.needs?.food != null)
-            {
-                return originalPawn.needs.food.MaxLevel * maxDebtMultiplier;
-            }
-
-            // Fallback for dead pawns: use body size (matching UnifiedFoodDebtManager.GetMaxCapacity())
-            float bodySize = originalPawn?.BodySize ?? 1.0f;
-            return 1.0f * bodySize * maxDebtMultiplier;
         }
 
         /// <summary>

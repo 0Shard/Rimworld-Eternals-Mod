@@ -1,6 +1,6 @@
 // Relative Path: Eternal/Source/Eternal.Tests/Resources/UnifiedFoodDebtManagerTests.cs
 // Creation Date: 24-02-2026
-// Last Edit: 24-02-2026
+// Last Edit: 12-07-2026
 // Author: 0Shard
 // Description: Unit tests for food debt system interfaces and debt math verification.
 //              UnifiedFoodDebtManager cannot be instantiated in unit tests because its
@@ -107,6 +107,27 @@ namespace Eternal.Tests.Resources
         {
             var method = FindInterfaceMethod(typeof(IFoodDebtSystem), "HasExcessiveDebt");
             Assert.NotNull(method);
+        }
+
+        [Fact]
+        public void IFoodDebtSystem_HasAddResurrectionDebtMethod()
+        {
+            var method = FindInterfaceMethod(typeof(IFoodDebtSystem), "AddResurrectionDebt");
+            Assert.NotNull(method);
+        }
+
+        [Fact]
+        public void IFoodDebtSystem_HasGetPeakDebtMethod()
+        {
+            var method = FindInterfaceMethod(typeof(IFoodDebtSystem), "GetPeakDebt");
+            Assert.NotNull(method);
+        }
+
+        [Fact]
+        public void IDebtAccumulator_HasAddResurrectionDebt_NotTheOldCappedMethod()
+        {
+            Assert.NotNull(typeof(IDebtAccumulator).GetMethod("AddResurrectionDebt"));
+            Assert.Null(typeof(IDebtAccumulator).GetMethod("AddDebtWithResurrectionCap"));
         }
 
         // -----------------------------------------------------------------
@@ -243,6 +264,84 @@ namespace Eternal.Tests.Resources
             float currentDebt = 4.99f;
             bool isExcessive = currentDebt >= maxDebt;
             Assert.False(isExcessive);
+        }
+
+        // -----------------------------------------------------------------
+        // Resurrection debt baseline math verification
+        // Capacity = baseCap + resurrectionBaseline; alive cap applies on top.
+        // Baseline shrinks with repayment: baseline = min(baseline, newDebt).
+        // -----------------------------------------------------------------
+
+        [Fact]
+        public void ResurrectionDebt_CapacityGrowsByBaseline()
+        {
+            // Decapitation scenario: 6 nutrition corpse debt, base cap 5 (1.0 × 5)
+            float baseCap = 1.0f * TestData.DefaultMaxDebtMultiplier;
+            float resurrectionBaseline = 6.0f;
+            float capacity = baseCap + resurrectionBaseline;
+            Assert.Equal(11.0f, capacity, TestData.FloatPrecision);
+        }
+
+        [Fact]
+        public void ResurrectionDebt_AliveHeadroomOnTopOfBaseline()
+        {
+            // With 6 baseline debt, alive healing can still add up to the base cap (5)
+            float baseCap = 1.0f * TestData.DefaultMaxDebtMultiplier;
+            float baseline = 6.0f;
+            float currentDebt = baseline;
+            float aliveHeadroom = (baseCap + baseline) - currentDebt;
+            Assert.Equal(baseCap, aliveHeadroom, TestData.FloatPrecision);
+        }
+
+        [Fact]
+        public void ResurrectionDebt_BaselineShrinksWithRepayment()
+        {
+            float baseline = 6.0f;
+            float newDebtAfterRepay = 4.0f;
+            float shrunkBaseline = Math.Min(baseline, newDebtAfterRepay);
+            Assert.Equal(4.0f, shrunkBaseline, TestData.FloatPrecision);
+        }
+
+        [Fact]
+        public void ResurrectionDebt_UncappedAdd_ExceedsBaseCapWithoutClamp()
+        {
+            // AddResurrectionDebt never clamps: 6 > base cap 5 must survive intact
+            float baseCap = 1.0f * TestData.DefaultMaxDebtMultiplier;
+            float resurrectionDebt = 6.0f;
+            Assert.True(resurrectionDebt > baseCap);
+            float storedDebt = resurrectionDebt; // no Min() against baseCap
+            Assert.Equal(6.0f, storedDebt, TestData.FloatPrecision);
+        }
+
+        // -----------------------------------------------------------------
+        // Repayment drain rate verification
+        // drainRate = peakDebt / (60000 × debtRepaymentDays) per tick — constant
+        // per episode, so full repayment completes within the window.
+        // -----------------------------------------------------------------
+
+        [Fact]
+        public void RepaymentRate_SixDebt_RepaysInExactlyOneDay()
+        {
+            float peakDebt = 6.0f;
+            float drainPerTick = peakDebt / (60000f * TestData.DefaultDebtRepaymentDays);
+            float ticksToRepay = peakDebt / drainPerTick;
+            Assert.Equal(60000f, ticksToRepay, TestData.FloatPrecision);
+        }
+
+        [Fact]
+        public void RepaymentRate_ConstantAsDebtShrinks()
+        {
+            // Rate derives from PEAK, not remaining debt — stays constant mid-episode
+            float peakDebt = 6.0f;
+            float rateAtStart = peakDebt / (60000f * TestData.DefaultDebtRepaymentDays);
+            float rateHalfway = Math.Max(peakDebt, 3.0f) / (60000f * TestData.DefaultDebtRepaymentDays);
+            Assert.Equal(rateAtStart, rateHalfway, TestData.FloatPrecision);
+        }
+
+        [Fact]
+        public void RepaymentRate_DefaultWindow_IsOneDay()
+        {
+            Assert.Equal(1.0f, TestData.DefaultDebtRepaymentDays, TestData.FloatPrecision);
         }
 
         // -----------------------------------------------------------------

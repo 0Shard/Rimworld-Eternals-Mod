@@ -1,10 +1,10 @@
 // Relative Path: Eternal/Source/Eternal/Healing/EternalResurrectionCalculator.cs
 // Creation Date: 09-11-2025
-// Last Edit: 11-07-2026
+// Last Edit: 12-07-2026
 // Author: 0Shard
 // Description: Calculates healing requirements, costs, and time estimates for Eternal corpse resurrection.
 //              Delegates to EternalHealingPriority for HealingItem creation to ensure EnergyCost is set.
-//              Resurrection debt is capped at RESURRECTION_DEBT_CAP (2.0) × pawn nutrition capacity.
+//              Resurrection debt is uncapped — costs are reported in full, never clamped.
 //              Time estimates use actual healing rates: severity / (baseHealingRate * bodySize) * tickInterval.
 //              Total ETA is the MAX over items (parallel healing model), not the sum.
 
@@ -93,43 +93,6 @@ namespace Eternal.Healing
 
             // Use EnergyCost set by EternalHealingPriority factory methods
             return healingItems.Sum(item => item?.EnergyCost ?? 0f);
-        }
-
-        /// <summary>
-        /// Calculates the total nutrition cost for a healing queue, capped at 2.0 × pawn's nutrition capacity.
-        /// This prevents resurrection from accumulating excessive debt.
-        /// </summary>
-        /// <param name="healingItems">The healing items to calculate cost for</param>
-        /// <param name="pawn">The pawn being resurrected (for nutrition cap calculation)</param>
-        /// <returns>Total nutrition cost, capped at 2.0 × nutrition capacity</returns>
-        public float CalculateTotalCostCapped(List<HealingItem> healingItems, Pawn pawn)
-        {
-            float uncappedCost = CalculateTotalCost(healingItems);
-            float costCap = GetResurrectionCostCap(pawn);
-            return Math.Min(uncappedCost, costCap);
-        }
-
-        /// <summary>
-        /// Gets the maximum resurrection debt cap for a pawn.
-        /// Cap is 2.0 × pawn's max nutrition (or 2.0 × bodySize if no food need).
-        /// This prevents resurrection from accumulating excessive debt.
-        /// </summary>
-        /// <param name="pawn">The pawn to calculate cap for</param>
-        /// <returns>Maximum resurrection debt</returns>
-        public float GetResurrectionCostCap(Pawn pawn)
-        {
-            // Debt cap: 2.0 × nutrition capacity
-            // Keeps resurrection cost reasonable even for heavily damaged pawns
-            const float RESURRECTION_DEBT_CAP = 2.0f;
-
-            if (pawn?.needs?.food != null)
-            {
-                return RESURRECTION_DEBT_CAP * pawn.needs.food.MaxLevel;
-            }
-
-            // Fallback for dead pawns without food need: use body size
-            float bodySize = pawn?.BodySize ?? 1.0f;
-            return RESURRECTION_DEBT_CAP * bodySize;
         }
 
         /// <summary>

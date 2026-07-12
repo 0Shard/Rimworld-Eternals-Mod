@@ -73,17 +73,15 @@
     </HediffDef>
 
     <!-- Metabolic Recovery Hediff -->
-    <!-- Applied after resurrection to represent the metabolic cost of healing.
+    <!-- Applied while a pawn carries food debt from healing/resurrection.
          Severity maps to accumulated food debt: 0.0 = no debt, 1.0 = maximum debt.
-         Higher severity = faster hunger, incentivising the player to feed the pawn quickly.
-         The custom hediff class (Plan 02) may override the cap for configurable max hunger rate.
-         The 8 stages provide a smooth BASE hunger rate curve from 1.1x at minimal debt up to
-         2.0x at maximum debt (2x hunger cap per design decision). -->
+         Pure status display: repayment happens via the food-bar drain
+         (DebtRepaymentProcessor), NOT via a hunger rate increase. -->
     <HediffDef>
         <defName>Eternal_MetabolicRecovery</defName>
         <hediffClass>Eternal.Hediffs.MetabolicRecovery_Hediff</hediffClass>
         <label>Metabolic Recovery</label>
-        <description>This pawn is metabolically recovering from resurrection. Increased hunger accelerates recovery.</description>
+        <description>This pawn is metabolically recovering from resurrection or healing. The body consumes extra nutrition until the metabolic debt is repaid.</description>
         <initialSeverity>0.01</initialSeverity>
         <minSeverity>0</minSeverity>
         <maxSeverity>1.0</maxSeverity>
@@ -92,53 +90,17 @@
         <displayWound>false</displayWound>
         <defaultLabelColor>(0.9, 0.6, 0.2)</defaultLabelColor>
         <stages>
-            <!-- Stage 0: minimal debt — very slight hunger increase -->
             <li>
                 <label>minor recovery</label>
                 <minSeverity>0.00</minSeverity>
-                <hungerRateFactor>1.1</hungerRateFactor>
             </li>
-            <!-- Stage 1: noticeable but mild -->
-            <li>
-                <label>minor recovery</label>
-                <minSeverity>0.10</minSeverity>
-                <hungerRateFactor>1.2</hungerRateFactor>
-            </li>
-            <!-- Stage 2: moderate onset -->
-            <li>
-                <label>minor recovery</label>
-                <minSeverity>0.20</minSeverity>
-                <hungerRateFactor>1.33</hungerRateFactor>
-            </li>
-            <!-- Stage 3: moderate recovery -->
             <li>
                 <label>moderate recovery</label>
                 <minSeverity>0.33</minSeverity>
-                <hungerRateFactor>1.5</hungerRateFactor>
             </li>
-            <!-- Stage 4: sustained moderate recovery -->
-            <li>
-                <label>moderate recovery</label>
-                <minSeverity>0.50</minSeverity>
-                <hungerRateFactor>1.66</hungerRateFactor>
-            </li>
-            <!-- Stage 5: intensive recovery begins -->
             <li>
                 <label>intensive recovery</label>
                 <minSeverity>0.66</minSeverity>
-                <hungerRateFactor>1.75</hungerRateFactor>
-            </li>
-            <!-- Stage 6: intensive recovery sustained -->
-            <li>
-                <label>intensive recovery</label>
-                <minSeverity>0.80</minSeverity>
-                <hungerRateFactor>1.85</hungerRateFactor>
-            </li>
-            <!-- Stage 7: maximum debt — 2x hunger cap -->
-            <li>
-                <label>intensive recovery</label>
-                <minSeverity>0.90</minSeverity>
-                <hungerRateFactor>2.0</hungerRateFactor>
             </li>
         </stages>
     </HediffDef>

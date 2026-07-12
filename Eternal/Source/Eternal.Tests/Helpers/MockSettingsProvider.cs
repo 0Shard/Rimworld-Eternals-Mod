@@ -1,6 +1,6 @@
 // Relative Path: Eternal/Source/Eternal.Tests/Helpers/MockSettingsProvider.cs
 // Creation Date: 24-02-2026
-// Last Edit: 24-02-2026
+// Last Edit: 12-07-2026
 // Author: 0Shard
 // Description: NSubstitute-based ISettingsProvider factory for tests.
 //              Default() returns a substitute with all properties matching SettingsDefaults.
@@ -45,8 +45,7 @@ namespace Eternal.Tests.Helpers
             // Food Debt
             settings.MaxDebtMultiplier.Returns(TestData.DefaultMaxDebtMultiplier);
             settings.FoodDrainThreshold.Returns(TestData.DefaultFoodDrainThreshold);
-            settings.MinDebtDrainRate.Returns(TestData.DefaultMinDebtDrainRate);
-            settings.MaxDebtDrainRate.Returns(TestData.DefaultMaxDebtDrainRate);
+            settings.DebtRepaymentDays.Returns(TestData.DefaultDebtRepaymentDays);
             settings.SeverityToNutritionRatio.Returns(TestData.DefaultSeverityToNutritionRatio);
 
             // Performance

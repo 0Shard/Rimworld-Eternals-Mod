@@ -218,7 +218,7 @@ Located in `Eternal/Source/Eternal/Patches/`:
 - `GameComponentRegistration_Patch`: Programmatic component registration
 - `Odyssey/`: DLC-specific patches for space travel scenarios
 
-**Note:** Food debt repayment is handled by `ProcessDebtRepaymentAndSync()` in `TickOrchestrator` (not a Harmony patch).
+**Note:** Food debt repayment is handled by `DebtRepaymentProcessor` (constant food-bar drain: `peakDebt / (60000 × debtRepaymentDays)` per tick, never below the 15% food floor — any debt repays within the configured window, default 1 day). `ProcessDebtRepaymentAndSync()` in `TickOrchestrator` only syncs the Metabolic Recovery hediff display and the food-need waiver. Resurrection debt is UNCAPPED (`AddResurrectionDebt` raises a per-pawn baseline; `GetMaxCapacity` = base cap + baseline, so `maxDebtMultiplier` is alive-time headroom on top). There is no permanent death from debt.
 
 ### RimWorld Death Sequence (Critical Knowledge)
 
@@ -357,10 +357,10 @@ IHealingRateCalculator {
     float CalculateHealingPerTick(Pawn pawn);
 }
 
-// Debt accumulation with resurrection cap
+// Debt accumulation: alive-capped standard debt + uncapped resurrection debt
 IDebtAccumulator {
-    void AddDebt(Pawn pawn, float amount);
-    void AddDebtWithResurrectionCap(Pawn pawn, float amount, float costCap);
+    bool AddDebt(Pawn pawn, float amount);
+    bool AddResurrectionDebt(Pawn pawn, float amount);
 }
 
 // Body part restoration

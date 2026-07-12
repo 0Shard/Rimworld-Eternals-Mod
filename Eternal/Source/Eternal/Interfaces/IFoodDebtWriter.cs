@@ -1,6 +1,6 @@
 // Relative Path: Eternal/Source/Eternal/Interfaces/IFoodDebtWriter.cs
 // Creation Date: 29-12-2025
-// Last Edit: 06-03-2026
+// Last Edit: 12-07-2026
 // Author: 0Shard
 // Description: Write interface for food debt mutations. Part of Interface Segregation
 //              refactoring - clients that need to modify debt use this interface.
@@ -34,6 +34,16 @@ namespace Eternal.Interfaces
         /// <param name="amount">The amount of debt to add.</param>
         /// <returns>True if debt was added successfully, false if capacity exceeded.</returns>
         bool AddDebt(Pawn pawn, float amount);
+
+        /// <summary>
+        /// Adds uncapped resurrection debt for a pawn during corpse healing.
+        /// Raises the pawn's resurrection debt baseline to the new total, so the alive-time
+        /// cap (maxDebtMultiplier) applies on top of resurrection debt.
+        /// </summary>
+        /// <param name="pawn">The pawn to add debt for.</param>
+        /// <param name="amount">The amount of debt to add.</param>
+        /// <returns>True if debt was added (or waived for food-need-disabled pawns).</returns>
+        bool AddResurrectionDebt(Pawn pawn, float amount);
 
         /// <summary>
         /// Repays debt for a pawn.

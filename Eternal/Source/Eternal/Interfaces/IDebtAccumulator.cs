@@ -1,9 +1,9 @@
 // Relative Path: Eternal/Source/Eternal/Interfaces/IDebtAccumulator.cs
 // Creation Date: 29-12-2025
-// Last Edit: 13-01-2026
+// Last Edit: 12-07-2026
 // Author: 0Shard
-// Description: Abstraction for debt accumulation during healing. Unifies the two different
-//              debt patterns: resurrection-capped (2x) and system-capped (5x).
+// Description: Abstraction for debt accumulation during healing. Two patterns:
+//              alive-capped debt (living healing) and uncapped resurrection debt (corpse healing).
 
 using Verse;
 
@@ -12,13 +12,13 @@ namespace Eternal.Interfaces
     /// <summary>
     /// Accumulates food debt during healing operations.
     /// Provides two modes:
-    /// - Standard debt: uses system's 5× max capacity
-    /// - Resurrection-capped debt: additional 2× per-resurrection cap
+    /// - Standard debt: capped at the alive-time capacity (maxDebtMultiplier on top of any resurrection baseline)
+    /// - Resurrection debt: uncapped, raises the pawn's resurrection debt baseline
     /// </summary>
     public interface IDebtAccumulator
     {
         /// <summary>
-        /// Adds debt using the system's maximum capacity (5× nutrition).
+        /// Adds debt using the system's maximum capacity.
         /// Used for living pawn healing.
         /// </summary>
         /// <param name="pawn">The pawn to add debt to</param>
@@ -27,14 +27,12 @@ namespace Eternal.Interfaces
         bool AddDebt(Pawn pawn, float amount);
 
         /// <summary>
-        /// Adds debt with an additional per-resurrection cap.
-        /// Used for corpse healing to ensure each resurrection costs at most 2× nutrition,
-        /// allowing a pawn to resurrect at least twice before hitting the 5× max.
+        /// Adds uncapped resurrection debt during corpse healing.
+        /// Resurrection is never blocked by cost; the full amount is always charged.
         /// </summary>
         /// <param name="pawn">The pawn to add debt to</param>
         /// <param name="amount">Amount of debt to add</param>
-        /// <param name="resurrectionCap">Maximum debt for this resurrection (typically 2× nutrition)</param>
-        /// <returns>Actual amount of debt added (may be less than requested if capped)</returns>
-        float AddDebtWithResurrectionCap(Pawn pawn, float amount, float resurrectionCap);
+        /// <returns>True if debt was added (or waived for food-need-disabled pawns)</returns>
+        bool AddResurrectionDebt(Pawn pawn, float amount);
     }
 }

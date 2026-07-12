@@ -1,7 +1,7 @@
 /*
  * Relative Path: Eternal/Source/Eternal/Components/TickOrchestrator.cs
  * Creation Date: 29-12-2025
- * Last Edit: 11-07-2026
+ * Last Edit: 12-07-2026
  * SAFE-09: ProcessTick() early-returns when EternalModState.IsDisabled to prevent NRE floods
  *          when critical defs are missing.
  * Author: 0Shard
@@ -380,16 +380,11 @@ namespace Eternal.Components
         }
 
         /// <summary>
-        /// Processes food debt repayment based on the extra hunger drain from the Metabolic Recovery hediff,
-        /// and synchronizes the hediff lifecycle for all tracked pawns.
+        /// Synchronizes the Metabolic Recovery hediff lifecycle for all tracked pawns and clears
+        /// debt for pawns whose food need was disabled (e.g. fed by gene).
         ///
-        /// How it works:
-        /// 1. CheckFoodNeedStateChanges() clears debt for pawns whose food need was disabled (e.g. fed by gene).
-        /// 2. For each living pawn with debt: calculate extra food drain from the hunger rate boost
-        ///    (hungerMultiplier - 1.0) × FoodFallPerTick × rareTickRate) and repay that amount.
-        /// 3. SyncMetabolicRecoveryHediff() adds/removes/syncs the Metabolic Recovery hediff based on debt state.
-        ///
-        /// This is complementary to DebtRepaymentProcessor which handles the active food-bar drain path.
+        /// Repayment itself is handled solely by DebtRepaymentProcessor (constant food-bar drain:
+        /// peakDebt / (60000 × debtRepaymentDays) per tick). The hediff is a pure status display.
         /// </summary>
         private void ProcessDebtRepaymentAndSync(ImmutableSettingsSnapshot snapshot)
         {
@@ -404,48 +399,15 @@ namespace Eternal.Components
                 concreteFoodDebt.CheckFoodNeedStateChanges();
             }
 
-            if (!snapshot.FoodDebt.HungerBoostEnabled)
-                return;
-
+            // Repayment itself is handled solely by DebtRepaymentProcessor (constant food-bar
+            // drain). This method only keeps the Metabolic Recovery hediff display in sync.
             foreach (var pawn in foodDebtSystem.GetTrackedPawns())
             {
                 if (pawn == null || pawn.Dead)
                     continue;
 
-                float debt = foodDebtSystem.GetDebt(pawn);
-
-                // Always sync hediff lifecycle regardless of debt (removes if zero, adds/updates if > 0)
+                // Sync hediff lifecycle (removes if zero debt, adds/updates severity if > 0)
                 SyncMetabolicRecoveryHediff(pawn, foodDebtSystem);
-
-                if (debt <= 0f)
-                    continue;
-
-                float maxDebt = foodDebtSystem.GetMaxCapacity(pawn);
-                if (maxDebt <= 0f)
-                    continue;
-
-                // Hunger rate multiplier scales linearly from 1.0 (no debt) to HungerMultiplierCap (max debt).
-                // The extra factor = (multiplier - 1.0) represents the additional hunger beyond baseline.
-                float debtRatio = Math.Min(debt / maxDebt, 1f);
-                float hungerMultiplier = 1.0f + debtRatio * (snapshot.FoodDebt.HungerMultiplierCap - 1.0f);
-                float extraFactor = hungerMultiplier - 1.0f;
-                if (extraFactor <= 0f)
-                    continue;
-
-                // FoodFallPerTick is a public property on Need_Food (confirmed public in RimWorld 1.6).
-                // It returns the per-tick food fall rate accounting for hunger category, hediff hunger
-                // factors (including our Metabolic Recovery hungerRateFactor), genes, traits, and beds.
-                // Fallback: approximate from the human base constant (2.6667e-5 / tick) scaled by body size.
-                float foodFallPerTick = pawn.needs?.food?.FoodFallPerTick ?? 0f;
-                if (foodFallPerTick <= 0f)
-                    foodFallPerTick = 2.6666667E-05f * pawn.BodySize;
-
-                // Extra drain = baseline_rate × (multiplier - 1.0) × ticks_elapsed_this_batch
-                float extraDrain = foodFallPerTick * extraFactor * snapshot.Perf.RareTickRate;
-                if (extraDrain > 0f)
-                {
-                    foodDebtSystem.RepayDebt(pawn, extraDrain);
-                }
             }
         }
 

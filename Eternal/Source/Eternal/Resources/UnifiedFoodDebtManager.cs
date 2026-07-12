@@ -1,7 +1,7 @@
 /*
  * Relative Path: Eternal/Source/Eternal/Resources/UnifiedFoodDebtManager.cs
  * Creation Date: 03-12-2025
- * Last Edit: 14-03-2026
+ * Last Edit: 12-07-2026
  * Author: 0Shard
  * Description: Unified food debt manager consolidating EternalFoodDebtSystem and EternalFoodDebtMonitor.
  *              Implements IFoodDebtSystem (inherits IFoodDebtReader + IFoodDebtWriter for ISP compliance).
@@ -10,6 +10,7 @@
  *              Fixed: Added warnings for list length mismatches and null pawns during save/load.
  *              Added: Food need waiver - pawns with food need disabled have nutrient costs waived.
  *              03-02: All catch sites converted to EternalLogger.HandleException(Resurrection, ...).
+ *              12-07: Uncapped resurrection debt via per-pawn baseline; alive cap applies on top.
  */
 
 using System;
@@ -42,6 +43,16 @@ namespace Eternal.Resources
     {
         // Single dictionary for debt tracking (DRY - no parallel structures)
         private Dictionary<Pawn, float> _debtTracker = new Dictionary<Pawn, float>();
+
+        // Resurrection debt baseline: the uncapped portion of a pawn's debt accrued from corpse
+        // healing. GetMaxCapacity returns base cap + baseline, so the alive-time cap
+        // (maxDebtMultiplier) applies ON TOP of resurrection debt. Shrinks with repayment.
+        private Dictionary<Pawn, float> _resurrectionDebtBaseline = new Dictionary<Pawn, float>();
+
+        // Peak debt of the current episode (max debt since it was last zero). Drives the
+        // constant repayment drain rate: peak / (60000 × debtRepaymentDays) per tick, so any
+        // debt fully repays within the window. Cleared when debt reaches zero.
+        private Dictionary<Pawn, float> _peakDebt = new Dictionary<Pawn, float>();
 
         // Tracked pawns for monitoring
         private HashSet<Pawn> _trackedPawns = new HashSet<Pawn>();
@@ -111,6 +122,8 @@ namespace Eternal.Resources
 
                 _trackedPawns.Remove(pawn);
                 _debtTracker.Remove(pawn);
+                _resurrectionDebtBaseline.Remove(pawn);
+                _peakDebt.Remove(pawn);
 
                 if (DebugMode)
                 {
@@ -164,6 +177,7 @@ namespace Eternal.Resources
 
                 // Store the (possibly clamped) debt
                 _debtTracker[pawn] = newDebt;
+                UpdatePeakDebt(pawn, newDebt);
 
                 // Sync with corpse data if available
                 SyncCorpseData(pawn);
@@ -184,6 +198,52 @@ namespace Eternal.Resources
         }
 
         /// <inheritdoc />
+        public bool AddResurrectionDebt(Pawn pawn, float amount)
+        {
+            try
+            {
+                if (pawn == null || amount <= 0)
+                    return false;
+
+                // Same waiver as AddDebt: no food need means healing is free.
+                if (pawn.HasFoodNeedDisabled())
+                {
+                    if (DebugMode)
+                    {
+                        Log.Message($"[Eternal] Waived {amount:F3} resurrection debt for {pawn.Name?.ToStringShort ?? "Pawn"} - food need disabled");
+                    }
+                    return true;
+                }
+
+                _debtTracker.TryGetValue(pawn, out float currentDebt);
+                float newDebt = currentDebt + amount;
+
+                _trackedPawns.Add(pawn);
+                _debtTracker[pawn] = newDebt;
+                UpdatePeakDebt(pawn, newDebt);
+
+                // The full post-add debt becomes the baseline: capacity = base cap + baseline,
+                // so the alive-time cap applies on top of everything owed from resurrection.
+                _resurrectionDebtBaseline[pawn] = newDebt;
+
+                SyncCorpseData(pawn);
+
+                if (DebugMode)
+                {
+                    Log.Message($"[Eternal] Added {amount:F3} resurrection debt to {pawn.Name}. Total: {newDebt:F1} (uncapped)");
+                }
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                EternalLogger.HandleException(EternalExceptionCategory.Resurrection,
+                    "AddResurrectionDebt", pawn, ex);
+                return false;
+            }
+        }
+
+        /// <inheritdoc />
         public float RepayDebt(Pawn pawn, float amount)
         {
             try
@@ -199,6 +259,22 @@ namespace Eternal.Resources
                 float actualRepayment = Math.Min(currentDebt, amount);
                 float newDebt = currentDebt - actualRepayment;
                 _debtTracker[pawn] = newDebt;
+
+                // Shrink the resurrection baseline with repayment so capacity returns to the
+                // base cap once corpse debt is paid off (baseline never exceeds current debt).
+                if (_resurrectionDebtBaseline.TryGetValue(pawn, out float baseline) && baseline > newDebt)
+                {
+                    if (newDebt <= 0f)
+                        _resurrectionDebtBaseline.Remove(pawn);
+                    else
+                        _resurrectionDebtBaseline[pawn] = newDebt;
+                }
+
+                // Debt episode over: reset the peak so the next episode gets a fresh rate.
+                if (newDebt <= 0f)
+                {
+                    _peakDebt.Remove(pawn);
+                }
 
                 // Sync with corpse data if available
                 SyncCorpseData(pawn);
@@ -236,6 +312,8 @@ namespace Eternal.Resources
                     return;
 
                 _debtTracker[pawn] = 0f;
+                _resurrectionDebtBaseline.Remove(pawn);
+                _peakDebt.Remove(pawn);
 
                 // Sync with corpse data if available
                 SyncCorpseData(pawn);
@@ -272,14 +350,52 @@ namespace Eternal.Resources
         /// <inheritdoc />
         public float GetMaxCapacity(Pawn pawn)
         {
+            float baseCapacity;
             if (pawn?.needs?.food == null)
             {
                 // Fallback for dead pawns without food need: use 1.0 × bodySize × multiplier
                 float bodySize = pawn?.BodySize ?? 1.0f;
-                return 1.0f * bodySize * MaxDebtMultiplier;
+                baseCapacity = 1.0f * bodySize * MaxDebtMultiplier;
+            }
+            else
+            {
+                baseCapacity = pawn.needs.food.MaxLevel * MaxDebtMultiplier;
             }
 
-            return pawn.needs.food.MaxLevel * MaxDebtMultiplier;
+            // Resurrection debt is uncapped: capacity grows by the baseline so the alive-time
+            // cap (maxDebtMultiplier) is headroom ON TOP of what resurrection cost.
+            return baseCapacity + GetResurrectionDebtBaseline(pawn);
+        }
+
+        /// <summary>
+        /// Gets the uncapped resurrection debt baseline included in GetMaxCapacity.
+        /// </summary>
+        private float GetResurrectionDebtBaseline(Pawn pawn)
+        {
+            if (pawn == null)
+                return 0f;
+
+            return _resurrectionDebtBaseline.TryGetValue(pawn, out float baseline) ? baseline : 0f;
+        }
+
+        /// <inheritdoc />
+        public float GetPeakDebt(Pawn pawn)
+        {
+            if (pawn == null)
+                return 0f;
+
+            return _peakDebt.TryGetValue(pawn, out float peak) ? peak : 0f;
+        }
+
+        /// <summary>
+        /// Raises the episode peak to the new debt total if it grew.
+        /// </summary>
+        private void UpdatePeakDebt(Pawn pawn, float newDebt)
+        {
+            if (!_peakDebt.TryGetValue(pawn, out float peak) || newDebt > peak)
+            {
+                _peakDebt[pawn] = newDebt;
+            }
         }
 
         /// <inheritdoc />
@@ -439,20 +555,43 @@ namespace Eternal.Resources
                 {
                     var pawnList = _debtTracker.Keys.ToList();
                     var debtList = _debtTracker.Values.ToList();
+                    var baselinePawnList = _resurrectionDebtBaseline.Keys.ToList();
+                    var baselineList = _resurrectionDebtBaseline.Values.ToList();
+                    var peakPawnList = _peakDebt.Keys.ToList();
+                    var peakList = _peakDebt.Values.ToList();
 
                     Scribe_Collections.Look(ref pawnList, "debtPawns", LookMode.Reference);
                     Scribe_Collections.Look(ref debtList, "debtAmounts", LookMode.Value);
+                    Scribe_Collections.Look(ref baselinePawnList, "resurrectionBaselinePawns", LookMode.Reference);
+                    Scribe_Collections.Look(ref baselineList, "resurrectionBaselineAmounts", LookMode.Value);
+                    Scribe_Collections.Look(ref peakPawnList, "peakDebtPawns", LookMode.Reference);
+                    Scribe_Collections.Look(ref peakList, "peakDebtAmounts", LookMode.Value);
                 }
                 else if (Scribe.mode == LoadSaveMode.LoadingVars)
                 {
                     var pawnList = new List<Pawn>();
                     var debtList = new List<float>();
+                    var baselinePawnList = new List<Pawn>();
+                    var baselineList = new List<float>();
+                    var peakPawnList = new List<Pawn>();
+                    var peakList = new List<float>();
 
                     Scribe_Collections.Look(ref pawnList, "debtPawns", LookMode.Reference);
                     Scribe_Collections.Look(ref debtList, "debtAmounts", LookMode.Value);
+                    Scribe_Collections.Look(ref baselinePawnList, "resurrectionBaselinePawns", LookMode.Reference);
+                    Scribe_Collections.Look(ref baselineList, "resurrectionBaselineAmounts", LookMode.Value);
+                    Scribe_Collections.Look(ref peakPawnList, "peakDebtPawns", LookMode.Reference);
+                    Scribe_Collections.Look(ref peakList, "peakDebtAmounts", LookMode.Value);
 
                     _debtTracker.Clear();
                     _trackedPawns.Clear();
+                    _resurrectionDebtBaseline.Clear();
+                    _peakDebt.Clear();
+
+                    // Pre-baseline saves simply load with empty baseline/peak dicts (old-cap behavior;
+                    // peaks re-establish on the next debt change).
+                    LoadPawnFloatPairs(baselinePawnList, baselineList, _resurrectionDebtBaseline, "resurrection baseline");
+                    LoadPawnFloatPairs(peakPawnList, peakList, _peakDebt, "peak debt");
 
                     if (pawnList != null && debtList != null)
                     {
@@ -539,6 +678,30 @@ namespace Eternal.Resources
             {
                 EternalLogger.HandleException(EternalExceptionCategory.Resurrection,
                     "CheckFoodNeedStateChanges", null, ex);
+            }
+        }
+
+        /// <summary>
+        /// Loads a parallel pawn/amount list pair into a dictionary, warning on length mismatch.
+        /// </summary>
+        private static void LoadPawnFloatPairs(List<Pawn> pawns, List<float> amounts,
+            Dictionary<Pawn, float> target, string label)
+        {
+            if (pawns == null || amounts == null)
+                return;
+
+            if (pawns.Count != amounts.Count)
+            {
+                Log.Warning($"[Eternal] {label} list length mismatch on load: pawns={pawns.Count}, amounts={amounts.Count}. Using minimum count.");
+            }
+
+            int loadCount = Math.Min(pawns.Count, amounts.Count);
+            for (int i = 0; i < loadCount; i++)
+            {
+                if (pawns[i] != null)
+                {
+                    target[pawns[i]] = amounts[i];
+                }
             }
         }
 

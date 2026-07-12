@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Cultivator of the Rim compatibility (packageId Aranmaho.Xianxia, workshop 3221270722).
+     Eternals cultivate 10x faster: CultivationSpeed is a StatDef read via GetStatValue by
+     every progress path (meditation, pills, lovin', body cultivation), so a statFactors
+     entry on the Eternal trait covers them all. Applied only when the mod is loaded. -->
+<Patch>
+    <Operation Class="PatchOperationFindMod">
+        <mods>
+            <li>Cultivator of the Rim</li>
+        </mods>
+        <match Class="PatchOperationAdd">
+            <xpath>Defs/TraitDef[defName="Eternal_GeneticMarker"]/degreeDatas/li</xpath>
+            <value>
+                <statFactors>
+                    <CultivationSpeed>10</CultivationSpeed>
+                </statFactors>
+            </value>
+        </match>
+    </Operation>
+</Patch>

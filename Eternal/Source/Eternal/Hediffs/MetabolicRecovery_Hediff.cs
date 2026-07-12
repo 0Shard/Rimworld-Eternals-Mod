@@ -1,11 +1,12 @@
 // Relative Path: Eternal/Source/Eternal/Hediffs/MetabolicRecovery_Hediff.cs
 // Creation Date: 04-03-2026
-// Last Edit: 26-03-2026
+// Last Edit: 12-07-2026
 // Author: 0Shard
 // Description: Custom hediff class for the Metabolic Recovery hediff applied to Eternal pawns
 //              when they accumulate food debt during healing. Syncs severity from the food
-//              debt tracker (single source of truth), overrides ShouldRemove to defer cleanup
-//              to the debt system, and drives hunger rate via XML-defined HediffStage factors.
+//              debt tracker (single source of truth) and overrides ShouldRemove to defer
+//              cleanup to the debt system. Pure status display — repayment happens via the
+//              DebtRepaymentProcessor food-bar drain, not a hunger rate increase.
 
 using Verse;
 using Eternal.DI;
@@ -21,8 +22,8 @@ namespace Eternal.Hediffs
     ///   on save/load to keep the debt tracker as the single source of truth.
     /// - ShouldRemove returns true only when debt is zero AND the pawn is alive; on dead
     ///   pawns the hediff remains visible until resurrection clears the debt.
-    /// - Hunger rate boost is handled by XML HediffStage hungerRateFactor — the C# class
-    ///   does not need to override hunger rate directly.
+    /// - Pure status display: stages carry no hungerRateFactor. Repayment is handled by
+    ///   DebtRepaymentProcessor's food-bar drain.
     /// </summary>
     public class MetabolicRecovery_Hediff : HediffWithComps
     {
@@ -91,8 +92,8 @@ namespace Eternal.Hediffs
         /// <summary>
         /// Syncs this hediff's severity with the current food debt ratio.
         /// Severity = debt / maxDebt, clamped to [MinActiveSeverity, 1.0] when debt > 0.
-        /// This keeps the hediff stage (and therefore hunger rate) in lockstep with the
-        /// debt tracker, which is the single source of truth.
+        /// This keeps the displayed hediff stage in lockstep with the debt tracker,
+        /// which is the single source of truth.
         /// </summary>
         public void SyncSeverityFromDebt()
         {

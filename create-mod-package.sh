@@ -3,10 +3,11 @@
 # file path: create-mod-package.sh
 # Author Name: 0Shard
 # Date Created: 29-10-2025
-# Date Last Modified: 09-03-2026
+# Date Last Modified: 12-07-2026
 # Description: Creates a distributable RimWorld mod package from the Eternal project.
 #              Output: Mods/Eternal/ - ready to copy directly to RimWorld's Mods folder.
 #              Includes Textures folder for gizmo icons (RimWorld ContentFinder requirement).
+#              Includes Patches folder for conditional XML PatchOperations (mod compatibility).
 #              Automatically cleans up legacy 'Mod' directory if present.
 
 # Exit immediately if a command exits with a non-zero status
@@ -122,6 +123,20 @@ find "$SOURCE_DIR/Defs" -name "*.xml" -type f | while read -r file; do
     cp "$file" "$dest_dir/"
     print_success "Copied: $rel_path"
 done
+
+# Copy XML PatchOperations (conditional mod-compatibility patches)
+print_status "Copying XML patches from Patches directory..."
+if [ -d "$SOURCE_DIR/Patches" ]; then
+    find "$SOURCE_DIR/Patches" -name "*.xml" -type f | while read -r file; do
+        rel_path=${file#$SOURCE_DIR/Patches/}
+        dest_dir="$DEST_DIR/Patches/$(dirname "$rel_path")"
+        mkdir -p "$dest_dir"
+        cp "$file" "$dest_dir/"
+        print_success "Copied: Patches/$rel_path"
+    done
+else
+    print_warning "No Patches directory found — skipping XML patches"
+fi
 
 # Copy all language files
 print_status "Copying language files..."

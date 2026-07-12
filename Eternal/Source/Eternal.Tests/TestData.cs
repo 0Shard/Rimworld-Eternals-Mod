@@ -1,6 +1,6 @@
 // Relative Path: Eternal/Source/Eternal.Tests/TestData.cs
 // Creation Date: 24-02-2026
-// Last Edit: 11-07-2026
+// Last Edit: 12-07-2026
 // Author: 0Shard
 // Description: Single source of truth for all expected constants used in tests.
 //              Values must match their production counterparts in SettingsDefaults,
@@ -42,8 +42,7 @@ namespace Eternal.Tests
         public const float DefaultMinimumNutritionThreshold = 0.1f;
         public const bool DefaultAllowResourceBorrowing = false;
         public const float DefaultFoodDrainThreshold = 0.15f;
-        public const float DefaultMinDebtDrainRate = 0.0001f;
-        public const float DefaultMaxDebtDrainRate = 0.001f;
+        public const float DefaultDebtRepaymentDays = 1.0f;
         public const int DefaultNormalTickRate = 60;
         public const int DefaultRareTickRate = 250;
         public const int DefaultTraitCheckInterval = 5000;

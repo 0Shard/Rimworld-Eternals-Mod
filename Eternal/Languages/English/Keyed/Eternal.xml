@@ -63,10 +63,6 @@
     <EternalResurrectionCompleteDesc>{PAWN_nameFull} has been resurrected. They will need to repay {DEBT:F1} nutrition of biological debt accumulated during healing.</EternalResurrectionCompleteDesc>
     <EternalResurrectionImmediateDesc>{PAWN_nameFull} has been resurrected without injury — no biological debt was incurred.</EternalResurrectionImmediateDesc>
 
-    <!-- Permanent Death (SAFE-05) -->
-    <EternalPermanentDeath>Eternal Lost</EternalPermanentDeath>
-    <EternalPermanentDeathDesc>{PAWN_nameFull}'s accumulated food debt ({DEBT:F1}) has exceeded the maximum capacity ({LIMIT:F1}). The enormous biological cost of repeated resurrections has overwhelmed {PAWN_pronoun}'s body beyond recovery. {PAWN_nameDef} is permanently dead and cannot be resurrected again.</EternalPermanentDeathDesc>
-
     <!-- Settlement Abandonment Blocking -->
     <Eternal_CannotAbandonTitle>Cannot Abandon Settlement</Eternal_CannotAbandonTitle>
     <Eternal_CannotAbandonDesc>This settlement cannot be abandoned while Eternal colonists are present:</Eternal_CannotAbandonDesc>

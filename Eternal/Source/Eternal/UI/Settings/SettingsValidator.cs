@@ -1,6 +1,6 @@
 // Relative Path: Eternal/Source/Eternal/UI/Settings/SettingsValidator.cs
 // Creation Date: 01-01-2025
-// Last Edit: 12-03-2026
+// Last Edit: 12-07-2026
 // Author: 0Shard
 // Description: Validation logic for Eternal mod settings. Clamps values to valid
 //              ranges and logs warnings for potentially problematic configurations.
@@ -31,8 +31,7 @@ namespace Eternal.UI.Settings
             // Validate food debt settings
             settings.maxDebtMultiplier = Mathf.Clamp(settings.maxDebtMultiplier, 1.0f, 20.0f);
             settings.foodDrainThreshold = Mathf.Clamp(settings.foodDrainThreshold, 0.01f, 0.5f);
-            settings.minDebtDrainRate = Mathf.Clamp(settings.minDebtDrainRate, 0.00001f, 0.01f);
-            settings.maxDebtDrainRate = Mathf.Clamp(settings.maxDebtDrainRate, 0.0001f, 0.1f);
+            settings.debtRepaymentDays = Mathf.Clamp(settings.debtRepaymentDays, 0.25f, 5.0f);
             settings.severityToNutritionRatio = Mathf.Clamp(settings.severityToNutritionRatio, 0.001f, 0.1f);
 
             // Validate map protection settings

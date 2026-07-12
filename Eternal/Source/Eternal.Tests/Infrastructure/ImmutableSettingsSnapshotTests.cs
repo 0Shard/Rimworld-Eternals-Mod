@@ -1,6 +1,6 @@
 // Relative Path: Eternal/Source/Eternal.Tests/Infrastructure/ImmutableSettingsSnapshotTests.cs
 // Creation Date: 24-02-2026
-// Last Edit: 12-03-2026
+// Last Edit: 12-07-2026
 // Author: 0Shard
 // Description: Unit tests for ImmutableSettingsSnapshot readonly record struct.
 //              Verifies default construction, initializer round-trip, with-expression independence,
@@ -82,8 +82,7 @@ namespace Eternal.Tests.Infrastructure
                 {
                     MaxDebtMultiplier = TestData.DefaultMaxDebtMultiplier,
                     FoodDrainThreshold = TestData.DefaultFoodDrainThreshold,
-                    MinDebtDrainRate = TestData.DefaultMinDebtDrainRate,
-                    MaxDebtDrainRate = TestData.DefaultMaxDebtDrainRate,
+                    DebtRepaymentDays = TestData.DefaultDebtRepaymentDays,
                     SeverityToNutritionRatio = TestData.DefaultSeverityToNutritionRatio
                 }
             };

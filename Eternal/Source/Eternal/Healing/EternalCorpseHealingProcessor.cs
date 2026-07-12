@@ -1,7 +1,7 @@
 /*
  * Relative Path: Eternal/Source/Eternal/Healing/EternalCorpseHealingProcessor.cs
  * Creation Date: 09-11-2025
- * Last Edit: 11-07-2026
+ * Last Edit: 12-07-2026
  * Author: 0Shard
  * Description: Processes healing and regrowth on Eternal corpses, accumulating debt and managing resurrection completion.
  *              Integrates with EternalRegrowthState for proper 4-phase body part regrowth.
@@ -17,9 +17,10 @@
  *              Enhanced: IsHealingComplete now verifies actual pawn state (missing parts, regrowth status).
  *              Fixed: Added Part sync after resurrection (Immortals pattern) - hediff.Part = hediff.forPart.
  *              11-07: Parallel healing model (parity with living pawns): per-item full rate, no shared-pool
- *                     division; debt cap clamps charging (AddDebtCapped) instead of stalling healing;
- *                     regrowth debt is effort-based like the living path; fallback only starts regrowth
- *                     (primary path heals it next pass with HP-scaled progression).
+ *                     division; regrowth debt is effort-based like the living path; fallback only starts
+ *                     regrowth (primary path heals it next pass with HP-scaled progression).
+ *              12-07: Resurrection debt is uncapped (AddResurrectionDebt raises the baseline); permanent
+ *                     death on debt removed — resurrection always completes and transfers full debt.
  *              03-02: All catch sites converted to EternalLogger.HandleException with correct categories.
  *              03-04: CompleteResurrection and ResurrectImmediately use try/finally + swapActive flag.
  *                     AttemptHediffRestore helper: retry once then re-kill — no hybrid-state pawn possible.
@@ -259,9 +260,8 @@ namespace Eternal.Healing
                         }
                     }
 
-                    // Use capped cost to prevent excessive debt (max 2.0 × pawn nutrition)
-                    corpseData.TotalHealingCost = resurrectionCalculator.CalculateTotalCostCapped(
-                        corpseData.HealingQueue, corpseData.OriginalPawn);
+                    corpseData.TotalHealingCost = resurrectionCalculator.CalculateTotalCost(
+                        corpseData.HealingQueue);
                 }
 
                 if (corpseData.HealingQueue.Count == 0)
@@ -344,11 +344,6 @@ namespace Eternal.Healing
 
             float totalHeal = CalculateHealingPerTick(corpseData.OriginalPawn);
 
-            // Get resurrection cost cap for this pawn (2.0 × nutrition capacity)
-            // Healing never stalls on the cap: AddDebtCapped stops CHARGING there instead,
-            // so heavily mutilated corpses (total cost > cap) can still finish resurrecting.
-            float resurrectionCostCap = resurrectionCalculator.GetResurrectionCostCap(corpseData.OriginalPawn);
-
             // PERF-01: Use pre-allocated instance buffers — zero allocation on the hot path.
             _nonRegrowthBuffer.Clear();
             _completedBuffer.Clear();
@@ -390,10 +385,10 @@ namespace Eternal.Healing
                     item.Hediff.Severity = newSeverity;
                 item.Severity = newSeverity;
 
-                // Debt accumulation proportional to healing performed
+                // Debt accumulation proportional to healing performed (uncapped resurrection debt)
                 float fraction = currentSeverity > 0f ? (healAmount / currentSeverity) : 1f;
                 float debtCost = fraction * item.EnergyCost;
-                AddDebtCapped(corpseData.OriginalPawn, debtCost, resurrectionCostCap);
+                DebtAccumulator?.AddResurrectionDebt(corpseData.OriginalPawn, debtCost);
 
                 float finalSeverity = item.Hediff?.Severity ?? item.Severity;
                 if (finalSeverity <= 0.01f)
@@ -426,11 +421,6 @@ namespace Eternal.Healing
                 return;
 
             float totalHeal = CalculateHealingPerTick(corpseData.OriginalPawn);
-
-            // Get resurrection cost cap for this pawn (2.0 × nutrition capacity)
-            // Healing never stalls on the cap: AddDebtCapped stops CHARGING there instead,
-            // so heavily mutilated corpses (total cost > cap) can still finish resurrecting.
-            float resurrectionCostCap = resurrectionCalculator.GetResurrectionCostCap(corpseData.OriginalPawn);
 
             // PERF-01: Use pre-allocated instance buffers — zero allocation on the hot path.
             // Safe to share _completedBuffer with ProcessCorpseInjuryTick because these methods
@@ -470,7 +460,7 @@ namespace Eternal.Healing
                 int regrowingPartCount = regrowthManager.GetRegrowingHediffs(corpseData.OriginalPawn).Count();
                 float severityToNutritionRatio = Eternal_Mod.GetSettings().severityToNutritionRatio;
                 float regrowthDebtPerTick = regrowingPartCount * regrowthHeal * severityToNutritionRatio;
-                AddDebtCapped(corpseData.OriginalPawn, regrowthDebtPerTick, resurrectionCostCap);
+                DebtAccumulator?.AddResurrectionDebt(corpseData.OriginalPawn, regrowthDebtPerTick);
 
                 // Check if regrowth is complete (all body parts restored)
                 if (regrowthState.IsRegrowthComplete())
@@ -539,19 +529,6 @@ namespace Eternal.Healing
         {
             // Use unified calculator for consistent healing across all contexts
             return RateCalculator?.CalculateHealingPerTick(pawn) ?? 0.00001f;
-        }
-
-        /// <summary>
-        /// Adds debt to a pawn, capped at the resurrection cost limit.
-        /// Delegates to IDebtAccumulator for consistent debt logic.
-        /// </summary>
-        /// <param name="pawn">The pawn to add debt to</param>
-        /// <param name="amount">The amount of debt to add</param>
-        /// <param name="costCap">The maximum allowed debt (resurrection cost cap)</param>
-        private void AddDebtCapped(Pawn pawn, float amount, float costCap)
-        {
-            // Use unified debt accumulator with resurrection cap
-            DebtAccumulator?.AddDebtWithResurrectionCap(pawn, amount, costCap);
         }
 
         /// <summary>
@@ -786,29 +763,8 @@ namespace Eternal.Healing
             // === SAFE-05: Capture healing debt BEFORE UnregisterPawn (which zeroes the tracker) ===
             // corpseData.FoodDebt is synced by SyncCorpseData() on every AddDebt/RepayDebt call —
             // it is current even after save/load (persisted via Scribe_Values).
+            // Resurrection debt is uncapped: the full amount always transfers, never permanent death.
             float healingDebt = corpseData.FoodDebt;
-            float absoluteLimit = DebtSystem.GetMaxCapacity(pawn);
-
-            // Permanent death check: if accumulated debt exceeds 5× max nutrition the pawn cannot
-            // survive another resurrection. Send a red-bordered letter and abort with full cleanup.
-            if (healingDebt > absoluteLimit)
-            {
-                Find.LetterStack.ReceiveLetter(
-                    "EternalPermanentDeath".Translate(),
-                    "EternalPermanentDeathDesc".Translate(
-                        pawn.Named("PAWN"),
-                        healingDebt.Named("DEBT"),
-                        absoluteLimit.Named("LIMIT")),
-                    LetterDefOf.ThreatBig);
-
-                // Full cleanup — leaves no orphaned entries (Pitfall 4 from RESEARCH.md).
-                activeHealingCorpses.Remove(pawn);
-                CorpseManager?.UnregisterCorpse(pawn);
-                DebtSystem.UnregisterPawn(pawn);
-
-                Log.Error($"[Eternal] Permanent death for {pawn.Name}: healing debt {healingDebt:F2} exceeds absolute limit {absoluteLimit:F2}");
-                return;
-            }
 
             // === Save HediffSet and ImmunityHandler (Immortals pattern) ===
             // Captured before the try block so the finally block can always access them.
@@ -975,7 +931,7 @@ namespace Eternal.Healing
                 // Additive transfer — old unpaid debt (from prior deaths) + new healing debt.
                 if (healingDebt > 0f)
                 {
-                    DebtSystem.AddDebt(pawn, healingDebt);
+                    DebtSystem.AddResurrectionDebt(pawn, healingDebt);
                 }
 
                 // Log completion with transferred debt amount
@@ -1157,29 +1113,8 @@ namespace Eternal.Healing
             // === SAFE-05: Capture healing debt BEFORE any unregister call that zeroes the tracker ===
             // Even in the immediate-resurrection path (no prior healing), corpseData.FoodDebt may
             // be non-zero if the pawn carried debt from a previous death cycle.
+            // Resurrection debt is uncapped: the full amount always transfers, never permanent death.
             float healingDebt = corpseData.FoodDebt;
-            float absoluteLimit = DebtSystem.GetMaxCapacity(pawn);
-
-            // Permanent death check mirrors CompleteResurrection — immediate resurrections are not
-            // exempt from the 5× cap. Debt earned in prior healing cycles accumulates additively.
-            if (healingDebt > absoluteLimit)
-            {
-                Find.LetterStack.ReceiveLetter(
-                    "EternalPermanentDeath".Translate(),
-                    "EternalPermanentDeathDesc".Translate(
-                        pawn.Named("PAWN"),
-                        healingDebt.Named("DEBT"),
-                        absoluteLimit.Named("LIMIT")),
-                    LetterDefOf.ThreatBig);
-
-                // Full cleanup — leaves no orphaned entries (Pitfall 4 from RESEARCH.md).
-                activeHealingCorpses.Remove(pawn);
-                CorpseManager?.UnregisterCorpse(pawn);
-                DebtSystem.UnregisterPawn(pawn);
-
-                Log.Error($"[Eternal] Permanent death (immediate) for {pawn.Name}: healing debt {healingDebt:F2} exceeds absolute limit {absoluteLimit:F2}");
-                return;
-            }
 
             // === Save HediffSet and ImmunityHandler (Immortals pattern) ===
             // Captured before the try block so the finally block can always access them.
@@ -1313,7 +1248,7 @@ namespace Eternal.Healing
                 // === SAFE-05: Transfer any accumulated healing debt to the now-living pawn ===
                 if (healingDebt > 0f)
                 {
-                    DebtSystem.AddDebt(pawn, healingDebt);
+                    DebtSystem.AddResurrectionDebt(pawn, healingDebt);
                 }
 
                 Log.Message($"[Eternal] Immediately resurrected {pawn.Name}. Transferred debt: {healingDebt:F2}");

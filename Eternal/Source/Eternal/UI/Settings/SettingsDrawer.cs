@@ -1,6 +1,6 @@
 // Relative Path: Eternal/Source/Eternal/UI/Settings/SettingsDrawer.cs
 // Creation Date: 01-01-2025
-// Last Edit: 11-07-2026
+// Last Edit: 12-07-2026
 // Author: 0Shard
 // Description: UI drawing methods for Eternal mod settings. Features tab-based layout,
 //              10-07: Status tab nutrition formulas now include severityToNutritionRatio (were 250x off vs engine).
@@ -532,19 +532,13 @@ namespace Eternal.UI.Settings
             DrawPreviewLabel(listing, $"Max debt: {settings.maxDebtMultiplier:F0}× nutrition capacity");
 
             listing.Gap();
-            DrawSubsectionLabel(listing, "Debt Repayment (Tick-Based Drain)");
+            DrawSubsectionLabel(listing, "Debt Repayment (Food-Bar Drain)");
 
-            // Drain rate range
-            SliderWithInlineEdit(listing, "Min Drain Rate", ref settings.minDebtDrainRate, 0.00001f, 0.001f,
-                "Nutrition drained per tick when debt is low (0%).\nLower = slower repayment at low debt.", 5);
-
-            SliderWithInlineEdit(listing, "Max Drain Rate", ref settings.maxDebtDrainRate, 0.0001f, 0.01f,
-                "Nutrition drained per tick when debt is high (100%).\nHigher = faster repayment at max debt.", 4);
-
-            // Preview for drain rates
-            float hourlyDrainMin = settings.minDebtDrainRate * 2500f;
-            float hourlyDrainMax = settings.maxDebtDrainRate * 2500f;
-            DrawPreviewLabel(listing, $"Drain range: {hourlyDrainMin:F2} - {hourlyDrainMax:F2} nutrition/hour");
+            SliderWithInlineEdit(listing, "Repayment Days", ref settings.debtRepaymentDays, 0.25f, 5.0f,
+                "In-game days a debt fully repays over via the food-bar drain (given enough food).\n\n" +
+                "• 1.0 = Any debt repaid within a day (default)\n• 0.25 = Very fast (quarter day)\n• 5.0 = Slow burn\n\n" +
+                "The drain never pulls the food bar below the Food Drain Threshold.", 2);
+            DrawPreviewLabel(listing, $"Full repayment in {settings.debtRepaymentDays:F2} day(s) with food available");
 
             listing.GapLine();
         }

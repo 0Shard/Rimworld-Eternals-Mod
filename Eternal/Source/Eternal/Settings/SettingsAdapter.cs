@@ -1,6 +1,6 @@
 // Relative Path: Eternal/Source/Eternal/Settings/SettingsAdapter.cs
 // Creation Date: 29-12-2025
-// Last Edit: 11-07-2026
+// Last Edit: 12-07-2026
 // Author: 0Shard
 // Description: Adapter that wraps Eternal_Mod.settings to provide ISettingsProvider interface.
 //              Eliminates direct static dependencies on Eternal_Mod.settings throughout codebase.
@@ -46,11 +46,8 @@ namespace Eternal.Settings
 
         public float MaxDebtMultiplier => Settings?.maxDebtMultiplier ?? 5.0f;
         public float FoodDrainThreshold => Settings?.foodDrainThreshold ?? 0.15f;
-        public float MinDebtDrainRate => Settings?.minDebtDrainRate ?? 0.0001f;
-        public float MaxDebtDrainRate => Settings?.maxDebtDrainRate ?? 0.001f;
+        public float DebtRepaymentDays => Settings?.debtRepaymentDays ?? SettingsDefaults.DebtRepaymentDays;
         public float SeverityToNutritionRatio => Settings?.severityToNutritionRatio ?? 0.004f;
-        public float HungerMultiplierCap => Settings?.hungerMultiplierCap ?? SettingsDefaults.HungerMultiplierCap;
-        public bool HungerBoostEnabled => Settings?.hungerBoostEnabled ?? SettingsDefaults.HungerBoostEnabled;
 
         #endregion
 

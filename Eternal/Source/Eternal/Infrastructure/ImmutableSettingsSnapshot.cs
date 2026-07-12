@@ -1,7 +1,7 @@
 /*
  * Relative Path: Eternal/Source/Eternal/Infrastructure/ImmutableSettingsSnapshot.cs
  * Creation Date: 19-02-2026
- * Last Edit: 12-03-2026
+ * Last Edit: 12-07-2026
  * Author: 0Shard
  * Description: Immutable snapshot of all Eternal mod settings, captured once per tick batch.
  *              Eliminates repeated null-checks and property lookups on the hot path (PERF-03).
@@ -66,15 +66,11 @@ namespace Eternal.Infrastructure
         {
             public float MaxDebtMultiplier { get; init; }
             public float FoodDrainThreshold { get; init; }
-            public float MinDebtDrainRate { get; init; }
-            public float MaxDebtDrainRate { get; init; }
+
+            /// <summary>In-game days a debt episode takes to fully repay via the food-bar drain.</summary>
+            public float DebtRepaymentDays { get; init; }
+
             public float SeverityToNutritionRatio { get; init; }
-
-            /// <summary>Maximum hunger rate multiplier at 100% food debt (Metabolic Recovery).</summary>
-            public float HungerMultiplierCap { get; init; }
-
-            /// <summary>Whether the Metabolic Recovery hunger rate boost is active.</summary>
-            public bool HungerBoostEnabled { get; init; }
         }
 
         /// <summary>Performance settings section (tick rates and intervals).</summary>
