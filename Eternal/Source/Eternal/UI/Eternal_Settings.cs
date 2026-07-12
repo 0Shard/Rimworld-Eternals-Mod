@@ -1,6 +1,6 @@
 // Relative Path: Eternal/Source/Eternal/UI/Eternal_Settings.cs
 // Creation Date: 01-01-2025
-// Last Edit: 12-07-2026
+// Last Edit: 13-07-2026
 // Author: 0Shard
 // Description: Settings data class for Eternal mod configuration. Contains all
 //              mod-specific settings and user preferences. UI drawing is delegated
@@ -46,10 +46,10 @@ namespace Eternal
 
         /// <summary>
         /// Regrowth severity at which a part's children may start regrowing in parallel
-        /// (phase 3, NerveIntegration). The Brain is exempt: its critical-sequence
-        /// prerequisites must be fully regrown before it starts.
+        /// (midway through phase 3, Nerve Integration: 0.5-0.75). The Brain is exempt:
+        /// its critical-sequence prerequisites must be fully regrown before it starts.
         /// </summary>
-        public const float RegrowthChildStartThreshold = 0.5f;
+        public const float RegrowthChildStartThreshold = 0.625f;
         public const bool ShowRegrowthEffects = true;
         public const bool ShowRegrowthProgress = true;
 

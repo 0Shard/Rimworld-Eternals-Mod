@@ -1,7 +1,7 @@
 /*
  * Relative Path: Eternal/Source/Eternal/Components/EternalRegrowthManager.cs
  * Creation Date: 28-10-2025
- * Last Edit: 12-07-2026
+ * Last Edit: 13-07-2026
  * Author: 0Shard
  * Description: Refactored regrowth manager using hediff-per-part approach (Immortals pattern).
  *              Adds Eternal_Regrowing hediff to each missing body part with partEfficiencyOffset stages.
@@ -73,6 +73,18 @@ namespace Eternal
                 // Enforce critical part order
                 if (!CanStartRegrowthForPart(pawn, part))
                     continue;
+
+                // Tripwire for the reported phase-1 child start: record the parent's
+                // severity at the moment a child is released, so a gate bypass is
+                // attributable from the log instead of unreproducible.
+                if (Eternal_Mod.settings?.debugMode == true && part.parent != null
+                    && HasRegrowthHediff(pawn, part.parent))
+                {
+                    Log.Message($"[Eternal DEBUG] Child regrowth start: {part.Label} under " +
+                        $"{part.parent.Label} at parent severity " +
+                        $"{GetRegrowthSeverity(pawn, part.parent):F3} " +
+                        $"(threshold {SettingsDefaults.RegrowthChildStartThreshold})");
+                }
 
                 // Create and add the regrowing hediff
                 AddRegrowthHediff(pawn, part);

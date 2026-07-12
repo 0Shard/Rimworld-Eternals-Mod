@@ -33,22 +33,22 @@
         <defaultLabelColor>(0.4, 0.8, 0.4)</defaultLabelColor>
         <stages>
             <li>
-                <label>Stage 1</label>
+                <label>initial formation</label>
                 <minSeverity>0</minSeverity>
                 <partEfficiencyOffset>-1.0</partEfficiencyOffset>
             </li>
             <li>
-                <label>Stage 2</label>
+                <label>tissue development</label>
                 <minSeverity>0.25</minSeverity>
                 <partEfficiencyOffset>-1.0</partEfficiencyOffset>
             </li>
             <li>
-                <label>Stage 3</label>
+                <label>nerve integration</label>
                 <minSeverity>0.5</minSeverity>
                 <partEfficiencyOffset>-0.75</partEfficiencyOffset>
             </li>
             <li>
-                <label>Stage 4</label>
+                <label>functional completion</label>
                 <minSeverity>0.75</minSeverity>
                 <partEfficiencyOffset>-0.5</partEfficiencyOffset>
             </li>
