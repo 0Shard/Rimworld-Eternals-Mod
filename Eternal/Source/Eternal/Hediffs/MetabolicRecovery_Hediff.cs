@@ -1,6 +1,6 @@
 // Relative Path: Eternal/Source/Eternal/Hediffs/MetabolicRecovery_Hediff.cs
 // Creation Date: 04-03-2026
-// Last Edit: 12-07-2026
+// Last Edit: 13-07-2026
 // Author: 0Shard
 // Description: Custom hediff class for the Metabolic Recovery hediff applied to Eternal pawns
 //              when they accumulate food debt during healing. Syncs severity from the food
@@ -85,6 +85,9 @@ namespace Eternal.Hediffs
                     return base.SeverityLabel;
 
                 float pct = (debt / maxDebt) * 100f;
+                // F0 would round a live residual down to a misleading "0% debt"
+                if (pct < 1f)
+                    return "<1% debt";
                 return $"{pct:F0}% debt";
             }
         }

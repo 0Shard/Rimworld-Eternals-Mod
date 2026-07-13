@@ -1,11 +1,13 @@
 // Relative Path: Eternal/Source/Eternal/Resources/DebtRepaymentProcessor.cs
 // Creation Date: 29-12-2025
-// Last Edit: 12-07-2026
+// Last Edit: 13-07-2026
 // Author: 0Shard
 // Description: Tick-based gradual debt repayment by draining food bar.
 //              Creates a "leaky food bar" effect when pawn has debt.
 //              Drain rate is CONSTANT per debt episode: peakDebt / (60000 × debtRepaymentDays)
 //              per tick, so any debt fully repays within the window when food is available.
+//              13-07: Drain rate floored at MinDrainNutritionPerDay so tiny episodes/tails
+//              clear in minutes instead of always taking the full repayment window.
 
 using System;
 using System.Linq;
@@ -28,6 +30,12 @@ namespace Eternal.Resources
     /// </remarks>
     public class DebtRepaymentProcessor
     {
+        // Floor for the episode drain rate: without it a residual crumb of debt (its own
+        // tiny "episode") drains at a rate sized for that crumb and takes the FULL
+        // repayment window — the hediff sits at "0% debt" for a day. ~1 nutrition/day is
+        // below natural hunger, so the floor is imperceptible on the food bar.
+        public const float MinDrainNutritionPerDay = 1.0f;
+
         private readonly ISettingsProvider _settings;
         private readonly IFoodDebtSystem _debtSystem;
 
@@ -123,7 +131,9 @@ namespace Eternal.Resources
             float peakDebt = Math.Max(_debtSystem.GetPeakDebt(pawn), debt);
             float repaymentTicks = 60000f * Math.Max(_settings.DebtRepaymentDays, 0.01f);
 
-            return peakDebt / repaymentTicks;
+            // Floor so small episodes finish quickly; ProcessPawnDebtRepayment already clamps
+            // the drained amount to the remaining debt and the 15% food floor.
+            return Math.Max(peakDebt / repaymentTicks, MinDrainNutritionPerDay / 60000f);
         }
     }
 }

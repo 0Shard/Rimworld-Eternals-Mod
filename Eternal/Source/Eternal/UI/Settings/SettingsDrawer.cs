@@ -1,8 +1,11 @@
 // Relative Path: Eternal/Source/Eternal/UI/Settings/SettingsDrawer.cs
 // Creation Date: 01-01-2025
-// Last Edit: 12-07-2026
+// Last Edit: 13-07-2026
 // Author: 0Shard
 // Description: UI drawing methods for Eternal mod settings. Features tab-based layout,
+//              13-07: Thresholds tab also lists healing-eligible staged debuffs that BYPASS
+//              the threshold system (noThreshold setting, bloodloss, stationary, naturally
+//              decaying like CE smoke inhalation) with the bypass reason as gray status.
 //              12-07: Added Thresholds tab — live per-pawn list of threshold-gated hediffs
 //              (severity/threshold, Waiting/Healing/Not-rolled status); replaces the removed
 //              Eternal Essence tooltip threshold lines.
@@ -18,6 +21,8 @@
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
+using RimWorld;
 using UnityEngine;
 using Verse;
 using Eternal.UI.HediffSettings;
@@ -703,13 +708,15 @@ namespace Eternal.UI.Settings
         private const float THRESHOLD_PAWN_GAP = 10f;
 
         /// <summary>
-        /// Collects, per living Eternal pawn, the hediffs whose healing is gated behind a
-        /// severity activation threshold (HediffHealingConfig.IsThresholdGated), with the
-        /// tracker's threshold state. Single data source for the Thresholds tab draw + height.
+        /// Collects, per living Eternal pawn, the staged debuffs the healing system acts on:
+        /// threshold-gated ones (HediffHealingConfig.IsThresholdGated) with the tracker's
+        /// threshold state, plus healing-eligible ones that BYPASS the threshold system
+        /// (bypassReason != null: noThreshold setting, bloodloss, stationary, decaying).
+        /// Single data source for the Thresholds tab draw + height.
         /// </summary>
-        private static List<(Pawn pawn, List<(Hediff hediff, float threshold, bool reached, bool hasEntry)> rows)> CollectThresholdRows()
+        private static List<(Pawn pawn, List<(Hediff hediff, float threshold, bool reached, bool hasEntry, string bypassReason)> rows)> CollectThresholdRows()
         {
-            var pawnRows = new List<(Pawn, List<(Hediff, float, bool, bool)>)>();
+            var pawnRows = new List<(Pawn, List<(Hediff, float, bool, bool, string)>)>();
             if (Current.Game == null)
                 return pawnRows;
 
@@ -722,22 +729,32 @@ namespace Eternal.UI.Settings
                 if (hediffSet == null)
                     continue;
 
-                List<(Hediff, float, bool, bool)> gatedRows = null;
+                List<(Hediff, float, bool, bool, string)> gatedRows = null;
                 foreach (var hediff in hediffSet.hediffs)
                 {
                     // Store.Get (NOT GetOrCreate): the settings UI must never mutate the store.
                     var setting = settingsStore?.Get(hediff.def.defName);
-                    if (!HediffHealingConfig.IsThresholdGated(hediff, setting))
-                        continue;
 
                     float threshold = 0f;
                     bool reached = false;
-                    bool hasEntry = thresholdTracker != null
-                        && thresholdTracker.TryGetThreshold(pawn, hediff, out threshold, out reached);
+                    bool hasEntry = false;
+                    string bypassReason = null;
+
+                    if (HediffHealingConfig.IsThresholdGated(hediff, setting))
+                    {
+                        hasEntry = thresholdTracker != null
+                            && thresholdTracker.TryGetThreshold(pawn, hediff, out threshold, out reached);
+                    }
+                    else
+                    {
+                        bypassReason = GetThresholdBypassReason(hediff, setting);
+                        if (bypassReason == null)
+                            continue;
+                    }
 
                     if (gatedRows == null)
-                        gatedRows = new List<(Hediff, float, bool, bool)>();
-                    gatedRows.Add((hediff, threshold, reached, hasEntry));
+                        gatedRows = new List<(Hediff, float, bool, bool, string)>();
+                    gatedRows.Add((hediff, threshold, reached, hasEntry, bypassReason));
                 }
 
                 if (gatedRows != null)
@@ -745,6 +762,32 @@ namespace Eternal.UI.Settings
             }
 
             return pawnRows;
+        }
+
+        /// <summary>
+        /// Why a healing-eligible staged debuff has no activation threshold, or null if the
+        /// hediff is not a staged debuff the healing system acts on (those stay off the tab).
+        /// Mirrors the bypass order in HediffExtensions.ShouldBypassThreshold.
+        /// </summary>
+        private static string GetThresholdBypassReason(Hediff hediff, EternalHediffSetting setting)
+        {
+            if (hediff?.def == null || hediff.def == EternalDefOf.Eternal_Essence)
+                return null;
+            if (!hediff.IsDebuffWithStages())
+                return null;
+            if (!HediffHealingConfig.IsEligibleForHealing(hediff, setting))
+                return null;
+
+            if (setting?.noThreshold == true)
+                return "Instant (setting)";
+            if (hediff.def == HediffDefOf.BloodLoss)
+                return "Always heals";
+            if (hediff.HasStationarySeverity())
+                return "Stationary";
+            if (hediff.HasNaturallyDecayingSeverity())
+                return "Decays naturally";
+
+            return null;
         }
 
         private void DrawThresholdsTab(Listing_Standard listing)
@@ -760,7 +803,7 @@ namespace Eternal.UI.Settings
             var pawnRows = CollectThresholdRows();
             if (pawnRows.Count == 0)
             {
-                DrawInfoBox(listing, "No threshold-gated hediffs on living Eternal pawns right now. Rows appear while a staged debuff (disease, infection, ...) that is allowed to heal is present. Eternals travelling in caravans are not listed.");
+                DrawInfoBox(listing, "No healing staged debuffs on living Eternal pawns right now. Rows appear while a staged debuff (disease, infection, ...) that is allowed to heal is present — threshold-gated or healing without a threshold. Eternals travelling in caravans are not listed.");
                 return;
             }
 
@@ -769,12 +812,19 @@ namespace Eternal.UI.Settings
                 Rect headerRect = listing.GetRect(THRESHOLD_PAWN_HEADER_HEIGHT);
                 Text.Anchor = TextAnchor.MiddleLeft;
                 GUI.color = new Color(0.9f, 0.85f, 0.7f);
-                Widgets.Label(headerRect, $"{pawn.LabelShortCap} — {rows.Count} gated");
+                int gatedCount = rows.Count(r => r.bypassReason == null);
+                int bypassCount = rows.Count - gatedCount;
+                string headerCounts = bypassCount == 0
+                    ? $"{gatedCount} gated"
+                    : gatedCount == 0
+                        ? $"{bypassCount} no-threshold"
+                        : $"{gatedCount} gated, {bypassCount} no-threshold";
+                Widgets.Label(headerRect, $"{pawn.LabelShortCap} — {headerCounts}");
                 GUI.color = Color.white;
                 Text.Anchor = TextAnchor.UpperLeft;
 
-                foreach (var (hediff, threshold, reached, hasEntry) in rows)
-                    DrawThresholdRow(listing, hediff, threshold, reached, hasEntry);
+                foreach (var (hediff, threshold, reached, hasEntry, bypassReason) in rows)
+                    DrawThresholdRow(listing, hediff, threshold, reached, hasEntry, bypassReason);
 
                 listing.Gap(THRESHOLD_PAWN_GAP);
             }
@@ -782,10 +832,11 @@ namespace Eternal.UI.Settings
 
         /// <summary>
         /// One hediff row: label (+ body part — thresholds are per part), severity/threshold,
-        /// and status: Waiting (threshold pending), Healing (latch fired), or Not rolled yet
-        /// (threshold registers on hediff add or lazily at the first healing pass).
+        /// and status: Waiting (threshold pending), Healing (latch fired), Not rolled yet
+        /// (threshold registers on hediff add or lazily at the first healing pass), or the
+        /// bypass reason for hediffs that heal without a threshold (severity shows a dash).
         /// </summary>
-        private void DrawThresholdRow(Listing_Standard listing, Hediff hediff, float threshold, bool reached, bool hasEntry)
+        private void DrawThresholdRow(Listing_Standard listing, Hediff hediff, float threshold, bool reached, bool hasEntry, string bypassReason)
         {
             Rect rowRect = listing.GetRect(THRESHOLD_ROW_HEIGHT);
             Text.Anchor = TextAnchor.MiddleLeft;
@@ -796,15 +847,22 @@ namespace Eternal.UI.Settings
             GUI.color = Color.gray;
             Widgets.Label(new Rect(rowRect.x + 10f, rowRect.y, rowRect.width * 0.5f - 10f, rowRect.height), label);
 
-            string severityText = hasEntry
-                ? $"{hediff.Severity:F2} / {threshold:F2}"
-                : $"{hediff.Severity:F2}";
+            string severityText = bypassReason != null
+                ? $"{hediff.Severity:F2} / —"
+                : hasEntry
+                    ? $"{hediff.Severity:F2} / {threshold:F2}"
+                    : $"{hediff.Severity:F2}";
             GUI.color = new Color(0.6f, 0.8f, 0.6f);
             Widgets.Label(new Rect(rowRect.x + rowRect.width * 0.5f, rowRect.y, rowRect.width * 0.3f, rowRect.height), severityText);
 
             string statusText;
             Color statusColor;
-            if (!hasEntry)
+            if (bypassReason != null)
+            {
+                statusText = bypassReason;
+                statusColor = Color.gray;
+            }
+            else if (!hasEntry)
             {
                 statusText = "Not rolled yet";
                 statusColor = Color.gray;
