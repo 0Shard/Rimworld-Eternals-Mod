@@ -50,7 +50,7 @@
 
   <!-- RimWorld and Harmony NuGet Package References -->
   <ItemGroup>
-    <PackageReference Include="Krafs.Rimworld.Ref" Version="1.6.4494-beta" />
+    <PackageReference Include="Krafs.Rimworld.Ref" Version="1.6.4871" />
     <PackageReference Include="Lib.Harmony" Version="2.4.2" />
     <!-- net472 reference assemblies as a NuGet package so the build works on Linux/macOS
          (Arch has no .NET Framework Developer Pack). Build-time only via PrivateAssets;

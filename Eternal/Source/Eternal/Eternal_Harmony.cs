@@ -1,7 +1,7 @@
 // file path: Eternal/Source/Eternal/Eternal_Harmony.cs
 // Author Name: 0Shard
 // Date Created: 28-10-2025
-// Date Last Modified: 11-07-2026
+// Date Last Modified: 13-07-2026
 // Description: Harmony patch initialization and management for Eternal mod.
 
 using System;
@@ -39,12 +39,21 @@ namespace Eternal
 
                 // Apply patches per class instead of a single PatchAll: one invalid patch class
                 // must not abort patching for every class after it in metadata order.
-                // CreateClassProcessor(type).Patch() is exactly what PatchAll does per type;
-                // types without Harmony annotations are a no-op.
+                // CreateClassProcessor(type).Patch() is exactly what PatchAll does per type.
+                // Only annotated classes are fed to the processor: Harmony ALSO discovers
+                // auxiliary hooks (Prepare/Cleanup/TargetMethod) by METHOD NAME, so a plain
+                // class with a public instance method named Cleanup would be invoked as a
+                // static [HarmonyCleanup] hook and throw "Non-static method requires a target"
+                // (this happened with EternalHealingProcessor.Cleanup()).
                 int appliedCount = 0;
                 var failedClasses = new System.Collections.Generic.List<string>();
                 foreach (var type in AccessTools.GetTypesFromAssembly(Assembly.GetExecutingAssembly()))
                 {
+                    if (!HarmonyAnnotationFilter.HasHarmonyAnnotation(type))
+                    {
+                        continue;
+                    }
+
                     try
                     {
                         harmony.CreateClassProcessor(type).Patch();
@@ -78,40 +87,54 @@ namespace Eternal
         }
         
         /// <summary>
-        /// Verifies that critical Harmony patches were applied successfully.
+        /// Verifies that Harmony patching took effect at all. The previous implementation
+        /// queried GetPatchInfo on the PATCH methods (always empty - it expects the patched
+        /// target), producing false "may not have been applied" warnings on every startup.
         /// </summary>
         /// <param name="harmony">The Harmony instance to check.</param>
         private static void VerifyCriticalPatches(Harmony harmony)
         {
             try
             {
-                var assembly = Assembly.GetExecutingAssembly();
-                var patchTypes = assembly.GetTypes()
-                    .Where(t => t.GetMethods().Any(m => m.GetCustomAttributes(typeof(HarmonyAttribute), false).Length > 0))
-                    .ToList();
-                
-                foreach (var patchType in patchTypes)
+                var patchedTargets = harmony.GetPatchedMethods().ToList();
+                if (patchedTargets.Count == 0)
                 {
-                    var methods = patchType.GetMethods()
-                        .Where(m => m.GetCustomAttributes(typeof(HarmonyAttribute), false).Length > 0);
-                    
-                    foreach (var method in methods)
-                    {
-                        var patches = Harmony.GetPatchInfo(method);
-                        if (patches == null || (patches.Prefixes.Count == 0 && patches.Postfixes.Count == 0 && patches.Transpilers.Count == 0))
-                        {
-                            Log.Warning($"[Eternal] Patch {method.Name} in {patchType.Name} may not have been applied correctly");
-                        }
-                    }
+                    Log.Error("[Eternal] No Harmony patches were applied at all - the mod will not function");
+                    return;
                 }
-                
-                Log.Message($"[Eternal] Verified {patchTypes.Count} patch types with {patchTypes.Sum(t => t.GetMethods().Count(m => m.GetCustomAttributes(typeof(HarmonyAttribute), false).Length > 0))} patch methods");
+
+                Log.Message($"[Eternal] Verified {patchedTargets.Count} game methods patched by Eternal");
             }
             catch (Exception ex)
             {
                 EternalLogger.HandleException(EternalExceptionCategory.CompatibilityFailure,
                     "VerifyCriticalPatches", null, ex);
             }
+        }
+    }
+
+    /// <summary>
+    /// Predicate for the bootstrap loop, kept off the [StaticConstructorOnStartup] class so
+    /// tests can call it without triggering game patching.
+    /// </summary>
+    public static class HarmonyAnnotationFilter
+    {
+        /// <summary>
+        /// True when Harmony's class processor has anything to do with this type: a
+        /// Harmony attribute on the class itself or on any of its methods.
+        /// </summary>
+        public static bool HasHarmonyAnnotation(Type type)
+        {
+            if (type.GetCustomAttributes(typeof(HarmonyAttribute), inherit: true).Length > 0)
+            {
+                return true;
+            }
+
+            // Method-role attributes (HarmonyPrefix/Postfix/Transpiler/Finalizer) derive from
+            // plain Attribute, NOT HarmonyAttribute - match any HarmonyLib attribute instead
+            return type.GetMethods(AccessTools.all)
+                .Any(m => m.GetCustomAttributes(false)
+                    .Any(attribute => attribute.GetType().Namespace == nameof(HarmonyLib)));
         }
     }
 }

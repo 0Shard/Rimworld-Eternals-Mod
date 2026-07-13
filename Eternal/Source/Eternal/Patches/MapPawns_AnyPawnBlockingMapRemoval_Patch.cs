@@ -1,17 +1,22 @@
-// Relative Path: Eternal/Source/Eternal/Patches/VGE/MapPawns_AnyPawnBlockingMapRemoval_Patch.cs
+// Relative Path: Eternal/Source/Eternal/Patches/MapPawns_AnyPawnBlockingMapRemoval_Patch.cs
 // Creation Date: 25-12-2025
-// Last Edit: 11-07-2026
+// Last Edit: 13-07-2026
 // Author: 0Shard
 // Description: Harmony patch extending the AnyPawnBlockingMapRemoval check to tracked Eternal
 //              corpses and active Eternal anchors. Every MapParent.ShouldRemoveMapNow override
 //              (Site, Camp, CaravansBattlefield, Settlement, SpaceMapParent) consults this getter,
 //              making it the single effective chokepoint for holding maps open. Always applied
 //              (vanilla temporary maps need it as much as gravship/Odyssey scenarios).
+//              EXCEPTION: space maps (SpaceMapParent / SOS2 orbiting ships) are never pinned -
+//              corpses there would hold the map open forever ("stranded in space"); instead the
+//              space-loss patches rescue Eternals to a ground crash site when the map is removed.
 
 using System;
 using System.Reflection;
 using HarmonyLib;
+using RimWorld.Planet;
 using Verse;
+using Eternal.Compatibility;
 using Eternal.Corpse;
 using Eternal.DI;
 using Eternal.Exceptions;
@@ -21,7 +26,7 @@ using Eternal.Utils;
 // Type alias to resolve namespace shadowing (Eternal.Map shadows Verse.Map)
 using MapType = Verse.Map;
 
-namespace Eternal.Patches.VGE
+namespace Eternal.Patches
 {
     /// <summary>
     /// Patches MapPawns.AnyPawnBlockingMapRemoval to include Eternal corpses and anchors.
@@ -114,6 +119,15 @@ namespace Eternal.Patches.VGE
                 // Get the map from the MapPawns instance using reflection
                 MapType map = GetMapFromMapPawns(__instance);
                 if (map == null)
+                {
+                    return;
+                }
+
+                // Space maps are never pinned: a corpse blocking removal would strand it in
+                // orbit forever. The SpaceMapParent/SOS2 rescue patches crash-down Eternals
+                // to a ground crash site when these maps close instead.
+                if (map.Parent is SpaceMapParent ||
+                    SpaceModDetection.IsOrbitingShip(map.Parent))
                 {
                     return;
                 }

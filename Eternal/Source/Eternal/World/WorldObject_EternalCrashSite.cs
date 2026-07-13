@@ -1,10 +1,11 @@
 // file path: Eternal/Source/Eternal/World/WorldObject_EternalCrashSite.cs
 // Author Name: 0Shard
 // Date Created: 06-12-2025
-// Date Last Modified: 20-02-2026
+// Date Last Modified: 13-07-2026
 // Description: World object representing a crash site where an Eternal fell from space.
-//              This is a playable map where the player can control the Eternal directly.
-//              Supports self-rescue, caravan rescue, or direct map control.
+//              Holds living pawns AND corpses (torso-only re-entry victims). Entering the site
+//              generates a map (vanilla Encounter generator via MapParent.MapGeneratorDef default)
+//              and PostMapGenerate spawns the crashed Eternals. Supports caravan rescue.
 
 using System;
 using System.Collections.Generic;
@@ -12,33 +13,38 @@ using System.Linq;
 using RimWorld;
 using RimWorld.Planet;
 using Verse;
+using Eternal.DI;
 using Eternal.Exceptions;
 using Eternal.Utils;
 
 // Type aliases to resolve namespace shadowing (Eternal.Map and Eternal.Caravan shadow Verse/RimWorld types)
 using MapType = Verse.Map;
 using CaravanType = RimWorld.Planet.Caravan;
+using CorpseType = Verse.Corpse;
 
 namespace Eternal.World
 {
     /// <summary>
     /// World object representing a crash site where an Eternal fell from space.
-    /// This is an actual playable map where the player controls the Eternal.
+    /// Holds living pawns and corpses until the player enters (map generation spawns them)
+    /// or rescues them with a caravan.
     /// </summary>
     public class WorldObject_EternalCrashSite : MapParent
     {
         /// <summary>
-        /// Eternals waiting to be spawned when map is generated.
+        /// Crashed Eternals waiting to be spawned: living Pawns or Corpses.
+        /// Deep-owned here while unspawned so they survive save/load.
         /// </summary>
-        private List<Pawn> crashedEternals = new List<Pawn>();
+        private List<Thing> crashedThings = new List<Thing>();
 
         /// <summary>
-        /// Whether the map has been generated yet.
+        /// Legacy storage from saves created before corpse support (pawns only).
+        /// Merged into crashedThings on load.
         /// </summary>
-        private bool mapGenerated = false;
+        private List<Pawn> crashedEternals;
 
         /// <summary>
-        /// Adds a pawn to the crash site (before map generation).
+        /// Adds a living pawn to the crash site (before map generation).
         /// </summary>
         public void AddPawn(Pawn pawn)
         {
@@ -48,25 +54,50 @@ namespace Eternal.World
                 return;
             }
 
-            if (!crashedEternals.Contains(pawn))
+            if (!crashedThings.Contains(pawn))
             {
-                crashedEternals.Add(pawn);
+                crashedThings.Add(pawn);
                 Log.Message($"[Eternal] Added {pawn.Name} to crash site");
             }
         }
 
         /// <summary>
-        /// Gets all pawns at this crash site (spawned on map or waiting).
+        /// Adds a corpse to the crash site (before map generation). The corpse must be
+        /// despawned; the crash site becomes its holder until the map is generated.
+        /// </summary>
+        public void AddCorpse(CorpseType corpse)
+        {
+            if (corpse?.InnerPawn == null)
+            {
+                Log.Warning("[Eternal] Attempted to add null corpse to crash site");
+                return;
+            }
+
+            if (!crashedThings.Contains(corpse))
+            {
+                crashedThings.Add(corpse);
+                Log.Message($"[Eternal] Added corpse of {corpse.InnerPawn.Name} to crash site");
+            }
+        }
+
+        /// <summary>
+        /// Gets all pawns at this crash site (waiting or spawned on the generated map).
+        /// Corpses yield their inner pawn.
         /// </summary>
         public IEnumerable<Pawn> GetCrashedPawns()
         {
-            // Return pawns waiting at crash site (not yet on map)
-            foreach (var pawn in crashedEternals)
+            foreach (var thing in crashedThings)
             {
-                yield return pawn;
+                if (thing is Pawn pawn)
+                {
+                    yield return pawn;
+                }
+                else if (thing is CorpseType corpse && corpse.InnerPawn != null)
+                {
+                    yield return corpse.InnerPawn;
+                }
             }
 
-            // Also return any spawned pawns if map exists
             if (HasMap)
             {
                 foreach (var pawn in Map.mapPawns.AllPawns.Where(p => p.Faction == Faction.OfPlayer))
@@ -85,8 +116,8 @@ namespace Eternal.World
 
             if (!HasMap)
             {
-                // No map, check if we still have pawns waiting
-                if (crashedEternals.Count == 0)
+                // No map, check if we still have things waiting
+                if (crashedThings.Count == 0)
                 {
                     alsoRemoveWorldObject = true;
                     return false;
@@ -94,7 +125,8 @@ namespace Eternal.World
                 return false;
             }
 
-            // Check if any player pawns remain on map
+            // Check if any player pawns (or tracked Eternal corpses, via the
+            // MapPawns_AnyPawnBlockingMapRemoval postfix) remain on map
             bool hasPlayerPawns = Map.mapPawns.AnyPawnBlockingMapRemoval;
 
             if (!hasPlayerPawns)
@@ -107,88 +139,74 @@ namespace Eternal.World
         }
 
         /// <summary>
-        /// Generate the crash site map when first entering.
+        /// Called by MapGenerator after the site map is generated (player entered the site).
+        /// Spawns all waiting crashed Eternals near the map center.
         /// </summary>
-        private MapType GenerateCrashSiteMap()
+        public override void PostMapGenerate()
         {
+            base.PostMapGenerate();
+
             try
             {
-                // Generate small map (crash site) - 75x75
-                IntVec3 mapSize = new IntVec3(75, 1, 75);
-
-                MapType map = MapGenerator.GenerateMap(
-                    mapSize,
-                    this,
-                    MapGeneratorDefOf.Base_Player);
-
-                if (map == null)
+                foreach (var thing in crashedThings.ToList())
                 {
-                    Log.Error("[Eternal] Failed to generate crash site map");
-                    return null;
+                    SpawnCrashedThingOnMap(thing, Map);
                 }
 
-                // Spawn crashed Eternals on the map
-                foreach (var eternal in crashedEternals)
-                {
-                    SpawnEternalOnMap(eternal, map);
-                }
+                crashedThings.Clear();
 
-                crashedEternals.Clear();
-                mapGenerated = true;
-
-                Log.Message($"[Eternal] Generated crash site map at tile {Tile}");
-
-                return map;
+                Log.Message($"[Eternal] Crash site map generated at tile {Tile}");
             }
             catch (Exception ex)
             {
                 EternalLogger.HandleException(EternalExceptionCategory.MapProtection,
-                    "GenerateCrashSiteMap", null, ex);
-                return null;
+                    "CrashSite.PostMapGenerate", null, ex);
             }
         }
 
         /// <summary>
-        /// Spawns an Eternal pawn on the crash site map.
+        /// Spawns a crashed Eternal (pawn or corpse) on the crash site map.
         /// </summary>
-        private void SpawnEternalOnMap(Pawn eternal, MapType map)
+        private void SpawnCrashedThingOnMap(Thing thing, MapType map)
         {
-            if (eternal == null || map == null)
+            if (thing == null || map == null)
             {
                 return;
             }
 
             try
             {
-                // Find valid spawn location near center
                 IntVec3 spawnPos;
                 if (!CellFinder.TryFindRandomCellNear(map.Center, map, 15,
                     c => c.Standable(map) && !c.Fogged(map), out spawnPos))
                 {
-                    // Fallback to any walkable cell
                     spawnPos = CellFinder.RandomClosewalkCellNear(map.Center, map, 20, null);
                 }
 
-                GenSpawn.Spawn(eternal, spawnPos, map, WipeMode.Vanish);
+                GenSpawn.Spawn(thing, spawnPos, map, WipeMode.Vanish);
 
-                // Ensure they're controllable (undraft if drafted, clear jobs)
-                if (eternal.Faction == Faction.OfPlayer)
+                if (thing is Pawn eternal && eternal.Faction == Faction.OfPlayer)
                 {
+                    // Ensure they're controllable (undraft if drafted, clear stale jobs)
                     if (eternal.drafter != null)
                     {
                         eternal.drafter.Drafted = false;
                     }
-
-                    // Clear any stale jobs
                     eternal.jobs?.EndCurrentJob(Verse.AI.JobCondition.InterruptForced, true);
                 }
+                else if (thing is CorpseType corpse)
+                {
+                    // Re-home the tracking entry so corpse healing/preservation see the new map
+                    EternalServiceContainer.Instance?.CorpseManager?.UpdateCorpseLocation(
+                        corpse.InnerPawn, map, spawnPos);
+                }
 
-                Log.Message($"[Eternal] Spawned {eternal.Name} at crash site map position {spawnPos}");
+                Log.Message($"[Eternal] Spawned {thing.LabelCap} at crash site position {spawnPos}");
             }
             catch (Exception ex)
             {
                 EternalLogger.HandleException(EternalExceptionCategory.MapProtection,
-                    "SpawnEternalOnMap", eternal, ex);
+                    "SpawnCrashedThingOnMap", thing as Pawn, ex);
             }
         }
 
@@ -203,7 +221,7 @@ namespace Eternal.World
             }
 
             // Option to rescue without entering (just pick them up)
-            if (crashedEternals.Count > 0 && !mapGenerated)
+            if (crashedThings.Count > 0 && !HasMap)
             {
                 yield return new FloatMenuOption(
                     "RescueEternalsWithCaravan".Translate(),
@@ -213,6 +231,7 @@ namespace Eternal.World
 
         /// <summary>
         /// Rescues all crashed Eternals directly to a caravan without generating a map.
+        /// Living pawns join the caravan; corpses go into caravan inventory.
         /// </summary>
         private void RescueEternalsToCaravan(CaravanType caravan)
         {
@@ -223,13 +242,21 @@ namespace Eternal.World
 
             try
             {
-                foreach (var eternal in crashedEternals.ToList())
+                foreach (var thing in crashedThings.ToList())
                 {
-                    caravan.AddPawn(eternal, true);
-                    Log.Message($"[Eternal] Rescued {eternal.Name} to caravan");
+                    if (thing is Pawn eternal)
+                    {
+                        caravan.AddPawn(eternal, true);
+                        Log.Message($"[Eternal] Rescued {eternal.Name} to caravan");
+                    }
+                    else if (thing is CorpseType corpse)
+                    {
+                        CaravanInventoryUtility.GiveThing(caravan, corpse);
+                        Log.Message($"[Eternal] Rescued corpse of {corpse.InnerPawn?.Name} to caravan inventory");
+                    }
                 }
 
-                crashedEternals.Clear();
+                crashedThings.Clear();
 
                 // Remove the world object since we're done
                 Find.WorldObjects.Remove(this);
@@ -250,14 +277,14 @@ namespace Eternal.World
         {
             string text = base.GetInspectString();
 
-            if (!mapGenerated && crashedEternals.Count > 0)
+            if (!HasMap && crashedThings.Count > 0)
             {
                 if (!string.IsNullOrEmpty(text))
                 {
                     text += "\n";
                 }
 
-                text += "EternalsCrashed".Translate(crashedEternals.Count);
+                text += "EternalsCrashed".Translate(crashedThings.Count);
                 text += "\n" + "ClickToEnterCrashSite".Translate();
             }
 
@@ -271,13 +298,25 @@ namespace Eternal.World
         {
             base.ExposeData();
 
+            Scribe_Collections.Look(ref crashedThings, "crashedThings", LookMode.Deep);
+            // Legacy list from saves created before corpse support
             Scribe_Collections.Look(ref crashedEternals, "crashedEternals", LookMode.Deep);
-            Scribe_Values.Look(ref mapGenerated, "mapGenerated", false);
 
-            // Ensure list is not null after loading
-            if (crashedEternals == null)
+            if (Scribe.mode == LoadSaveMode.PostLoadInit)
             {
-                crashedEternals = new List<Pawn>();
+                if (crashedThings == null)
+                {
+                    crashedThings = new List<Thing>();
+                }
+
+                if (crashedEternals != null)
+                {
+                    foreach (var legacyPawn in crashedEternals.Where(p => p != null && !crashedThings.Contains(p)))
+                    {
+                        crashedThings.Add(legacyPawn);
+                    }
+                    crashedEternals = null;
+                }
             }
         }
     }

@@ -1,11 +1,14 @@
 // Relative Path: Eternal/Source/Eternal/Patches/VGE/VGE_CrashLanding_Patch.cs
 // Creation Date: 25-12-2025
-// Last Edit: 20-02-2026
+// Last Edit: 13-07-2026
 // Author: 0Shard
 // Description: Harmony patches for VGE (Vanilla Gravship Expanded) crash landing compatibility.
-//              Protects Eternal corpses from being destroyed during gravship crash landings.
-//              Uses the same rescue pattern as SOS2/Odyssey patches - despawn before destruction,
-//              respawn after with fall damage applied.
+//              VGE's LandingEnded prefix runs ApplyCrashlanding on EVERY landing: gravship things
+//              overlapping a destroyable blocking thing take 25%-MaxHP blunt, and things overlapping
+//              an INDESTRUCTIBLE blocker are Destroy(0)'d outright (no corpse). This patch despawns
+//              Eternal pawns/corpses on those overlap cells before VGE runs and respawns them after.
+//              The postfix uses the Map captured in __state - vanilla LandingEnded() always nulls
+//              the controller's map field, so re-reading it would misreport "map destroyed".
 
 using System;
 using System.Collections.Generic;
@@ -16,7 +19,6 @@ using RimWorld;
 using RimWorld.Planet;
 using Verse;
 using Eternal.Compatibility;
-using Eternal.Corpse;
 using Eternal.DI;
 using Eternal.Exceptions;
 using Eternal.Extensions;
@@ -26,6 +28,7 @@ using Eternal.World;
 // Type aliases to resolve namespace shadowing
 using MapType = Verse.Map;
 using CorpseType = Verse.Corpse;
+using GravshipType = RimWorld.Planet.Gravship;
 
 namespace Eternal.Patches.VGE
 {
@@ -36,33 +39,28 @@ namespace Eternal.Patches.VGE
     {
         public List<CorpseType> EternalCorpsesToSave { get; } = new List<CorpseType>();
         public List<Pawn> EternalPawnsToSave { get; } = new List<Pawn>();
+        public MapType Map { get; set; }
         public int WorldTile { get; set; } = -1;
         public IntVec3 LandingPosition { get; set; } = IntVec3.Invalid;
         public bool PrefixSucceeded { get; set; }
     }
 
     /// <summary>
-    /// Patches WorldComponent_GravshipController.LandingEnded to protect Eternal corpses
-    /// during crash landings. Runs BEFORE VGE's patch to save corpses, then respawns them after.
+    /// Patches WorldComponent_GravshipController.LandingEnded to protect Eternals from VGE's
+    /// crash-landing collision damage. Runs BEFORE VGE's patch (High priority vs their Normal),
+    /// despawns Eternals on blocker-overlap cells, and respawns them after landing completes.
     /// </summary>
-    /// <remarks>
-    /// VGE's ApplyCrashlanding method (called in their Prefix) destroys things that collide
-    /// with the gravship during landing. We intercept this by:
-    /// 1. Running at High priority (before VGE's Normal priority)
-    /// 2. Temporarily despawning Eternal corpses before VGE processes them
-    /// 3. Respawning them after landing with appropriate fall damage
-    /// </remarks>
     [HarmonyPatch]
     public static class VGE_LandingEnded_Patch
     {
         private static Type _gravshipControllerType;
         private static FieldInfo _mapField;
         private static FieldInfo _gravshipField;
+        private static FieldInfo _blockingThingsField;
         private static bool _typesInitialized = false;
 
         /// <summary>
-        /// Determines if this patch should be applied.
-        /// Only patches when VGE is active.
+        /// Determines if this patch should be applied. Only patches when VGE is active.
         /// </summary>
         public static bool Prepare()
         {
@@ -101,15 +99,28 @@ namespace Eternal.Patches.VGE
 
             if (_gravshipControllerType != null)
             {
-                // Cache the field accessors
                 _mapField = AccessTools.Field(_gravshipControllerType, "map");
                 _gravshipField = AccessTools.Field(_gravshipControllerType, "gravship");
+            }
 
-                if (Eternal_Mod.settings?.debugMode == true)
-                {
-                    Log.Message($"[Eternal] VGE crash landing patch types initialized: " +
-                        $"map={_mapField != null}, gravship={_gravshipField != null}");
-                }
+            // VGE's landing-collision set: things on the destination map overlapping the ship footprint
+            var mapGenUtilityType = AccessTools.TypeByName("VanillaGravshipExpanded.GravshipMapGenUtility");
+            if (mapGenUtilityType != null)
+            {
+                _blockingThingsField = AccessTools.Field(mapGenUtilityType, "BlockingThings");
+            }
+
+            if (_blockingThingsField == null)
+            {
+                Log.Warning("[Eternal] VGE GravshipMapGenUtility.BlockingThings not found - " +
+                    "landing collision protection disabled (VGE API changed?)");
+            }
+
+            if (Eternal_Mod.settings?.debugMode == true)
+            {
+                Log.Message($"[Eternal] VGE crash landing patch types initialized: " +
+                    $"map={_mapField != null}, gravship={_gravshipField != null}, " +
+                    $"blockingThings={_blockingThingsField != null}");
             }
         }
 
@@ -136,14 +147,14 @@ namespace Eternal.Patches.VGE
         /// <summary>
         /// Gets the gravship from the controller using reflection.
         /// </summary>
-        private static object GetGravship(object controller)
+        private static GravshipType GetGravship(object controller)
         {
             if (_gravshipField == null || controller == null)
                 return null;
 
             try
             {
-                return _gravshipField.GetValue(controller);
+                return _gravshipField.GetValue(controller) as GravshipType;
             }
             catch (Exception ex)
             {
@@ -154,28 +165,44 @@ namespace Eternal.Patches.VGE
         }
 
         /// <summary>
-        /// Gets the engine position from a gravship object using reflection.
+        /// Gets the cells where VGE's ApplyCrashlanding will damage or destroy gravship things:
+        /// the occupied rects of everything in GravshipMapGenUtility.BlockingThings.
+        /// Empty on a clean landing.
         /// </summary>
-        private static IntVec3 GetGravshipPosition(object gravship)
+        private static HashSet<IntVec3> GetBlockerOverlapCells()
         {
-            if (gravship == null)
-                return IntVec3.Invalid;
+            var overlapCells = new HashSet<IntVec3>();
+
+            if (_blockingThingsField == null)
+            {
+                return overlapCells;
+            }
 
             try
             {
-                var engineProp = AccessTools.Property(gravship.GetType(), "Engine");
-                if (engineProp == null)
-                    return IntVec3.Invalid;
+                if (_blockingThingsField.GetValue(null) is IEnumerable<Thing> blockingThings)
+                {
+                    foreach (var blocker in blockingThings)
+                    {
+                        if (blocker == null)
+                        {
+                            continue;
+                        }
 
-                var engine = engineProp.GetValue(gravship) as Thing;
-                return engine?.Position ?? IntVec3.Invalid;
+                        foreach (var cell in GenAdj.OccupiedRect(blocker))
+                        {
+                            overlapCells.Add(cell);
+                        }
+                    }
+                }
             }
             catch (Exception ex)
             {
                 EternalLogger.HandleException(EternalExceptionCategory.CompatibilityFailure,
-                    "VGE_GetGravshipPosition", null, ex);
-                return IntVec3.Invalid;
+                    "VGE_GetBlockerOverlapCells", null, ex);
             }
+
+            return overlapCells;
         }
 
         /// <summary>
@@ -201,8 +228,9 @@ namespace Eternal.Patches.VGE
         }
 
         /// <summary>
-        /// Prefix: Save Eternal corpses BEFORE VGE's crash landing logic runs.
+        /// Prefix: Save Eternals on blocker-overlap cells BEFORE VGE's crash landing logic runs.
         /// Uses HarmonyPriority.High to run before VGE's Normal priority patch.
+        /// No-op on clean landings (no blocking things).
         /// </summary>
         [HarmonyPrefix]
         [HarmonyPriority(Priority.High)]
@@ -223,56 +251,63 @@ namespace Eternal.Patches.VGE
                     return;
                 }
 
+                __state.Map = map;
                 __state.WorldTile = map.Tile;
 
-                // Get landing position from gravship if available
                 var gravship = GetGravship(__instance);
-                if (gravship != null)
+                if (gravship?.Engine != null)
                 {
-                    __state.LandingPosition = GetGravshipPosition(gravship);
+                    __state.LandingPosition = gravship.Engine.Position;
                 }
 
-                // Find all Eternal corpses on the map
-                var corpseManager = EternalServiceContainer.Instance.CorpseManager;
-                if (corpseManager != null && corpseManager.HasEternalCorpses(map))
+                // Only landings that collide with existing map things are dangerous.
+                var overlapCells = GetBlockerOverlapCells();
+                if (overlapCells.Count == 0)
                 {
-                    var trackedCorpses = corpseManager.GetCorpsesOnMap(map).ToList();
+                    __state.PrefixSucceeded = true;
+                    return;
+                }
 
-                    foreach (var entry in trackedCorpses)
+                // Riders: gravship things on overlap cells get damaged, or Destroy(0)'d outright
+                // when the blocker is indestructible.
+                if (gravship != null)
+                {
+                    foreach (var thing in gravship.Things.ToList())
                     {
-                        if (entry?.Corpse != null && entry.Corpse.Spawned)
+                        if (thing is Pawn pawn && pawn.IsValidEternal() &&
+                            pawn.Faction == Faction.OfPlayer && overlapCells.Contains(pawn.Position))
                         {
-                            __state.EternalCorpsesToSave.Add(entry.Corpse);
-                            entry.Corpse.DeSpawn(DestroyMode.WillReplace);
-
-                            if (Eternal_Mod.settings?.debugMode == true)
+                            __state.EternalPawnsToSave.Add(pawn);
+                            if (pawn.Spawned)
                             {
-                                Log.Message($"[Eternal] Saved corpse of {entry.OriginalPawn?.Name} from VGE crash landing");
+                                pawn.DeSpawn(DestroyMode.WillReplace);
+                            }
+                        }
+                        else if (thing is CorpseType riderCorpse && riderCorpse.InnerPawn != null &&
+                            riderCorpse.InnerPawn.IsValidEternal() && overlapCells.Contains(riderCorpse.Position))
+                        {
+                            __state.EternalCorpsesToSave.Add(riderCorpse);
+                            if (riderCorpse.Spawned)
+                            {
+                                riderCorpse.DeSpawn(DestroyMode.WillReplace);
                             }
                         }
                     }
                 }
 
-                // Also find any living Eternal pawns that might be in the crash zone
-                var allPawns = map.mapPawns?.AllPawnsSpawned?.ToList();
-                if (allPawns != null)
+                // Destination-map side: tracked Eternal corpses that ARE blocking things
+                // (or sit on overlap cells) get destroyed by VGE's blocker cleanup.
+                var corpseManager = EternalServiceContainer.Instance.CorpseManager;
+                if (corpseManager != null && corpseManager.HasEternalCorpses(map))
                 {
-                    foreach (var pawn in allPawns)
+                    foreach (var entry in corpseManager.GetCorpsesOnMap(map).ToList())
                     {
-                        if (pawn != null && pawn.IsValidEternal() && pawn.Faction == Faction.OfPlayer)
+                        if (entry?.Corpse != null && entry.Corpse.Spawned &&
+                            overlapCells.Contains(entry.Corpse.Position) &&
+                            !__state.EternalCorpsesToSave.Contains(entry.Corpse))
                         {
-                            // Check if pawn is near the landing zone (within gravship bounds)
-                            if (__state.LandingPosition.IsValid &&
-                                pawn.Position.DistanceTo(__state.LandingPosition) < 20f)
-                            {
-                                __state.EternalPawnsToSave.Add(pawn);
-                                pawn.DeSpawn(DestroyMode.WillReplace);
-
-                                if (Eternal_Mod.settings?.debugMode == true)
-                                {
-                                    Log.Message($"[Eternal] Saved {pawn.Name} from VGE crash landing zone");
-                                }
-                            }
+                            __state.EternalCorpsesToSave.Add(entry.Corpse);
+                            entry.Corpse.DeSpawn(DestroyMode.WillReplace);
                         }
                     }
                 }
@@ -282,7 +317,7 @@ namespace Eternal.Patches.VGE
                 int totalSaved = __state.EternalCorpsesToSave.Count + __state.EternalPawnsToSave.Count;
                 if (totalSaved > 0)
                 {
-                    Log.Message($"[Eternal] Protected {totalSaved} Eternal(s) from VGE crash landing");
+                    Log.Message($"[Eternal] Protected {totalSaved} Eternal(s) from VGE crash landing collision");
                 }
             }
             catch (Exception ex)
@@ -295,7 +330,7 @@ namespace Eternal.Patches.VGE
 
         /// <summary>
         /// Postfix: Respawn saved Eternals after crash landing completes.
-        /// Applies fall damage and spawns them near the landing site.
+        /// Uses the Map captured by the prefix - the controller's field is always null here.
         /// </summary>
         [HarmonyPostfix]
         [HarmonyPriority(Priority.Low)]
@@ -314,15 +349,14 @@ namespace Eternal.Patches.VGE
 
             try
             {
-                MapType map = GetMap(__instance);
-                if (map == null)
+                MapType map = __state.Map;
+                bool mapGone = map == null || map.Disposed || Find.Maps == null || !Find.Maps.Contains(map);
+                if (mapGone)
                 {
-                    // Map was destroyed - try to create crash site
                     HandleMapDestroyed(__state);
                     return;
                 }
 
-                // Respawn corpses on the map
                 foreach (var corpse in __state.EternalCorpsesToSave)
                 {
                     if (corpse == null || corpse.Destroyed)
@@ -330,20 +364,15 @@ namespace Eternal.Patches.VGE
                         continue;
                     }
 
-                    // Find a valid spawn location near the landing site
                     IntVec3 spawnPos = FindSafeSpawnLocation(map, __state.LandingPosition);
                     if (spawnPos.IsValid)
                     {
                         GenSpawn.Spawn(corpse, spawnPos, map);
-
-                        if (Eternal_Mod.settings?.debugMode == true)
-                        {
-                            Log.Message($"[Eternal] Respawned corpse at {spawnPos} after VGE landing");
-                        }
+                        EternalServiceContainer.Instance?.CorpseManager?.UpdateCorpseLocation(
+                            corpse.InnerPawn, map, spawnPos);
                     }
                 }
 
-                // Respawn living pawns with fall damage
                 foreach (var pawn in __state.EternalPawnsToSave)
                 {
                     if (pawn == null || pawn.Destroyed)
@@ -356,22 +385,13 @@ namespace Eternal.Patches.VGE
                     {
                         GenSpawn.Spawn(pawn, spawnPos, map);
                         ApplyCrashDamage(pawn);
-
-                        if (Eternal_Mod.settings?.debugMode == true)
-                        {
-                            Log.Message($"[Eternal] Respawned {pawn.Name} with crash damage after VGE landing");
-                        }
                     }
                 }
 
-                if (totalToRespawn > 0)
-                {
-                    // Notify player
-                    Find.LetterStack?.ReceiveLetter(
-                        "Eternal.VGECrashSurvival".Translate(),
-                        "Eternal.VGECrashSurvivalDesc".Translate(totalToRespawn),
-                        LetterDefOf.NeutralEvent);
-                }
+                Find.LetterStack?.ReceiveLetter(
+                    "EternalVGECrashSurvival".Translate(),
+                    "EternalVGECrashSurvivalDesc".Translate(totalToRespawn),
+                    LetterDefOf.NeutralEvent);
             }
             catch (Exception ex)
             {
@@ -440,8 +460,8 @@ namespace Eternal.Patches.VGE
         }
 
         /// <summary>
-        /// Emergency handler when the map was destroyed.
-        /// Creates a crash site for rescued Eternals.
+        /// Emergency handler when the landing map is genuinely gone: deliver the saved
+        /// Eternals to a crash site at the landing tile (already a ground tile).
         /// </summary>
         private static void HandleMapDestroyed(VGELandingContext state)
         {
@@ -449,43 +469,38 @@ namespace Eternal.Patches.VGE
 
             try
             {
-                // Create crash site at world tile
-                if (state.WorldTile < 0)
-                {
-                    Log.Error("[Eternal] No valid world tile for crash site");
-                    SpawnAtHomeColony(state);
-                    return;
-                }
+                var crashSite = state.WorldTile >= 0
+                    ? SpaceCrashRescueService.CreateOrGetCrashSite(state.WorldTile)
+                    : null;
 
-                var crashSite = CreateOrGetCrashSite(state.WorldTile);
                 if (crashSite == null)
                 {
-                    SpawnAtHomeColony(state);
+                    SpaceCrashRescueService.SpawnAtHomeColony(
+                        state.EternalPawnsToSave.Concat(
+                            state.EternalCorpsesToSave.Select(c => c.InnerPawn)));
                     return;
                 }
 
-                // Add corpses to crash site (they'll spawn when player visits)
                 foreach (var corpse in state.EternalCorpsesToSave)
                 {
-                    if (corpse?.InnerPawn != null)
+                    if (corpse != null && !corpse.Destroyed)
                     {
-                        crashSite.AddPawn(corpse.InnerPawn);
+                        crashSite.AddCorpse(corpse);
                     }
                 }
 
-                // Add living pawns to crash site
                 foreach (var pawn in state.EternalPawnsToSave)
                 {
                     if (pawn != null && !pawn.Destroyed)
                     {
-                        ApplyCrashDamage(pawn);
+                        SpaceCrashRescueService.ApplyFallDamage(pawn);
                         crashSite.AddPawn(pawn);
                     }
                 }
 
                 Find.LetterStack?.ReceiveLetter(
-                    "Eternal.VGECrashSite".Translate(),
-                    "Eternal.VGECrashSiteDesc".Translate(),
+                    "EternalVGECrashSite".Translate(),
+                    "EternalVGECrashSiteDesc".Translate(),
                     LetterDefOf.NegativeEvent,
                     crashSite);
             }
@@ -493,87 +508,10 @@ namespace Eternal.Patches.VGE
             {
                 EternalLogger.HandleException(EternalExceptionCategory.MapProtection,
                     "HandleMapDestroyed", null, ex);
-                SpawnAtHomeColony(state);
+                SpaceCrashRescueService.SpawnAtHomeColony(
+                    state.EternalPawnsToSave.Concat(
+                        state.EternalCorpsesToSave.Select(c => c.InnerPawn)));
             }
-        }
-
-        /// <summary>
-        /// Creates or retrieves an existing crash site at the given tile.
-        /// </summary>
-        private static WorldObject_EternalCrashSite CreateOrGetCrashSite(int worldTile)
-        {
-            // Check for existing crash site
-            var existing = Find.WorldObjects?.AllWorldObjects
-                ?.OfType<WorldObject_EternalCrashSite>()
-                .FirstOrDefault(x => x.Tile == worldTile);
-
-            if (existing != null)
-            {
-                return existing;
-            }
-
-            // Create new crash site
-            var crashSiteDef = EternalDefOf.Eternal_CrashSite;
-            if (crashSiteDef == null)
-            {
-                Log.Error("[Eternal] Eternal_CrashSite WorldObjectDef not found");
-                return null;
-            }
-
-            var crashSite = (WorldObject_EternalCrashSite)WorldObjectMaker.MakeWorldObject(crashSiteDef);
-            if (crashSite == null)
-            {
-                return null;
-            }
-
-            crashSite.Tile = worldTile;
-            crashSite.SetFaction(Faction.OfPlayer);
-            Find.WorldObjects.Add(crashSite);
-
-            return crashSite;
-        }
-
-        /// <summary>
-        /// Emergency fallback: spawn at home colony.
-        /// </summary>
-        private static void SpawnAtHomeColony(VGELandingContext state)
-        {
-            var homeMap = Find.AnyPlayerHomeMap;
-            if (homeMap == null)
-            {
-                Log.Error("[Eternal] No home map for emergency spawn - Eternals may be lost");
-                return;
-            }
-
-            foreach (var corpse in state.EternalCorpsesToSave)
-            {
-                if (corpse != null && !corpse.Destroyed)
-                {
-                    var cell = CellFinder.RandomEdgeCell(homeMap);
-                    if (cell.IsValid)
-                    {
-                        GenSpawn.Spawn(corpse, cell, homeMap);
-                    }
-                }
-            }
-
-            foreach (var pawn in state.EternalPawnsToSave)
-            {
-                if (pawn != null && !pawn.Destroyed)
-                {
-                    var cell = CellFinder.RandomEdgeCell(homeMap);
-                    if (cell.IsValid)
-                    {
-                        GenSpawn.Spawn(pawn, cell, homeMap);
-                        ApplyCrashDamage(pawn);
-                    }
-                }
-            }
-
-            Find.LetterStack?.ReceiveLetter(
-                "Eternal.EmergencyRecovery".Translate(),
-                "Eternal.EmergencyRecoveryDesc".Translate(),
-                LetterDefOf.NegativeEvent);
         }
     }
 }

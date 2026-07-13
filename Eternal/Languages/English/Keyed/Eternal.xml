@@ -76,6 +76,15 @@
     <EternalSOS2ShipAbandoned>{0} Eternal pawn(s) were rescued from the abandoned ship and fell to the planet surface. They are at a crash site awaiting rescue.</EternalSOS2ShipAbandoned>
     <EternalEmergencyRecovery>Eternal pawn(s) were emergency teleported to your colony after a ship destruction event.</EternalEmergencyRecovery>
 
+    <!-- Space Loss - Terminal-Velocity Re-entry -->
+    <EternalSpaceLossTorsoDesc>{0} Eternal(s) were lost in space. Their remains re-entered the atmosphere and struck the ground at terminal velocity — only a torso survived the impact. Recover the remains from the crash site to begin resurrection.</EternalSpaceLossTorsoDesc>
+
+    <!-- VGE Crash Landing -->
+    <EternalVGECrashSurvival>Eternals Survived Crash Landing</EternalVGECrashSurvival>
+    <EternalVGECrashSurvivalDesc>{0} Eternal(s) were shielded from the gravship's crash landing and have been recovered at the landing site.</EternalVGECrashSurvivalDesc>
+    <EternalVGECrashSite>Eternals At Crash Site</EternalVGECrashSite>
+    <EternalVGECrashSiteDesc>The gravship's landing map was lost. The Eternals aboard have been recovered at a crash site.</EternalVGECrashSiteDesc>
+
     <!-- Roof Collapse Protection -->
     <EternalRoofCollapseSaved>The corpse of {0} was saved from roof collapse!</EternalRoofCollapseSaved>
 

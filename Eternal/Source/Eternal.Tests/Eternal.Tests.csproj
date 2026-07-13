@@ -32,7 +32,7 @@
     <!-- NSubstitute: interface mocking for ISettingsProvider, IPawnData -->
     <PackageReference Include="NSubstitute" Version="5.3.0" />
     <!-- RimWorld reference assemblies: compile-time type safety, no game runtime needed -->
-    <PackageReference Include="Krafs.Rimworld.Ref" Version="1.6.4494-beta" />
+    <PackageReference Include="Krafs.Rimworld.Ref" Version="1.6.4871" />
     <!-- Harmony: patch attribute verification via reflection -->
     <PackageReference Include="Lib.Harmony" Version="2.4.2" />
     <!-- System.Reflection.Metadata: PE metadata inspection for CauseDeathNow IL verification
