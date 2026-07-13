@@ -1,12 +1,14 @@
 // Relative Path: Eternal/Source/Eternal/Patches/CultivatorOfTheRim/CTR_OnReadingTick_Patch.cs
 // Creation Date: 12-07-2026
-// Last Edit: 12-07-2026
+// Last Edit: 13-07-2026
 // Author: 0Shard
 // Description: Harmony patch for Cultivator of the Rim's technique-manual reading so Eternal
-// readers learn techniques 1000x faster. CTR has no exp system — OnReadingTick rolls a learn
-// chance every 250 ticks (binary hediff grant), so the boost multiplies that chance by 1000
-// (clamped to 1.0 = guaranteed learn on the first roll). Only active when the mod is loaded.
-// Uses reflection to avoid compile-time dependency.
+// readers learn techniques 1000x faster. Covers CTR's No-Sorcery variant only: there manuals
+// have no exp system — OnReadingTick rolls a learn chance every 250 ticks (binary hediff
+// grant), so the boost multiplies that chance by 1000 (clamped to 1.0 = guaranteed learn on
+// the first roll). With zomuro.itssorcery active, manuals are schema items instead — see
+// Patches/ItsSorcery/. Only active when the mod is loaded. Uses reflection to avoid
+// compile-time dependency.
 
 using System;
 using System.Reflection;

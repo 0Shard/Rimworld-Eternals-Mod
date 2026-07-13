@@ -1,11 +1,13 @@
 // Relative Path: Eternal/Source/Eternal/Compatibility/CultivatorOfTheRimDetection.cs
 // Creation Date: 12-07-2026
-// Last Edit: 12-07-2026
+// Last Edit: 13-07-2026
 // Author: 0Shard
 // Description: Detects the Cultivator of the Rim mod (packageId Aranmaho.Xianxia, workshop 3221270722)
 // and caches types for reflection-based patching. Grants Eternals guaranteed technique-manual
-// learning (1000x learn chance); the 10x cultivation speed is delivered via an XML statFactors
-// patch on the Eternal trait (Patches/CultivatorOfTheRim_Patches.xml), not through this class.
+// learning in the No-Sorcery variant (1000x learn chance; with It's Sorcery active manuals are
+// schema items handled by ItsSorceryDetection instead); the 25x cultivation speed is delivered
+// via an XML statFactors patch on the Eternal trait (Patches/CultivatorOfTheRim_Patches.xml).
+// Also caches HediffComp_BodyCultivation members for the passive body-cultivation patch.
 
 using System;
 using System.Reflection;
@@ -56,11 +58,18 @@ namespace Eternal.Compatibility
         private static bool _typesInitialized = false;
 
         // CultivatorOfTheRim.BookOutcomeDoerTechniqueManual — rolls the technique learn chance
-        // every 250 reading ticks (binary hediff grant, no exp system).
+        // every 250 reading ticks (binary hediff grant, no exp system). Only loaded by CTR's
+        // No-Sorcery variant; with zomuro.itssorcery active this type is never instantiated.
         private static Type _techniqueManualDoerType;
         private static MethodInfo _onReadingTickMethod;
         private static FieldInfo _chanceCachedField;
         private static PropertyInfo _finalChanceProperty;
+
+        // CultivatorOfTheRim.HediffComp_BodyCultivation — passive body-realm severity gain
+        // for Eternals via periodic CompPostTickInterval callback.
+        private static Type _bodyCultivationCompType;
+        private static MethodInfo _compPostTickIntervalMethod;
+        private static FieldInfo _bodyCultivationSpeedField;
 
         /// <summary>
         /// Gets the OnReadingTick method from BookOutcomeDoerTechniqueManual.
@@ -95,6 +104,30 @@ namespace Eternal.Compatibility
             {
                 EnsureTypesInitialized();
                 return _finalChanceProperty;
+            }
+        }
+
+        /// <summary>
+        /// Gets the CompPostTickInterval method from HediffComp_BodyCultivation.
+        /// </summary>
+        public static MethodInfo CompPostTickIntervalMethod
+        {
+            get
+            {
+                EnsureTypesInitialized();
+                return _compPostTickIntervalMethod;
+            }
+        }
+
+        /// <summary>
+        /// Gets the CultivationSpeed field from HediffComp_BodyCultivation.
+        /// </summary>
+        public static FieldInfo BodyCultivationSpeedField
+        {
+            get
+            {
+                EnsureTypesInitialized();
+                return _bodyCultivationSpeedField;
             }
         }
 
@@ -136,13 +169,32 @@ namespace Eternal.Compatibility
                     Log.Warning("[Eternal] Cultivator of the Rim detected but BookOutcomeDoerTechniqueManual type not found");
                 }
 
+                _bodyCultivationCompType = AccessTools.TypeByName("CultivatorOfTheRim.HediffComp_BodyCultivation");
+                if (_bodyCultivationCompType != null)
+                {
+                    _compPostTickIntervalMethod = AccessTools.Method(_bodyCultivationCompType, "CompPostTickInterval");
+                    _bodyCultivationSpeedField = AccessTools.Field(_bodyCultivationCompType, "CultivationSpeed");
+
+                    if (_compPostTickIntervalMethod == null)
+                        Log.Warning("[Eternal] Cultivator of the Rim: CompPostTickInterval method not found on HediffComp_BodyCultivation");
+                    if (_bodyCultivationSpeedField == null)
+                        Log.Warning("[Eternal] Cultivator of the Rim: CultivationSpeed field not found on HediffComp_BodyCultivation");
+                }
+                else
+                {
+                    Log.Warning("[Eternal] Cultivator of the Rim detected but HediffComp_BodyCultivation type not found");
+                }
+
                 if (Eternal_Mod.settings?.debugMode == true)
                 {
                     Log.Message($"[Eternal] Cultivator of the Rim types initialized: " +
                         $"TechniqueManualDoer={_techniqueManualDoerType != null}, " +
                         $"OnReadingTick={_onReadingTickMethod != null}, " +
                         $"chanceCached={_chanceCachedField != null}, " +
-                        $"finalChance={_finalChanceProperty != null}");
+                        $"finalChance={_finalChanceProperty != null}, " +
+                        $"BodyCultivationComp={_bodyCultivationCompType != null}, " +
+                        $"CompPostTickInterval={_compPostTickIntervalMethod != null}, " +
+                        $"CultivationSpeed={_bodyCultivationSpeedField != null}");
                 }
             }
             catch (Exception ex)
@@ -162,6 +214,9 @@ namespace Eternal.Compatibility
             _onReadingTickMethod = null;
             _chanceCachedField = null;
             _finalChanceProperty = null;
+            _bodyCultivationCompType = null;
+            _compPostTickIntervalMethod = null;
+            _bodyCultivationSpeedField = null;
         }
 
         #endregion
@@ -205,6 +260,26 @@ namespace Eternal.Compatibility
             {
                 EternalLogger.HandleException(EternalExceptionCategory.CompatibilityFailure,
                     "SetChanceCached", null, ex);
+            }
+        }
+
+        /// <summary>
+        /// Reads the comp's stat-refreshed CultivationSpeed field. 0f signals lookup failure (callers skip the gain).
+        /// </summary>
+        public static float GetBodyCultivationSpeed(object bodyCultivationComp)
+        {
+            if (bodyCultivationComp == null || BodyCultivationSpeedField == null)
+                return 0f;
+
+            try
+            {
+                return (float)BodyCultivationSpeedField.GetValue(bodyCultivationComp);
+            }
+            catch (Exception ex)
+            {
+                EternalLogger.HandleException(EternalExceptionCategory.CompatibilityFailure,
+                    "GetBodyCultivationSpeed", null, ex);
+                return 0f;
             }
         }
 

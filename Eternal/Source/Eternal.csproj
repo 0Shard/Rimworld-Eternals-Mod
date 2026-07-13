@@ -67,4 +67,8 @@
   <!-- Removed local assembly references to avoid conflicts with NuGet packages -->
   <!-- Using only NuGet package references for better compatibility -->
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="Eternal.Tests" />
+  </ItemGroup>
+
 </Project>
