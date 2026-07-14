@@ -1,12 +1,14 @@
 // Relative Path: Eternal/Source/Eternal/World/SpaceCrashRescueService.cs
 // Creation Date: 13-07-2026
-// Last Edit: 13-07-2026
+// Last Edit: 14-07-2026
 // Author: 0Shard
 // Description: Shared rescue pipeline for Eternals destroyed or stranded in space.
 //              Converts victims to torso-only corpses (terminal-velocity re-entry), updates their
 //              pre-calculated healing queue, and stores them in a ground crash site for recovery.
 //              Consolidates the crash-site helpers previously duplicated across the
 //              Odyssey/SOS2/VGE patch classes (CreateOrGetCrashSite, ApplyFallDamage, home fallback).
+//              Added DeliverCorpsesToCrashSite: non-stripping delivery for corpses rescued from
+//              container sweeps (corpse-only pod arrivals, silent Vanish-destroys).
 
 using System;
 using System.Collections.Generic;
@@ -126,6 +128,75 @@ namespace Eternal.World
             {
                 EternalLogger.HandleException(EternalExceptionCategory.MapProtection,
                     "CrashDownEternals", null, ex);
+                return 0;
+            }
+        }
+
+        /// <summary>
+        /// Delivers already-dead Eternal corpses to a ground crash site WITHOUT the
+        /// terminal-velocity torso-strip: the corpse is being rescued from a container sweep
+        /// (corpse-only pod arrival, silent Vanish-destroy), not falling from space, so its
+        /// death-time healing queue stays valid. Each corpse is removed from its current
+        /// map/container first — the crash site deep-saves its contents, so leaving the corpse
+        /// in another ThingOwner would double-own it and corrupt the save.
+        /// </summary>
+        /// <param name="corpses">Tracked Eternal corpses to rescue (null-safe)</param>
+        /// <param name="spaceTile">Best-known world tile of the loss event</param>
+        /// <returns>Number of corpses delivered to the crash site</returns>
+        public static int DeliverCorpsesToCrashSite(IEnumerable<CorpseType> corpses, PlanetTile spaceTile)
+        {
+            try
+            {
+                var rescuedCorpses = (corpses ?? Enumerable.Empty<CorpseType>())
+                    .Where(corpse => corpse?.InnerPawn != null && !corpse.Destroyed)
+                    .ToList();
+
+                if (rescuedCorpses.Count == 0)
+                {
+                    return 0;
+                }
+
+                var groundTile = ResolveGroundTile(spaceTile);
+                var crashSite = groundTile.Valid ? CreateOrGetCrashSite(groundTile) : null;
+
+                int delivered = 0;
+                foreach (var corpse in rescuedCorpses)
+                {
+                    if (corpse.Spawned)
+                    {
+                        corpse.DeSpawn(DestroyMode.WillReplace);
+                    }
+                    else
+                    {
+                        corpse.holdingOwner?.Remove(corpse);
+                    }
+
+                    if (crashSite != null)
+                    {
+                        crashSite.AddCorpse(corpse);
+                        delivered++;
+                    }
+                    else
+                    {
+                        SpawnCorpseAtHomeColony(corpse);
+                    }
+                }
+
+                if (crashSite != null && delivered > 0)
+                {
+                    Find.LetterStack?.ReceiveLetter(
+                        "EternalFellFromSpace".Translate(),
+                        "EternalCorpseRescuedDesc".Translate(delivered),
+                        LetterDefOf.NegativeEvent,
+                        crashSite);
+                }
+
+                return delivered;
+            }
+            catch (Exception ex)
+            {
+                EternalLogger.HandleException(EternalExceptionCategory.CorpseTracking,
+                    "DeliverCorpsesToCrashSite", null, ex);
                 return 0;
             }
         }

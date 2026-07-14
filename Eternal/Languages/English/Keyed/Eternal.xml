@@ -79,6 +79,11 @@
     <!-- Space Loss - Terminal-Velocity Re-entry -->
     <EternalSpaceLossTorsoDesc>{0} Eternal(s) were lost in space. Their remains re-entered the atmosphere and struck the ground at terminal velocity — only a torso survived the impact. Recover the remains from the crash site to begin resurrection.</EternalSpaceLossTorsoDesc>
 
+    <!-- Corpse Loss Protection - pod arrivals and silent container sweeps -->
+    <EternalCorpseAboardCaravan>Eternal Corpse Aboard Caravan</EternalCorpseAboardCaravan>
+    <EternalCorpseAboardCaravanDesc>The corpse of {0} arrived with the transport pods and is carried by {1} in caravan {2}. Resurrection can be started from the caravan's "Resurrect" button and will continue while traveling.</EternalCorpseAboardCaravanDesc>
+    <EternalCorpseRescuedDesc>{0} Eternal corpse(s) were about to be destroyed and were recovered to a crash site instead. Recover the remains to continue resurrection.</EternalCorpseRescuedDesc>
+
     <!-- VGE Crash Landing -->
     <EternalVGECrashSurvival>Eternals Survived Crash Landing</EternalVGECrashSurvival>
     <EternalVGECrashSurvivalDesc>{0} Eternal(s) were shielded from the gravship's crash landing and have been recovered at the landing site.</EternalVGECrashSurvivalDesc>

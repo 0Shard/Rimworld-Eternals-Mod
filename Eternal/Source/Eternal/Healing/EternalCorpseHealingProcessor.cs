@@ -1,7 +1,7 @@
 /*
  * Relative Path: Eternal/Source/Eternal/Healing/EternalCorpseHealingProcessor.cs
  * Creation Date: 09-11-2025
- * Last Edit: 12-07-2026
+ * Last Edit: 14-07-2026
  * Author: 0Shard
  * Description: Processes healing and regrowth on Eternal corpses, accumulating debt and managing resurrection completion.
  *              Integrates with EternalRegrowthState for proper 4-phase body part regrowth.
@@ -39,6 +39,9 @@
  *              09-03: Apply Metabolic Recovery hediff to corpse during StartCorpseHealing for debt visibility.
  *              26-03: Added SanitizeHediffSetBeforeRestore — removes stale regrowth hediffs, MetabolicRecovery,
  *                     and residual injuries from saved HediffSet BEFORE swap-back (RSRV-01/02/03).
+ *              14-07: Both TryResurrect calls wrapped with Mark/UnmarkExpectedDestruction so the
+ *                     Corpse_Destroy_Patch anti-vaporize guard lets resurrection consume the
+ *                     still-tracked corpse (UnregisterCorpse runs AFTER TryResurrect).
  */
 
 using System;
@@ -809,6 +812,9 @@ namespace Eternal.Healing
                 // log a warning, clear swapActive, and continue post-work normally.
                 // If the pawn is still dead after the exception, it is a hard failure — let the
                 // outer catch and finally handle it (AttemptHediffRestore).
+                // TryResurrect destroys the still-tracked corpse (Vanish, unspawned for caravan
+                // corpses) — mark it expected so Corpse_Destroy_Patch lets the destroy through.
+                CorpseManager?.MarkExpectedDestruction(corpseData.Corpse);
                 try
                 {
                     ResurrectionUtility.TryResurrect(pawn, null);
@@ -831,6 +837,10 @@ namespace Eternal.Healing
                         // and the finally block calls AttemptHediffRestore with swapActive=true.
                         throw;
                     }
+                }
+                finally
+                {
+                    CorpseManager?.UnmarkExpectedDestruction(corpseData.Corpse);
                 }
 
                 // === Sanitize saved HediffSet BEFORE swap-back (RSRV-01/02/03) ===
@@ -1151,6 +1161,9 @@ namespace Eternal.Healing
                 // Notify_Resurrected sets healthState=Mobile BEFORE EnableAndInitialize is called,
                 // so if WorkTab crashes during EnableAndInitialize the pawn is already alive.
                 // Treat that as a soft failure: log warning, clear swapActive, continue post-work.
+                // Same expected-destroy mark as CompleteResurrection — TryResurrect destroys the
+                // still-tracked corpse and Corpse_Destroy_Patch must not block it.
+                CorpseManager?.MarkExpectedDestruction(corpseData.Corpse);
                 try
                 {
                     ResurrectionUtility.TryResurrect(pawn, null);
@@ -1169,6 +1182,10 @@ namespace Eternal.Healing
                         // Pawn is still dead — hard failure.
                         throw;
                     }
+                }
+                finally
+                {
+                    CorpseManager?.UnmarkExpectedDestruction(corpseData.Corpse);
                 }
 
                 // === Sanitize saved HediffSet BEFORE swap-back (RSRV-01/02/03) ===

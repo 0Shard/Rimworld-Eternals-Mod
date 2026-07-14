@@ -1,0 +1,96 @@
+# Uploads the released mod package to the Steam Workshop (item 294100 / RimWorld).
+# Trigger: every GitHub release published by publish.sh (which also handles the public push),
+# or manually via workflow_dispatch with an existing release tag.
+# Auth: STEAM_USERNAME + STEAM_CONFIG_VDF (base64 of a locally cached steamcmd login token)
+# repository secrets. If the token expires (password change, login churn), refresh the secret
+# by logging in locally with steamcmd and re-uploading config.vdf.
+name: Steam Workshop Upload
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing release tag to upload (e.g. v1.0.13)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: workshop-upload
+  cancel-in-progress: false
+
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Download release asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}
+        run: |
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern 'Eternal-*.zip' --output mod.zip
+          unzip -q mod.zip -d content
+          test -f content/Eternal/About/About.xml
+          test -s content/Eternal/About/PublishedFileId.txt
+
+      - name: Install SteamCMD
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq lib32gcc-s1
+          mkdir -p "$HOME/steamcmd"
+          curl -fsSL https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz | tar zx -C "$HOME/steamcmd"
+
+      - name: Restore Steam login token
+        env:
+          STEAM_CONFIG_VDF: ${{ secrets.STEAM_CONFIG_VDF }}
+        run: |
+          if [ -z "$STEAM_CONFIG_VDF" ]; then
+            echo "::error::STEAM_CONFIG_VDF secret is not set — cannot log in to Steam."
+            exit 1
+          fi
+          # steamcmd reads cached credentials from its config dir; the tarball install uses
+          # the install dir and some builds fall back to ~/Steam — populate both.
+          mkdir -p "$HOME/steamcmd/config" "$HOME/Steam/config"
+          echo "$STEAM_CONFIG_VDF" | base64 -d > "$HOME/steamcmd/config/config.vdf"
+          cp "$HOME/steamcmd/config/config.vdf" "$HOME/Steam/config/config.vdf"
+
+      - name: Upload to Workshop
+        env:
+          STEAM_USERNAME: ${{ secrets.STEAM_USERNAME }}
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}
+          RELEASE_TITLE: ${{ github.event.release.name }}
+          RELEASE_BODY: ${{ github.event.release.body }}
+        run: |
+          WORKSHOP_ID=$(tr -d '\r\n' < content/Eternal/About/PublishedFileId.txt)
+          # Subscriber change note: the release message publish.sh puts between the
+          # "## Eternal <version>" heading and the "### Installation" boilerplate.
+          # Falls back to the release title (or the tag on workflow_dispatch, where
+          # github.event.release is empty).
+          CHANGE_NOTE=$(printf '%s\n' "$RELEASE_BODY" | sed -n '/^## /,/^### Installation/p' | sed '1d;$d' | sed '/^[[:space:]]*$/d')
+          CHANGE_NOTE="${CHANGE_NOTE:-${RELEASE_TITLE:-Update $TAG}}"
+          # VDF strings break on embedded double quotes — strip them.
+          CHANGE_NOTE=$(printf '%s' "$CHANGE_NOTE" | tr -d '"')
+          cat > item.vdf <<VDF
+          "workshopitem"
+          {
+            "appid"           "294100"
+            "publishedfileid" "$WORKSHOP_ID"
+            "contentfolder"   "$GITHUB_WORKSPACE/content/Eternal"
+            "changenote"      "$CHANGE_NOTE"
+          }
+          VDF
+          echo "Uploading item $WORKSHOP_ID (change note: $CHANGE_NOTE)"
+          # An expired login token makes steamcmd prompt for a password and hang — timeout
+          # converts that into a hard failure instead of burning the job's 20 minutes.
+          timeout 600 "$HOME/steamcmd/steamcmd.sh" \
+            +@ShutdownOnFailedCommand 1 \
+            +login "$STEAM_USERNAME" \
+            +workshop_build_item "$GITHUB_WORKSPACE/item.vdf" \
+            +quit \
+            || { echo "::error::SteamCMD upload failed — the cached login token may have expired. Re-run 'steamcmd +login' locally and refresh the STEAM_CONFIG_VDF secret."; exit 1; }
+          echo "Workshop item updated: https://steamcommunity.com/sharedfiles/filedetails/?id=$WORKSHOP_ID"

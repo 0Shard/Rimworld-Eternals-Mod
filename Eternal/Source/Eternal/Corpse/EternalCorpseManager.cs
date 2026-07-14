@@ -1,7 +1,7 @@
 // file path: Eternal/Source/Eternal/Corpse/EternalCorpseManager.cs
 // Author Name: 0Shard
 // Date Created: 09-11-2025
-// Date Last Modified: 12-03-2026
+// Date Last Modified: 14-07-2026
 // Description: Manages all dead Eternal corpses globally, tracking their locations, states, and resurrection progress.
 //              Implements IExposable for save/load persistence of corpse tracking data.
 //              Now accepts and stores PawnAssignmentSnapshot for work priority/policy preservation.
@@ -9,6 +9,9 @@
 //              Added: ResetAllRotProgress() to fix rot on saves from before the rot prevention fix.
 //              Added: PreCalculatedHealingQueue parameter to capture injuries at death before RimWorld removes them.
 //              Added: GetHealingCorpseCount() for live Effects tab population count display.
+//              Added: Expected-destroy whitelist (Mark/Unmark/IsExpectedDestruction) so
+//              Corpse_Destroy_Patch can distinguish the mod's own corpse-consuming operations
+//              (resurrection) from silent third-party container sweeps.
 
 using System;
 using System.Collections.Generic;
@@ -37,6 +40,15 @@ namespace Eternal.Corpse
     {
         private Dictionary<Pawn, CorpseTrackingEntry> trackedCorpses = new Dictionary<Pawn, CorpseTrackingEntry>();
         private Dictionary<MapType, HashSet<Pawn>> corpsesByMap = new Dictionary<MapType, HashSet<Pawn>>();
+
+        /// <summary>
+        /// Corpses whose upcoming destruction is an expected part of a mod-controlled operation
+        /// (ResurrectionUtility.TryResurrect consumes the corpse while it is still tracked).
+        /// Consulted by Corpse_Destroy_Patch to let those destroys through while blocking
+        /// silent third-party container sweeps. Transient by design (never scribed): the mark
+        /// only lives for the duration of a single TryResurrect call.
+        /// </summary>
+        private readonly HashSet<Verse.Corpse> expectedDestructions = new HashSet<Verse.Corpse>();
 
         /// <summary>
         /// Default constructor for new instances and IExposable deserialization.
@@ -232,6 +244,38 @@ namespace Eternal.Corpse
         public bool IsTracked(Pawn pawn)
         {
             return pawn != null && trackedCorpses.ContainsKey(pawn);
+        }
+
+        /// <summary>
+        /// Marks a corpse's upcoming destruction as expected (mod-controlled), so
+        /// Corpse_Destroy_Patch does not block it. Always pair with UnmarkExpectedDestruction
+        /// in a finally block.
+        /// </summary>
+        public void MarkExpectedDestruction(Verse.Corpse corpse)
+        {
+            if (corpse != null)
+            {
+                expectedDestructions.Add(corpse);
+            }
+        }
+
+        /// <summary>
+        /// Removes the expected-destruction mark set by MarkExpectedDestruction.
+        /// </summary>
+        public void UnmarkExpectedDestruction(Verse.Corpse corpse)
+        {
+            if (corpse != null)
+            {
+                expectedDestructions.Remove(corpse);
+            }
+        }
+
+        /// <summary>
+        /// Checks whether a corpse's destruction was marked as expected.
+        /// </summary>
+        public bool IsExpectedDestruction(Verse.Corpse corpse)
+        {
+            return corpse != null && expectedDestructions.Contains(corpse);
         }
 
         /// <summary>

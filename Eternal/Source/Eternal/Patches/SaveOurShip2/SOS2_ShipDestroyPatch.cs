@@ -1,6 +1,6 @@
 // Relative Path: Eternal/Source/Eternal/Patches/SaveOurShip2/SOS2_ShipDestroyPatch.cs
 // Creation Date: 25-12-2025
-// Last Edit: 13-07-2026
+// Last Edit: 14-07-2026
 // Author: 0Shard
 // Description: Harmony patch for SOS2's WorldObjectOrbitingShip.Destroy.
 //              When an orbiting ship world object is destroyed while its map still exists
@@ -43,10 +43,13 @@ namespace Eternal.Patches.SaveOurShip2
 
         /// <summary>
         /// Dynamically targets SOS2's WorldObjectOrbitingShip.Destroy method.
+        /// Resolves the type via AccessTools.TypeByName directly: TargetMethod runs at startup
+        /// patching, before EternalServiceContainer/SOS2ReflectionCache exist (FinalizeInit),
+        /// so SpaceModDetection.WorldObjectOrbitingShipType is always null here.
         /// </summary>
         public static MethodBase TargetMethod()
         {
-            var shipType = SpaceModDetection.WorldObjectOrbitingShipType;
+            var shipType = AccessTools.TypeByName("SaveOurShip2.WorldObjectOrbitingShip");
             if (shipType == null)
             {
                 return null;
