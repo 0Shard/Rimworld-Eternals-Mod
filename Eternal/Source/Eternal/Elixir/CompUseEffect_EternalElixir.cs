@@ -45,12 +45,17 @@ namespace Eternal.Elixir
             if (EternalModState.IsDisabled)
                 return "Eternal_Elixir_RejectModDisabled".Translate();
 
+            if (pawn == null)
+                return false;
+
+            Pawn target = pawn.jobs?.curJob?.targetB.Pawn ?? pawn;
+
             // ELIX-03: dead pawns cannot receive the elixir
-            if (pawn.Dead)
+            if (target.Dead)
                 return "Eternal_Elixir_RejectDead".Translate();
 
             // ELIX-04: already-Eternal pawns are rejected
-            if (pawn.IsValidEternal())
+            if (target.IsValidEternal())
                 return "Eternal_Elixir_RejectAlreadyEternal".Translate();
 
             // ELIX-05, POP-02, POP-03: population cap enforcement
@@ -67,7 +72,11 @@ namespace Eternal.Elixir
         /// </summary>
         public override TaggedString ConfirmMessage(Pawn pawn)
         {
-            string pawnName = pawn.Name?.ToStringShort ?? pawn.LabelShort;
+            Pawn target = pawn?.jobs?.curJob?.targetB.Pawn ?? pawn;
+            if (target == null)
+                return TaggedString.Empty;
+
+            string pawnName = target.Name?.ToStringShort ?? target.LabelShort;
 
             try
             {
@@ -104,25 +113,29 @@ namespace Eternal.Elixir
 
             try
             {
-                if (usedBy.story?.traits == null)
+                Pawn target = usedBy?.jobs?.curJob?.targetB.Pawn ?? usedBy;
+                if (target == null)
+                    return;
+
+                if (target.story?.traits == null)
                 {
-                    Log.Error($"[Eternal] Cannot grant Eternal trait to {usedBy.LabelShort} — pawn has no trait storage (story.traits is null).");
+                    Log.Error($"[Eternal] Cannot grant Eternal trait to {target.LabelShort} — pawn has no trait storage (story.traits is null).");
                     return;
                 }
 
                 // Belt-and-suspenders: re-check in case state changed between CanBeUsedBy and DoEffect
-                if (usedBy.IsValidEternal())
+                if (target.IsValidEternal())
                 {
-                    Log.Warning($"[Eternal] {usedBy.LabelShort} already has Eternal trait at DoEffect time — skipping duplicate trait addition.");
+                    Log.Warning($"[Eternal] {target.LabelShort} already has Eternal trait at DoEffect time — skipping duplicate trait addition.");
                     return;
                 }
 
                 Trait eternalTrait = new Trait(EternalDefOf.Eternal_GeneticMarker);
-                usedBy.story.traits.GainTrait(eternalTrait);
+                target.story.traits.GainTrait(eternalTrait);
 
                 if (Eternal_Mod.settings?.debugMode == true)
                 {
-                    Log.Message($"[Eternal] Elixir of Eternity used on {usedBy.LabelShort} — Eternal_GeneticMarker trait granted. TraitSet_Patch will auto-add Eternal_Essence hediff.");
+                    Log.Message($"[Eternal] Elixir of Eternity used on {target.LabelShort} — Eternal_GeneticMarker trait granted. TraitSet_Patch will auto-add Eternal_Essence hediff.");
                 }
             }
             catch (Exception ex)
