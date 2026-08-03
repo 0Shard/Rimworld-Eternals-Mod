@@ -45,7 +45,7 @@ namespace Eternal
         /// </summary>
         protected override ThoughtState CurrentStateInternal(Pawn p)
         {
-            if (p == null || p.Dead)
+            if (EternalModState.IsDisabled || p == null || p.Dead)
                 return ThoughtState.Inactive;
 
             bool moodEnabled = Eternal_Mod.settings?.moodBuffEnabled
