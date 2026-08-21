@@ -1,6 +1,6 @@
 // Relative Path: Eternal/Source/Eternal/Hediffs/Eternal_Hediff.cs
 // Creation Date: 28-10-2025
-// Last Edit: 12-07-2026
+// Last Edit: 16-07-2026
 // Author: 0Shard
 // Description: Core hediff class for Eternal mod, manages Eternal Essence hediff with enhanced validation, error handling, and healing system integration.
 //              12-07: Removed BuildThresholdTip — pending thresholds moved to the mod settings "Thresholds" tab (SettingsDrawer.DrawThresholdsTab); tooltip keeps only the consciousness line.
@@ -8,7 +8,7 @@
 //              Added Notify_PawnDied() override as PRIMARY corpse registration path (matches Immortals mod pattern for reliability).
 //              Added caravan death handling - delegates to EternalCaravanDeathHandler when pawn dies in caravan.
 //              BUGFIX: Pre-calculates healing queue at death time before RimWorld removes injuries from dead pawns.
-//              05-02: Reactive healing history cleanup — calls HediffHealer.ClearPawnHealingProgress on essence removal (SAFE-07).
+//              05-02: Reactive healing history cleanup now queues live-health reconciliation on Essence removal (SAFE-07).
 //              09-03: Removed debt display from SeverityLabel and GetHealingStatus — debt is now shown on Metabolic Recovery hediff only.
 //              12-03: CurStage override for configurable consciousness buff — reads consciousnessBuffEnabled/Multiplier from settings at runtime.
 
@@ -152,6 +152,10 @@ namespace Eternal
 
                 base.PostAdd(dinfo);
 
+                // Essence addition is a health mutation seam. Defer all derived-state work until
+                // the next safe tick so this callback never re-enters healing.
+                Eternal_Component.Instance?.EnqueueHealthReconciliation(pawn);
+
                 // Integrate with healing system - register pawn for healing tracking
                 var healingProcessor = Eternal_Component.Instance?.HealingProcessor;
                 if (healingProcessor != null && pawn.Dead)
@@ -199,17 +203,21 @@ namespace Eternal
                         operation);
                 }
 
+                Pawn ownerPawn = pawn;
                 base.PostRemoved();
 
-                // Integrate with healing system - cleanup pawn from healing tracking
+                // Essence removal is also deferred. ReconcileLiveHealth will prune threshold,
+                // severity-history, and progress state from the current HediffSet.
+                Eternal_Component.Instance?.EnqueueHealthReconciliation(ownerPawn, this);
+
+                // Food debt and scar records are independent bookkeeping systems; clear them
+                // here without touching current Hediff severity. Threshold/history/progress are
+                // deliberately left to the deferred reconciliation pass.
                 var healingProcessor = Eternal_Component.Instance?.HealingProcessor;
                 if (healingProcessor != null)
                 {
-                    // Unregister pawn from all healing systems
                     healingProcessor.FoodDebtSystem.UnregisterPawn(pawn);
                     healingProcessor.ScarHealing.ClearPawnHealingRecords(pawn);
-                    // Reactive cleanup: clear healing history when Eternal_Essence is removed
-                    healingProcessor.HediffHealer?.ClearPawnHealingProgress(pawn);
                 }
 
                 // Log the removal of Eternal Essence with enhanced context
@@ -224,6 +232,26 @@ namespace Eternal
             {
                 EternalLogger.LogException(ex, operation, pawn);
                 throw new EternalException("Failed to remove Eternal Essence hediff", operation, ex) { Pawn = pawn };
+            }
+        }
+
+        /// <summary>
+        /// Called by RimWorld after a pawn is resurrected. Only enqueue the owning Pawn; the
+        /// explicit restore paths perform a non-healing reconciliation after their HediffSet swap.
+        /// </summary>
+        public override void Notify_Resurrected()
+        {
+            try
+            {
+                base.Notify_Resurrected();
+            }
+            catch (Exception ex)
+            {
+                EternalLogger.LogException(ex, "Notify_Resurrected", pawn);
+            }
+            finally
+            {
+                Eternal_Component.Instance?.EnqueueHealthReconciliation(pawn);
             }
         }
 
@@ -394,12 +422,12 @@ namespace Eternal
                     if (Eternal_Mod.settings != null)
                     {
                         // Validate settings values
-                        EternalValidator.ValidateRange(Eternal_Mod.settings.showRegrowthProgress ? 1f : 0f, 0f, 1f, "showRegrowthProgress", operation);
+                        EternalValidator.ValidateRange(Eternal_Mod.settings.showEternalPowerLabel ? 1f : 0f, 0f, 1f, "showEternalPowerLabel", operation);
 
                         // Display immortality power level based on settings.
                         // Debt display is intentionally removed — food debt is shown on
                         // the Metabolic Recovery hediff (single source of truth, 09-03).
-                        if (Eternal_Mod.settings.showRegrowthProgress)
+                        if (Eternal_Mod.settings.showEternalPowerLabel)
                         {
                             return $"Eternal Power: {Severity:F1}";
                         }

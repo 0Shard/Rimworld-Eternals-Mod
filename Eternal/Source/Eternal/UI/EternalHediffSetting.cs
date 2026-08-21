@@ -1,14 +1,15 @@
 // Relative Path: Eternal/Source/Eternal/UI/EternalHediffSetting.cs
 // Creation Date: 09-11-2025
-// Last Edit: 19-02-2026
+// Last Edit: 16-07-2026
 // Author: 0Shard
 // Description: Individual hediff configuration setting for the Eternal mod healing system.
-//              Contains HealingOrder enum for healing order configuration.
 //              Conservative defaults: Only injuries/scars/regrowth heal by default.
-//              Simplified: Only canHeal, healingRate, nutritionCostMultiplier are user-configurable.
+//              Active per-hediff controls are canHeal, healingRate, and noThreshold;
+//              per-hediff nutritionCost is legacy input and is no longer persisted or displayed.
 
 using System;
 using Verse;
+using Eternal.Settings;
 
 namespace Eternal
 {
@@ -21,7 +22,7 @@ namespace Eternal
         /// <summary>
         /// Sentinel value indicating "use global baseHealingRate".
         /// </summary>
-        public const float USE_GLOBAL_RATE = -1f;
+        public const float USE_GLOBAL_RATE = SettingsDefaults.HediffHealingRateUseGlobal;
 
         /// <summary>
         /// The defName of the hediff this setting is for. Used for lookup during reset.
@@ -32,17 +33,16 @@ namespace Eternal
         /// The default value of canHeal computed from hediff properties.
         /// Used by HasCustomSettings() to detect customization.
         /// </summary>
-        public bool defaultCanHeal = true;
+        public bool defaultCanHeal = SettingsDefaults.HediffCanHeal;
 
         // Core healing properties
         public bool enabled = true;
-        public bool canHeal = true;
+        public bool canHeal = SettingsDefaults.HediffCanHeal;
         public bool requireCureToResurrect = false;
 
         // Auto-healing properties
         public bool allowAutoHeal = false;
         public bool requiresResources = false;
-        public float resourceCostMultiplier = 1.0f;
         public float nutritionCost = 0f;
         public MedicineRequirement medicineRequirement = MedicineRequirement.None;
         public float healingInterval = 250f;
@@ -60,7 +60,7 @@ namespace Eternal
         /// Overrides the default threshold behavior for debuff hediffs.
         /// Note: Bloodloss, injuries, scars, and regrowth ALWAYS bypass threshold regardless of this setting.
         /// </summary>
-        public bool noThreshold = false;
+        public bool noThreshold = SettingsDefaults.HediffNoThreshold;
 
         /// <summary>
         /// Returns true if this hediff uses a custom healing rate (overrides global).
@@ -109,8 +109,8 @@ namespace Eternal
         // Sorting (priority removed - now automatic via cost calculation)
         public int sortOrder = 0;
 
-        // Resource management (legacy)
-        public float nutritionCostMultiplier = 1.0f;
+        // Legacy resource flags remain in memory only so old ModSettings entries can be ignored
+        // safely; no per-hediff nutrition multiplier is part of the active schema.
         public bool consumeExtraResources = false;
 
         // UI state
@@ -363,13 +363,13 @@ namespace Eternal
         /// </summary>
         public bool HasCustomSettings()
         {
-            // Only check the 3 fields that matter for the simplified UI:
+            // Only check the three active v2 fields:
             // 1. canHeal differs from its context-aware default
             // 2. Custom healing rate (not using global)
-            // 3. Custom nutrition cost multiplier
+            // 3. Explicit threshold bypass
             return canHeal != defaultCanHeal ||
                    HasCustomHealingRate ||
-                   nutritionCostMultiplier != 1.0f;
+                   noThreshold;
         }
 
         /// <summary>
@@ -382,7 +382,6 @@ namespace Eternal
                    requireCureToResurrect ||
                    allowAutoHeal ||
                    requiresResources ||
-                   resourceCostMultiplier != 1.0f ||
                    nutritionCost != 0f ||
                    medicineRequirement != MedicineRequirement.None ||
                    healingInterval != 250f ||
@@ -393,7 +392,6 @@ namespace Eternal
                    !healScars ||
                    !healMissingParts ||
                    allowedCategories != HediffCategory.All ||
-                   nutritionCostMultiplier != 1.0f ||
                    consumeExtraResources ||
                    maxSeverityThresholdOverride.HasValue ||
                    healSpeedOverride.HasValue ||
@@ -409,7 +407,6 @@ namespace Eternal
         {
             // Reset the user-configurable fields to defaults
             healingRate = USE_GLOBAL_RATE;  // Reset to use global rate
-            nutritionCostMultiplier = 1.0f;
 
             // Re-apply context-aware defaults for canHeal
             HediffDef hediffDef = null;
@@ -435,11 +432,10 @@ namespace Eternal
             requireCureToResurrect = false;
             allowAutoHeal = false;
             requiresResources = false;
-            resourceCostMultiplier = 1.0f;
             nutritionCost = 0f;
             medicineRequirement = MedicineRequirement.None;
             healingInterval = 250f;
-            noThreshold = false;
+            noThreshold = SettingsDefaults.HediffNoThreshold;
             maxSeverityThreshold = 1.0f;
             healPermanentInjuries = true;
             healScars = true;
@@ -462,22 +458,22 @@ namespace Eternal
         {
             // Core identifiers (new in simplified version)
             Scribe_Values.Look(ref defName, "defName", "");
-            Scribe_Values.Look(ref defaultCanHeal, "defaultCanHeal", true);
+            Scribe_Values.Look(ref defaultCanHeal, "defaultCanHeal", SettingsDefaults.HediffCanHeal);
 
             // Core healing properties
             Scribe_Values.Look(ref enabled, "isEnabled", true);
-            Scribe_Values.Look(ref canHeal, "canHeal", true);
+            Scribe_Values.Look(ref canHeal, "canHeal", SettingsDefaults.HediffCanHeal);
             Scribe_Values.Look(ref requireCureToResurrect, "requireCureToResurrect", false);
 
             // Auto-healing properties
             Scribe_Values.Look(ref allowAutoHeal, "allowAutoHeal", false);
             Scribe_Values.Look(ref requiresResources, "requiresResources", false);
-            Scribe_Values.Look(ref resourceCostMultiplier, "resourceCostMultiplier", 1.0f);
+            // The obsolete per-hediff cost key is intentionally not loaded.
             Scribe_Values.Look(ref nutritionCost, "nutritionCost", 0f);
             Scribe_Values.Look(ref medicineRequirement, "medicineRequirement", MedicineRequirement.None);
             Scribe_Values.Look(ref healingInterval, "healingInterval", 250f);
-            Scribe_Values.Look(ref healingRate, "healingRate", USE_GLOBAL_RATE);
-            Scribe_Values.Look(ref noThreshold, "noThreshold", false);
+            Scribe_Values.Look(ref healingRate, "healingRate", SettingsDefaults.HediffHealingRateUseGlobal);
+            Scribe_Values.Look(ref noThreshold, "noThreshold", SettingsDefaults.HediffNoThreshold);
 
             Scribe_Values.Look(ref maxSeverityThreshold, "maxSeverityThreshold", 1.0f);
             Scribe_Values.Look(ref healPermanentInjuries, "healPermanentInjuries", true);
@@ -490,7 +486,6 @@ namespace Eternal
             Scribe_Values.Look(ref isConditionFilter, "isConditionFilter", false);
 
             Scribe_Values.Look(ref sortOrder, "sortOrder", 0);
-            Scribe_Values.Look(ref nutritionCostMultiplier, "nutritionCostMultiplier", 1.0f);
             Scribe_Values.Look(ref consumeExtraResources, "consumeExtraResources", false);
 
             // Custom per-hediff overrides

@@ -1,6 +1,6 @@
 // Relative Path: Eternal/Source/Eternal/Healing/HediffHealingConfig.cs
 // Creation Date: 28-10-2025
-// Last Edit: 12-07-2026
+// Last Edit: 16-07-2026
 // Author: 0Shard
 // Description: Creates default healing configurations for hediffs.
 //              Determines if hediffs should be healed by default and with what parameters.
@@ -159,7 +159,6 @@ namespace Eternal.Healing
             {
                 allowAutoHeal = true,
                 requiresResources = true,
-                resourceCostMultiplier = 1.0f,
                 nutritionCost = hediff.GetHealingNutritionCost(),
                 medicineRequirement = GetMedicineRequirement(hediff),
                 healingInterval = 250f,
@@ -179,7 +178,6 @@ namespace Eternal.Healing
             {
                 allowAutoHeal = false,
                 requiresResources = false,
-                resourceCostMultiplier = 1.0f,
                 nutritionCost = 0f,
                 medicineRequirement = MedicineRequirement.None,
                 healingInterval = 250f,

@@ -1,6 +1,6 @@
 // Relative Path: Eternal/Source/Eternal/Patches/VGE/VGE_CrashLanding_Patch.cs
 // Creation Date: 25-12-2025
-// Last Edit: 13-07-2026
+// Last Edit: 16-07-2026
 // Author: 0Shard
 // Description: Harmony patches for VGE (Vanilla Gravship Expanded) crash landing compatibility.
 //              VGE's LandingEnded prefix runs ApplyCrashlanding on EVERY landing: gravship things
@@ -367,9 +367,16 @@ namespace Eternal.Patches.VGE
                     IntVec3 spawnPos = FindSafeSpawnLocation(map, __state.LandingPosition);
                     if (spawnPos.IsValid)
                     {
-                        GenSpawn.Spawn(corpse, spawnPos, map);
-                        EternalServiceContainer.Instance?.CorpseManager?.UpdateCorpseLocation(
-                            corpse.InnerPawn, map, spawnPos);
+                        var corpseManager = EternalServiceContainer.Instance?.CorpseManager;
+                        if (corpseManager != null && corpseManager.IsTracked(corpse.InnerPawn))
+                        {
+                            if (!corpseManager.TryRelocateCorpse(corpse.InnerPawn, map, spawnPos))
+                                continue;
+                        }
+                        else
+                        {
+                            GenSpawn.Spawn(corpse, spawnPos, map);
+                        }
                     }
                 }
 

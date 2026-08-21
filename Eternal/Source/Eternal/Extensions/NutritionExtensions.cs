@@ -1,9 +1,9 @@
 // Relative Path: Eternal/Source/Eternal/Extensions/NutritionExtensions.cs
 // Creation Date: 09-11-2025
-// Last Edit: 19-02-2026
+// Last Edit: 16-07-2026
 // Author: 0Shard
 // Description: Extension methods for nutrition cost and healing speed calculations.
-//              Uses configurable severity-to-nutrition ratio (default 250:1), no type-specific multipliers.
+//              Uses the internal severity conversion constant and the single global nutrition multiplier.
 //              Stage-based healing speed retained for debuff hediffs.
 
 using Verse;
@@ -12,33 +12,31 @@ namespace Eternal.Extensions
 {
     /// <summary>
     /// Extension methods for nutrition cost calculations.
-    /// Uses configurable severity-to-nutrition ratio, no type-specific multipliers.
+    /// Uses the internal severity-to-nutrition conversion and one global cost multiplier.
     /// Stage-based healing speed is still applied for debuff hediffs.
     /// </summary>
     public static class NutritionExtensions
     {
         /// <summary>
-        /// Default cost ratio: 250 severity = 1 nutrition (0.004f).
-        /// Matches SettingsDefaults.SeverityToNutritionRatio.
-        /// Actual ratio is configurable via settings.severityToNutritionRatio.
+        /// Severity conversion is intentionally internal balance data, not a player control.
+        /// The only exposed cost knob is the global nutrition multiplier.
         /// </summary>
-        private const float DEFAULT_COST_PER_SEVERITY = 0.004f;
 
         /// <summary>
         /// Calculates the nutrition cost to heal this hediff.
-        /// Uses configurable severity-to-nutrition ratio (default 250:1) × global multiplier.
+        /// Uses the internal severity conversion (250:1) × the global multiplier.
         /// </summary>
         public static float GetHealingNutritionCost(this Hediff hediff)
         {
             if (hediff == null || !hediff.def.isBad)
                 return 0f;
 
-            // Use configurable ratio (default 250:1). GetSettings() guarantees non-null (SAFE-08).
-            var s = Eternal_Mod.GetSettings();
-            float baseCost = hediff.Severity * s.severityToNutritionRatio;
+            // GetSettings() guarantees a non-null root; the conversion constant keeps all
+            // healing paths on the same balance formula.
+            var settings = Eternal_Mod.GetSettings();
+            float baseCost = hediff.Severity * SettingsDefaults.SeverityToNutritionRatio;
 
-            // Apply global nutrition cost multiplier from settings
-            return baseCost * s.nutritionCostMultiplier;
+            return baseCost * settings.nutritionCostMultiplier;
         }
 
         /// <summary>

@@ -1,17 +1,11 @@
-// file path: Eternal/Source/Eternal/Corpse/EternalCorpseManager.cs
-// Author Name: 0Shard
-// Date Created: 09-11-2025
-// Date Last Modified: 14-07-2026
-// Description: Manages all dead Eternal corpses globally, tracking their locations, states, and resurrection progress.
-//              Implements IExposable for save/load persistence of corpse tracking data.
-//              Now accepts and stores PawnAssignmentSnapshot for work priority/policy preservation.
-//              Fixed: Added logging for orphaned/invalid corpse entries skipped during load.
-//              Added: ResetAllRotProgress() to fix rot on saves from before the rot prevention fix.
-//              Added: PreCalculatedHealingQueue parameter to capture injuries at death before RimWorld removes them.
-//              Added: GetHealingCorpseCount() for live Effects tab population count display.
-//              Added: Expected-destroy whitelist (Mark/Unmark/IsExpectedDestruction) so
-//              Corpse_Destroy_Patch can distinguish the mod's own corpse-consuming operations
-//              (resurrection) from silent third-party container sweeps.
+/*
+ * Relative Path: Eternal/Source/Eternal/Corpse/EternalCorpseManager.cs
+ * Creation Date: 09-11-2025
+ * Last Edit: 16-07-2026
+ * Author: 0Shard
+ * Description: Manages dead Eternal corpses globally, including save/load indexes,
+ *              failure-safe relocation, and resurrection lifecycle state.
+ */
 
 using System;
 using System.Collections.Generic;
@@ -40,6 +34,9 @@ namespace Eternal.Corpse
     {
         private Dictionary<Pawn, CorpseTrackingEntry> trackedCorpses = new Dictionary<Pawn, CorpseTrackingEntry>();
         private Dictionary<MapType, HashSet<Pawn>> corpsesByMap = new Dictionary<MapType, HashSet<Pawn>>();
+        private List<CorpseTrackingEntry> serializedCorpseEntries;
+        private bool corpseIndexesRebuiltAfterLoad;
+        private bool mapIndexHydrated = true;
 
         /// <summary>
         /// Corpses whose upcoming destruction is an expected part of a mod-controlled operation
@@ -57,6 +54,7 @@ namespace Eternal.Corpse
         {
             trackedCorpses = new Dictionary<Pawn, CorpseTrackingEntry>();
             corpsesByMap = new Dictionary<MapType, HashSet<Pawn>>();
+            corpseIndexesRebuiltAfterLoad = true;
         }
 
         /// <summary>
@@ -65,69 +63,81 @@ namespace Eternal.Corpse
         /// </summary>
         public void ExposeData()
         {
-            // Serialize tracked corpses as list of entries
-            // We use a list because dictionaries with Pawn keys are complex
-            List<CorpseTrackingEntry> corpseEntries = null;
-
+            // Keep the deep-loaded list on the manager. References inside each entry are not
+            // resolved during LoadingVars, so rebuilding either dictionary in that phase loses
+            // every entry whose Pawn or Corpse reference is still deferred.
             if (Scribe.mode == LoadSaveMode.Saving)
             {
-                corpseEntries = trackedCorpses.Values.ToList();
+                serializedCorpseEntries = trackedCorpses.Values.ToList();
             }
-
-            Scribe_Collections.Look(ref corpseEntries, "trackedCorpses", LookMode.Deep);
-
-            if (Scribe.mode == LoadSaveMode.LoadingVars || Scribe.mode == LoadSaveMode.PostLoadInit)
+            else if (Scribe.mode == LoadSaveMode.LoadingVars)
             {
-                // Reconstruct dictionaries from loaded entries
-                trackedCorpses = new Dictionary<Pawn, CorpseTrackingEntry>();
-                corpsesByMap = new Dictionary<MapType, HashSet<Pawn>>();
-
-                if (corpseEntries != null)
-                {
-                    int loadedCount = 0;
-                    int skippedCount = 0;
-
-                    foreach (var entry in corpseEntries)
-                    {
-                        if (entry?.OriginalPawn != null && entry.IsValid())
-                        {
-                            trackedCorpses[entry.OriginalPawn] = entry;
-
-                            // Rebuild corpsesByMap
-                            if (entry.CurrentMap != null)
-                            {
-                                if (!corpsesByMap.ContainsKey(entry.CurrentMap))
-                                {
-                                    corpsesByMap[entry.CurrentMap] = new HashSet<Pawn>();
-                                }
-                                corpsesByMap[entry.CurrentMap].Add(entry.OriginalPawn);
-                            }
-                            loadedCount++;
-                        }
-                        else
-                        {
-                            // Log skipped/orphaned corpse entries for debugging
-                            skippedCount++;
-                            string pawnName = entry?.OriginalPawn?.Name?.ToStringShort ?? "null";
-                            bool isValid = entry?.IsValid() ?? false;
-                            Log.Warning($"[Eternal] Skipped orphaned corpse entry on load: Pawn={pawnName}, IsValid={isValid}");
-                        }
-                    }
-
-                    if (skippedCount > 0)
-                    {
-                        Log.Warning($"[Eternal] {skippedCount} corpse entries were orphaned/invalid and skipped during load");
-                    }
-                }
-
-                if (Eternal_Mod.settings?.debugMode == true)
-                {
-                    Log.Message($"[Eternal] Loaded {trackedCorpses.Count} tracked Eternal corpses");
-                }
-
-                // Reset rot progress for all tracked corpses to handle saves from before rot fix
-                ResetAllRotProgress();
+                serializedCorpseEntries = null;
+                corpseIndexesRebuiltAfterLoad = false;
+                mapIndexHydrated = false;
             }
+
+            Scribe_Collections.Look(ref serializedCorpseEntries, "trackedCorpses", LookMode.Deep);
+
+            // Scribe invokes PostLoadInit after nested references have been resolved. Rebuild
+            // both indexes once, from the fully hydrated entries, and never during LoadingVars.
+            if (Scribe.mode == LoadSaveMode.PostLoadInit)
+            {
+                RebuildIndexesAfterLoad();
+            }
+        }
+
+        /// <summary>
+        /// Rebuilds the pawn and map indexes after Scribe has resolved all entry references.
+        /// Idempotence prevents duplicate work if a load harness invokes the post-load hook twice.
+        /// </summary>
+        public void RebuildIndexesAfterLoad()
+        {
+            if (corpseIndexesRebuiltAfterLoad)
+                return;
+
+            trackedCorpses = new Dictionary<Pawn, CorpseTrackingEntry>();
+            corpsesByMap = new Dictionary<MapType, HashSet<Pawn>>();
+
+            int loadedCount = 0;
+            int skippedCount = 0;
+
+            if (serializedCorpseEntries != null)
+            {
+                foreach (var entry in serializedCorpseEntries)
+                {
+                    if (entry?.OriginalPawn != null && entry.IsValid())
+                    {
+                        trackedCorpses[entry.OriginalPawn] = entry;
+                        AddPawnToMapIndex(entry.CurrentMap, entry.OriginalPawn);
+                        loadedCount++;
+                    }
+                    else
+                    {
+                        skippedCount++;
+                        string pawnName = entry?.OriginalPawn?.Name?.ToStringShort ?? "null";
+                        bool isValid = entry?.IsValid() ?? false;
+                        Log.Warning($"[Eternal] Skipped orphaned corpse entry on load: Pawn={pawnName}, IsValid={isValid}");
+                    }
+                }
+            }
+
+            corpseIndexesRebuiltAfterLoad = true;
+            mapIndexHydrated = AreMapIndexesEquivalentToScan();
+
+            if (skippedCount > 0)
+            {
+                Log.Warning($"[Eternal] {skippedCount} corpse entries were orphaned/invalid and skipped during load");
+            }
+
+            if (Eternal_Mod.settings?.debugMode == true)
+            {
+                Log.Message($"[Eternal] Loaded {loadedCount} tracked Eternal corpses");
+            }
+
+            // Reset rot progress for all tracked corpses to handle saves from before the rot fix.
+            ResetAllRotProgress();
+            serializedCorpseEntries = null;
         }
 
         /// <summary>
@@ -153,6 +163,11 @@ namespace Eternal.Corpse
                     return;
                 }
 
+                if (trackedCorpses.TryGetValue(originalPawn, out var previousEntry))
+                {
+                    RemovePawnFromMapIndex(previousEntry.CurrentMap, originalPawn);
+                }
+
                 var corpseData = new CorpseTrackingEntry(corpse, originalPawn, corpse.Map, corpse.Position);
 
                 // Store the assignment snapshot for restoration after resurrection
@@ -166,15 +181,8 @@ namespace Eternal.Corpse
 
                 trackedCorpses[originalPawn] = corpseData;
 
-                // Track by map
-                if (corpse.Map != null)
-                {
-                    if (!corpsesByMap.ContainsKey(corpse.Map))
-                    {
-                        corpsesByMap[corpse.Map] = new HashSet<Pawn>();
-                    }
-                    corpsesByMap[corpse.Map].Add(originalPawn);
-                }
+                // Track by map only after the entry is owned by this manager.
+                AddPawnToMapIndex(corpse.Map, originalPawn);
 
                 // Add corpse component
                 AddCorpseComponent(corpse, corpseData);
@@ -202,15 +210,7 @@ namespace Eternal.Corpse
                     return;
                 }
 
-                // Remove from map tracking
-                if (corpseData.CurrentMap != null && corpsesByMap.TryGetValue(corpseData.CurrentMap, out var mapCorpses))
-                {
-                    mapCorpses.Remove(originalPawn);
-                    if (mapCorpses.Count == 0)
-                    {
-                        corpsesByMap.Remove(corpseData.CurrentMap);
-                    }
-                }
+                RemovePawnFromMapIndex(corpseData.CurrentMap, originalPawn);
 
                 // Remove corpse component
                 RemoveCorpseComponent(corpseData.Corpse);
@@ -285,12 +285,37 @@ namespace Eternal.Corpse
         /// <returns>Collection of corpses on the map</returns>
         public IEnumerable<CorpseTrackingEntry> GetCorpsesOnMap(MapType map)
         {
+            if (!mapIndexHydrated)
+            {
+                return GetCorpsesOnMapByScan(map);
+            }
+
             if (!corpsesByMap.TryGetValue(map, out var mapCorpses))
             {
                 return Enumerable.Empty<EternalCorpseData>();
             }
 
-            return mapCorpses.Select(pawn => trackedCorpses[pawn]);
+            return mapCorpses
+                .Where(trackedCorpses.ContainsKey)
+                .Select(trackedPawn => trackedCorpses[trackedPawn]);
+        }
+
+        /// <summary>
+        /// Scans authoritative entry state while the map index is being hydrated or verified.
+        /// This remains the correctness fallback until indexed and scanned results agree.
+        /// </summary>
+        private IEnumerable<CorpseTrackingEntry> GetCorpsesOnMapByScan(MapType map)
+        {
+            foreach (var corpseData in trackedCorpses.Values)
+            {
+                if (corpseData?.OriginalPawn == null || corpseData.Corpse == null || corpseData.Corpse.Destroyed)
+                    continue;
+
+                if (corpseData.CurrentMap == map || corpseData.Corpse.Map == map)
+                {
+                    yield return corpseData;
+                }
+            }
         }
 
         /// <summary>
@@ -300,7 +325,7 @@ namespace Eternal.Corpse
         /// <returns>True if the map contains Eternal corpses</returns>
         public bool HasEternalCorpses(Verse.Map map)
         {
-            return corpsesByMap.ContainsKey(map) && corpsesByMap[map].Count > 0;
+            return GetCorpsesOnMap(map).Any();
         }
 
         /// <summary>
@@ -335,41 +360,298 @@ namespace Eternal.Corpse
         }
 
         /// <summary>
-        /// Updates corpse location if moved between maps.
+        /// Relocates a tracked corpse and commits its entry/index changes only after the
+        /// corpse is spawned on the requested map. A failed spawn attempts to restore the
+        /// original ownership before touching either index.
         /// </summary>
-        /// <param name="pawn">The pawn whose corpse moved</param>
-        /// <param name="newMap">The new map location</param>
-        /// <param name="newPosition">The new position</param>
+        /// <param name="pawn">The pawn whose corpse moves.</param>
+        /// <param name="targetMap">The map that should own the corpse.</param>
+        /// <param name="targetPosition">The position on the target map.</param>
+        /// <returns>True when the target map owns the spawned corpse.</returns>
+        public bool TryRelocateCorpse(Pawn pawn, MapType targetMap, IntVec3 targetPosition)
+        {
+            if (!trackedCorpses.TryGetValue(pawn, out var corpseData)
+                || corpseData?.Corpse == null
+                || corpseData.Corpse.Destroyed
+                || targetMap == null
+                || !targetPosition.InBounds(targetMap))
+            {
+                return false;
+            }
+
+            var corpse = corpseData.Corpse;
+            // GenSpawn.Spawn removes holdingOwner immediately before SpawnSetup. Capture the
+            // exact ThingOwner before that call so a thrown SpawnSetup can be rolled back.
+            ThingOwner sourceOwner = corpse.holdingOwner;
+            MapType sourceMap = corpse.Spawned ? corpse.Map : null;
+            IntVec3 sourcePosition = corpse.Spawned ? corpse.Position : IntVec3.Invalid;
+
+            if (corpse.Spawned && corpse.Map == targetMap && corpse.Position == targetPosition)
+            {
+                CommitCorpseLocation(corpseData, targetMap, targetPosition);
+                return true;
+            }
+
+            try
+            {
+                if (corpse.Spawned)
+                {
+                    corpse.DeSpawn(DestroyMode.WillReplace);
+                }
+
+                GenSpawn.Spawn(corpse, targetPosition, targetMap);
+                if (!corpse.Spawned || corpse.Map != targetMap || corpse.Position != targetPosition)
+                {
+                    throw new InvalidOperationException("Corpse did not become owned by the target map after spawn.");
+                }
+
+                CommitCorpseLocation(corpseData, targetMap, targetPosition);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                bool ownershipRestored = TryRestoreCorpseOwnership(
+                    corpse, sourceOwner, sourceMap, sourcePosition);
+
+                if (corpse.Destroyed)
+                {
+                    UnregisterCorpse(pawn);
+                }
+                else if (!ownershipRestored && !corpse.Spawned)
+                {
+                    // A destroyed/unspawned corpse must never remain in an old map bucket.
+                    RemovePawnFromMapIndex(corpseData.CurrentMap, pawn);
+                    corpseData.UpdateLocation(null, IntVec3.Invalid);
+                }
+
+                EternalLogger.HandleException(EternalExceptionCategory.CorpseTracking,
+                    "TryRelocateCorpse", pawn, ex);
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Commits a tracked corpse's transfer to an unspawned owner such as a caravan,
+        /// crash-site container, or ship cargo. The callback owns the external transfer;
+        /// this manager updates the entry/index only after it reports successful ownership.
+        /// </summary>
+        public bool TryReleaseCorpseToUnspawnedOwner(Pawn pawn, Func<bool> transferOwnership)
+        {
+            if (!trackedCorpses.TryGetValue(pawn, out var corpseData)
+                || corpseData?.Corpse == null
+                || corpseData.Corpse.Destroyed
+                || transferOwnership == null)
+            {
+                return false;
+            }
+
+            var corpse = corpseData.Corpse;
+            // The callback can remove the corpse from its holder before reporting failure, so
+            // capture the exact owner before invoking external ownership code.
+            ThingOwner sourceOwner = corpse.holdingOwner;
+            MapType sourceMap = corpse.Spawned ? corpse.Map : null;
+            IntVec3 sourcePosition = corpse.Spawned ? corpse.Position : IntVec3.Invalid;
+
+            try
+            {
+                bool transferSucceeded = transferOwnership();
+                if (!transferSucceeded || corpse.Destroyed || corpse.Spawned)
+                {
+                    if (corpse.Destroyed)
+                    {
+                        UnregisterCorpse(pawn);
+                    }
+                    else if (!corpse.Spawned)
+                    {
+                        bool ownershipRestored = TryRestoreCorpseOwnership(
+                            corpse, sourceOwner, sourceMap, sourcePosition);
+                        if (!ownershipRestored)
+                        {
+                            RemovePawnFromMapIndex(corpseData.CurrentMap, pawn);
+                            corpseData.UpdateLocation(null, IntVec3.Invalid);
+                        }
+                    }
+                    return false;
+                }
+
+                CommitCorpseLocation(corpseData, null, IntVec3.Invalid);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                bool ownershipRestored = TryRestoreCorpseOwnership(
+                    corpse, sourceOwner, sourceMap, sourcePosition);
+                if (corpse.Destroyed)
+                {
+                    UnregisterCorpse(pawn);
+                }
+                else if (!ownershipRestored && !corpse.Spawned)
+                {
+                    RemovePawnFromMapIndex(corpseData.CurrentMap, pawn);
+                    corpseData.UpdateLocation(null, IntVec3.Invalid);
+                }
+
+                EternalLogger.HandleException(EternalExceptionCategory.CorpseTracking,
+                    "TryReleaseCorpseToUnspawnedOwner", pawn, ex);
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Compatibility boundary for external integrations that already performed a spawn.
+        /// It accepts the update only when the corpse's physical ownership matches the request.
+        /// New mod-controlled moves should call TryRelocateCorpse instead.
+        /// </summary>
         public void UpdateCorpseLocation(Pawn pawn, MapType newMap, IntVec3 newPosition)
         {
-            if (!trackedCorpses.TryGetValue(pawn, out var corpseData))
+            if (!trackedCorpses.TryGetValue(pawn, out var corpseData)
+                || corpseData?.Corpse == null
+                || corpseData.Corpse.Destroyed)
             {
                 return;
             }
 
-            var oldMap = corpseData.CurrentMap;
-
-            // Remove from old map tracking
-            if (oldMap != null && corpsesByMap.TryGetValue(oldMap, out var oldMapCorpses))
+            bool ownershipMatches = newMap == null
+                ? !corpseData.Corpse.Spawned
+                : corpseData.Corpse.Spawned && corpseData.Corpse.Map == newMap;
+            if (!ownershipMatches)
             {
-                oldMapCorpses.Remove(pawn);
-                if (oldMapCorpses.Count == 0)
+                return;
+            }
+
+            CommitCorpseLocation(corpseData, newMap, newPosition);
+        }
+
+        private void CommitCorpseLocation(CorpseTrackingEntry corpseData, MapType newMap, IntVec3 newPosition)
+        {
+            if (corpseData == null || corpseData.OriginalPawn == null)
+                return;
+
+            RemovePawnFromMapIndex(corpseData.CurrentMap, corpseData.OriginalPawn);
+            corpseData.UpdateLocation(newMap, newPosition);
+            AddPawnToMapIndex(newMap, corpseData.OriginalPawn);
+        }
+
+        private void AddPawnToMapIndex(MapType map, Pawn pawn)
+        {
+            if (map == null || pawn == null)
+                return;
+
+            if (!corpsesByMap.TryGetValue(map, out var mapCorpses))
+            {
+                mapCorpses = new HashSet<Pawn>();
+                corpsesByMap[map] = mapCorpses;
+            }
+
+            mapCorpses.Add(pawn);
+        }
+
+        private void RemovePawnFromMapIndex(MapType map, Pawn pawn)
+        {
+            if (map == null || pawn == null || !corpsesByMap.TryGetValue(map, out var mapCorpses))
+                return;
+
+            mapCorpses.Remove(pawn);
+            if (mapCorpses.Count == 0)
+            {
+                corpsesByMap.Remove(map);
+            }
+        }
+
+        private bool AreMapIndexesEquivalentToScan()
+        {
+            foreach (var corpseData in trackedCorpses.Values)
+            {
+                if (corpseData?.OriginalPawn == null || corpseData.Corpse == null || corpseData.Corpse.Destroyed)
+                    continue;
+
+                if (corpseData.Corpse.Spawned && corpseData.CurrentMap != corpseData.Corpse.Map)
                 {
-                    corpsesByMap.Remove(oldMap);
+                    return false;
+                }
+
+                var authoritativeMap = corpseData.Corpse.Map ?? corpseData.CurrentMap;
+                if (authoritativeMap != null
+                    && (!corpsesByMap.TryGetValue(authoritativeMap, out var mapCorpses)
+                        || !mapCorpses.Contains(corpseData.OriginalPawn)))
+                {
+                    return false;
                 }
             }
 
-            // Update location
-            corpseData.UpdateLocation(newMap, newPosition);
-
-            // Add to new map tracking
-            if (newMap != null)
+            foreach (var mapIndex in corpsesByMap)
             {
-                if (!corpsesByMap.ContainsKey(newMap))
+                foreach (var pawn in mapIndex.Value)
                 {
-                    corpsesByMap[newMap] = new HashSet<Pawn>();
+                    if (!trackedCorpses.TryGetValue(pawn, out var corpseData)
+                        || corpseData?.CurrentMap != mapIndex.Key)
+                    {
+                        return false;
+                    }
                 }
-                corpsesByMap[newMap].Add(pawn);
+            }
+
+            return true;
+        }
+
+        private bool TryRestoreCorpseOwnership(
+            Verse.Corpse corpse,
+            ThingOwner sourceOwner,
+            MapType sourceMap,
+            IntVec3 sourcePosition)
+        {
+            if (corpse == null || corpse.Destroyed)
+                return false;
+
+            try
+            {
+                if (corpse.Spawned)
+                {
+                    corpse.DeSpawn(DestroyMode.WillReplace);
+                }
+            }
+            catch (Exception despawnException)
+            {
+                // A third-party SpawnSetup failure can leave partial map state. Still attempt
+                // the exact ThingOwner restore; leaving the corpse ownerless is the unsafe path.
+                EternalLogger.HandleException(EternalExceptionCategory.CorpseTracking,
+                    "TryRelocateCorpse.RestoreSourceDespawn", corpse.InnerPawn, despawnException);
+            }
+
+            if (sourceOwner != null)
+            {
+                if (corpse.holdingOwner == sourceOwner)
+                    return true;
+
+                try
+                {
+                    if (sourceOwner.TryAddOrTransfer(corpse, canMergeWithExistingStacks: false))
+                    {
+                        return true;
+                    }
+                }
+                catch (Exception ownerException)
+                {
+                    EternalLogger.HandleException(EternalExceptionCategory.CorpseTracking,
+                        "TryRelocateCorpse.RestoreSourceOwner", corpse.InnerPawn, ownerException);
+                }
+            }
+
+            if (sourceMap == null || !sourcePosition.IsValid || !sourcePosition.InBounds(sourceMap))
+                return false;
+
+            try
+            {
+                var restoredCorpse = GenSpawn.Spawn(corpse, sourcePosition, sourceMap);
+                return restoredCorpse == corpse
+                    && corpse.Spawned
+                    && corpse.Map == sourceMap;
+            }
+            catch (Exception restoreException)
+            {
+                EternalLogger.HandleException(EternalExceptionCategory.CorpseTracking,
+                    "TryRelocateCorpse.RestoreSourceMap", corpse.InnerPawn, restoreException);
+                return false;
             }
         }
 

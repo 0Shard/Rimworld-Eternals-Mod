@@ -1,6 +1,6 @@
 // Relative Path: Eternal/Source/Eternal/InGameTests/EternalTestRunner.cs
 // Creation Date: 24-02-2026
-// Last Edit: 10-07-2026
+// Last Edit: 16-07-2026
 // Author: 0Shard
 // Description: Self-contained in-game test runner for Eternal mod integration tests.
 //              Invoked via dev-mode DebugAction buttons. Discovers and runs all test suites,
@@ -35,7 +35,7 @@ namespace Eternal.InGameTests
         // ─── Run All ──────────────────────────────────────────────────────────
 
         /// <summary>
-        /// Dev-mode button entry point. Runs all 9 registered test suites sequentially.
+        /// Dev-mode button entry point. Runs all registered test suites sequentially.
         /// </summary>
         [DebugAction("Eternal", "Tests: Run All", allowedGameStates = AllowedGameStates.PlayingOnMap)]
         public static void RunAllTests()
@@ -64,6 +64,7 @@ namespace Eternal.InGameTests
             RunSuite("ElixirPopCap",          () => ElixirPopulationCapTests.RunAll(map),    suiteResults);
             RunSuite("ResurrectionSurvival", () => ResurrectionSurvivalTests.RunAll(map),   suiteResults);
             RunSuite("HealingGate",          () => HealingGateTests.RunAll(map),            suiteResults);
+            RunSuite("ReactiveHealth",        () => ReactiveHealthTests.RunAll(map),          suiteResults);
 
             int totalPassed = suiteResults.Sum(r => r.Result.Passed);
             int totalFailed = suiteResults.Sum(r => r.Result.Failed);
@@ -156,6 +157,14 @@ namespace Eternal.InGameTests
             var map = Find.CurrentMap;
             if (map == null) { Log.Error("[EternalTests] No current map."); return; }
             RunSingleSuite("ResurrectionSurvival", () => ResurrectionSurvivalTests.RunAll(map));
+        }
+
+        [DebugAction("Eternal Tests", "Run: ReactiveHealth", allowedGameStates = AllowedGameStates.PlayingOnMap)]
+        public static void RunReactiveHealthOnly()
+        {
+            var map = Find.CurrentMap;
+            if (map == null) { Log.Error("[EternalTests] No current map."); return; }
+            RunSingleSuite("ReactiveHealth", () => ReactiveHealthTests.RunAll(map));
         }
 
         // ─── Internal Helpers ────────────────────────────────────────────────

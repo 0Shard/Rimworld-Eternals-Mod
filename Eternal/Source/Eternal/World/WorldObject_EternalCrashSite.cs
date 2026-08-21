@@ -1,11 +1,11 @@
-// file path: Eternal/Source/Eternal/World/WorldObject_EternalCrashSite.cs
-// Author Name: 0Shard
-// Date Created: 06-12-2025
-// Date Last Modified: 13-07-2026
-// Description: World object representing a crash site where an Eternal fell from space.
-//              Holds living pawns AND corpses (torso-only re-entry victims). Entering the site
-//              generates a map (vanilla Encounter generator via MapParent.MapGeneratorDef default)
-//              and PostMapGenerate spawns the crashed Eternals. Supports caravan rescue.
+/*
+ * Relative Path: Eternal/Source/Eternal/World/WorldObject_EternalCrashSite.cs
+ * Creation Date: 06-12-2025
+ * Last Edit: 16-07-2026
+ * Author: 0Shard
+ * Description: World object representing a crash site where an Eternal fell from space.
+ *              Spawns tracked corpses through the manager-owned relocation boundary.
+ */
 
 using System;
 using System.Collections.Generic;
@@ -183,7 +183,18 @@ namespace Eternal.World
                     spawnPos = CellFinder.RandomClosewalkCellNear(map.Center, map, 20, null);
                 }
 
-                GenSpawn.Spawn(thing, spawnPos, map, WipeMode.Vanish);
+                var corpseManager = EternalServiceContainer.Instance?.CorpseManager;
+                if (thing is CorpseType corpse
+                    && corpseManager != null
+                    && corpseManager.IsTracked(corpse.InnerPawn))
+                {
+                    if (!corpseManager.TryRelocateCorpse(corpse.InnerPawn, map, spawnPos))
+                        return;
+                }
+                else
+                {
+                    GenSpawn.Spawn(thing, spawnPos, map, WipeMode.Vanish);
+                }
 
                 if (thing is Pawn eternal && eternal.Faction == Faction.OfPlayer)
                 {
@@ -194,13 +205,6 @@ namespace Eternal.World
                     }
                     eternal.jobs?.EndCurrentJob(Verse.AI.JobCondition.InterruptForced, true);
                 }
-                else if (thing is CorpseType corpse)
-                {
-                    // Re-home the tracking entry so corpse healing/preservation see the new map
-                    EternalServiceContainer.Instance?.CorpseManager?.UpdateCorpseLocation(
-                        corpse.InnerPawn, map, spawnPos);
-                }
-
                 Log.Message($"[Eternal] Spawned {thing.LabelCap} at crash site position {spawnPos}");
             }
             catch (Exception ex)
@@ -251,7 +255,25 @@ namespace Eternal.World
                     }
                     else if (thing is CorpseType corpse)
                     {
-                        CaravanInventoryUtility.GiveThing(caravan, corpse);
+                        var corpseManager = EternalServiceContainer.Instance?.CorpseManager;
+                        if (corpseManager != null && corpseManager.IsTracked(corpse.InnerPawn))
+                        {
+                            if (!corpseManager.TryReleaseCorpseToUnspawnedOwner(
+                                    corpse.InnerPawn,
+                                    () =>
+                                    {
+                                        CaravanInventoryUtility.GiveThing(caravan, corpse);
+                                        return corpse.holdingOwner != null;
+                                    }))
+                            {
+                                continue;
+                            }
+                        }
+                        else
+                        {
+                            CaravanInventoryUtility.GiveThing(caravan, corpse);
+                        }
+
                         Log.Message($"[Eternal] Rescued corpse of {corpse.InnerPawn?.Name} to caravan inventory");
                     }
                 }

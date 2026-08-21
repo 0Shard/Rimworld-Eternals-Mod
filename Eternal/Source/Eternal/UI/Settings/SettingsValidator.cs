@@ -1,9 +1,10 @@
 // Relative Path: Eternal/Source/Eternal/UI/Settings/SettingsValidator.cs
 // Creation Date: 01-01-2025
-// Last Edit: 12-07-2026
+// Last Edit: 16-07-2026
 // Author: 0Shard
-// Description: Validation logic for Eternal mod settings. Clamps values to valid
-//              ranges and logs warnings for potentially problematic configurations.
+// Description: Validates persisted Eternal settings at load and write boundaries. Bounds
+//              and warning thresholds come from the canonical SettingsDefaults catalog;
+//              the settings window never validates during repaint.
 
 using UnityEngine;
 using Eternal.Utils;
@@ -16,67 +17,104 @@ namespace Eternal.UI.Settings
     public static class SettingsValidator
     {
         /// <summary>
-        /// Validates all settings in the given Eternal_Settings instance.
-        /// Clamps values to valid ranges and logs warnings for potentially problematic settings.
+        /// Clamps every mutable setting to the catalog range and emits warnings for values
+        /// that are valid but likely to surprise the player. Call only after load or before write.
         /// </summary>
         public static void ValidateSettings(Eternal_Settings settings)
         {
-            // Validate base healing rate (range must match slider in SettingsDrawer: 0.01-3.0)
-            settings.baseHealingRate = Mathf.Clamp(settings.baseHealingRate, 0.01f, 3.0f);
+            if (settings == null)
+                return;
 
-            // Validate resource settings
-            settings.nutritionCostMultiplier = Mathf.Clamp(settings.nutritionCostMultiplier, 0.1f, 5.0f);
-            settings.minimumNutritionThreshold = Mathf.Clamp(settings.minimumNutritionThreshold, 0.01f, 1.0f);
+            settings.baseHealingRate = Mathf.Clamp(
+                settings.baseHealingRate,
+                SettingsDefaults.BaseHealingRateMin,
+                SettingsDefaults.BaseHealingRateMax);
 
-            // Validate food debt settings
-            settings.maxDebtMultiplier = Mathf.Clamp(settings.maxDebtMultiplier, 1.0f, 20.0f);
-            settings.foodDrainThreshold = Mathf.Clamp(settings.foodDrainThreshold, 0.01f, 0.5f);
-            settings.debtRepaymentDays = Mathf.Clamp(settings.debtRepaymentDays, 0.25f, 5.0f);
-            settings.severityToNutritionRatio = Mathf.Clamp(settings.severityToNutritionRatio, 0.001f, 0.1f);
+            settings.nutritionCostMultiplier = Mathf.Clamp(
+                settings.nutritionCostMultiplier,
+                SettingsDefaults.NutritionCostMultiplierMin,
+                SettingsDefaults.NutritionCostMultiplierMax);
 
-            // Validate map protection settings
-            settings.anchorGracePeriodTicks = Mathf.Clamp(settings.anchorGracePeriodTicks, 60, 3600);
+            settings.maxDebtMultiplier = Mathf.Clamp(
+                settings.maxDebtMultiplier,
+                SettingsDefaults.MaxDebtMultiplierMin,
+                SettingsDefaults.MaxDebtMultiplierMax);
+            settings.foodDrainThreshold = Mathf.Clamp(
+                settings.foodDrainThreshold,
+                SettingsDefaults.FoodDrainThresholdMin,
+                SettingsDefaults.FoodDrainThresholdMax);
+            settings.debtRepaymentDays = Mathf.Clamp(
+                settings.debtRepaymentDays,
+                SettingsDefaults.DebtRepaymentDaysMin,
+                SettingsDefaults.DebtRepaymentDaysMax);
 
-            // Validate performance settings
-            settings.normalTickRate = Mathf.Clamp(settings.normalTickRate, 30, 250);
-            settings.rareTickRate = Mathf.Clamp(settings.rareTickRate, 100, 1000);
-            settings.traitCheckInterval = Mathf.Clamp(settings.traitCheckInterval, 1000, 15000);
-            settings.corpseCheckInterval = Mathf.Clamp(settings.corpseCheckInterval, 250, 5000);
-            settings.mapCheckInterval = Mathf.Clamp(settings.mapCheckInterval, 100, 2000);
+            settings.anchorGracePeriodTicks = Mathf.Clamp(
+                settings.anchorGracePeriodTicks,
+                SettingsDefaults.AnchorGracePeriodTicksMin,
+                SettingsDefaults.AnchorGracePeriodTicksMax);
 
-            // Validate logging level
-            settings.loggingLevel = Mathf.Clamp(settings.loggingLevel, 0, 3);
+            settings.normalTickRate = Mathf.Clamp(
+                settings.normalTickRate,
+                SettingsDefaults.NormalTickRateMin,
+                SettingsDefaults.NormalTickRateMax);
+            settings.rareTickRate = Mathf.Clamp(
+                settings.rareTickRate,
+                SettingsDefaults.RareTickRateMin,
+                SettingsDefaults.RareTickRateMax);
+            settings.traitCheckInterval = Mathf.Clamp(
+                settings.traitCheckInterval,
+                SettingsDefaults.TraitCheckIntervalMin,
+                SettingsDefaults.TraitCheckIntervalMax);
+            settings.corpseCheckInterval = Mathf.Clamp(
+                settings.corpseCheckInterval,
+                SettingsDefaults.CorpseCheckIntervalMin,
+                SettingsDefaults.CorpseCheckIntervalMax);
+            settings.mapCheckInterval = Mathf.Clamp(
+                settings.mapCheckInterval,
+                SettingsDefaults.MapCheckIntervalMin,
+                SettingsDefaults.MapCheckIntervalMax);
+            settings.healingHistorySweepInterval = Mathf.Clamp(
+                settings.healingHistorySweepInterval,
+                SettingsDefaults.HealingHistorySweepIntervalMin,
+                SettingsDefaults.HealingHistorySweepIntervalMax);
 
-            // Validate effects settings
-            settings.consciousnessMultiplier = Mathf.Clamp(settings.consciousnessMultiplier, 1.0f, 10.0f);
-            settings.moodBuffValue = Mathf.Clamp(settings.moodBuffValue, 1, 200);
-            settings.populationCap = Mathf.Clamp(settings.populationCap, 1, 30);
+            settings.loggingLevel = Mathf.Clamp(
+                settings.loggingLevel,
+                SettingsDefaults.LoggingLevelMin,
+                SettingsDefaults.LoggingLevelMax);
 
-            // Log warnings for potentially problematic settings
+            settings.consciousnessMultiplier = Mathf.Clamp(
+                settings.consciousnessMultiplier,
+                SettingsDefaults.ConsciousnessMultiplierMin,
+                SettingsDefaults.ConsciousnessMultiplierMax);
+            settings.moodBuffValue = Mathf.Clamp(
+                settings.moodBuffValue,
+                SettingsDefaults.MoodBuffValueMin,
+                SettingsDefaults.MoodBuffValueMax);
+            settings.populationCap = Mathf.Clamp(
+                settings.populationCap,
+                SettingsDefaults.PopulationCapMin,
+                SettingsDefaults.PopulationCapMax);
+
             CheckForWarnings(settings);
         }
 
         /// <summary>
-        /// Checks for settings that may cause issues and logs warnings.
+        /// Checks for values that are valid but may have a material gameplay or performance cost.
         /// </summary>
         private static void CheckForWarnings(Eternal_Settings settings)
         {
-            if (settings.minimumNutritionThreshold > 0.5f)
-            {
-                EternalLogger.Warning("Minimum nutrition threshold is very high, regrowth may be frequently paused.");
-            }
-
-            if (settings.normalTickRate < 45)
+            if (settings.normalTickRate < SettingsDefaults.NormalTickRateWarningThreshold)
             {
                 EternalLogger.Warning("Normal tick rate is very low, this may impact game performance.");
             }
 
-            if (settings.rareTickRate < 150)
+            if (settings.rareTickRate < SettingsDefaults.RareTickRateWarningThreshold)
             {
                 EternalLogger.Warning("Rare tick rate is very low, this may impact game performance.");
             }
 
-            if (settings.baseHealingRate > 2.5f)
+            if (settings.baseHealingRate > SettingsDefaults.BaseHealingRateWarningThreshold)
             {
                 EternalLogger.Warning("Base healing rate is very high, this may make the game too easy.");
             }
@@ -85,23 +123,26 @@ namespace Eternal.UI.Settings
         #region Individual Validation Methods
 
         /// <summary>
-        /// Validates heal amount is within acceptable range.
+        /// Validates a healing rate using the same bounds as the global healing control.
         /// </summary>
         public static float ValidateHealAmount(float value)
         {
-            return Mathf.Clamp(value, 0.1f, 5.0f);
+            return Mathf.Clamp(value, SettingsDefaults.BaseHealingRateMin, SettingsDefaults.BaseHealingRateMax);
         }
 
         /// <summary>
-        /// Validates nutrition cost multiplier is within acceptable range.
+        /// Validates the single global nutrition cost multiplier.
         /// </summary>
         public static float ValidateNutritionCostMultiplier(float value)
         {
-            return Mathf.Clamp(value, 0.1f, 5.0f);
+            return Mathf.Clamp(
+                value,
+                SettingsDefaults.NutritionCostMultiplierMin,
+                SettingsDefaults.NutritionCostMultiplierMax);
         }
 
         /// <summary>
-        /// Validates tick rate is within acceptable range.
+        /// Validates a tick rate against an explicit catalog range.
         /// </summary>
         public static int ValidateTickRate(int value, int min, int max)
         {
@@ -109,11 +150,11 @@ namespace Eternal.UI.Settings
         }
 
         /// <summary>
-        /// Validates logging level is within acceptable range.
+        /// Validates logging level against the catalog choices.
         /// </summary>
         public static int ValidateLoggingLevel(int value)
         {
-            return Mathf.Clamp(value, 0, 3);
+            return Mathf.Clamp(value, SettingsDefaults.LoggingLevelMin, SettingsDefaults.LoggingLevelMax);
         }
 
         #endregion

@@ -1,6 +1,6 @@
 // Relative Path: Eternal/Source/Eternal/Caravan/EternalCaravanDeathHandler.cs
 // Creation Date: 29-10-2025
-// Last Edit: 21-02-2026
+// Last Edit: 21-08-2026
 // Author: 0Shard
 // Description: EternalCaravanDeathHandler handles teleportation of dead Eternals from caravans.
 //              Provides static IsPawnInCaravan method for checking if a pawn or corpse is in a caravan.
@@ -26,7 +26,7 @@ namespace Eternal.Caravan
     /// EternalCaravanDeathHandler handles teleportation of dead Eternals from caravans.
     /// When an Eternal dies in a caravan, they teleport to the player's colony after a delay.
     /// </summary>
-    public class EternalCaravanDeathHandler : GameComponent
+    public class EternalCaravanDeathHandler : IExposable
     {
         private static EternalCaravanDeathHandler instance;
         public static EternalCaravanDeathHandler Instance => instance;
@@ -74,20 +74,22 @@ namespace Eternal.Caravan
         /// <summary>
         /// Initializes a new instance of EternalCaravanDeathHandler class.
         /// </summary>
-        /// <param name="game">The current game instance.</param>
-        public EternalCaravanDeathHandler(Game game)
+        /// <remarks>
+        /// Must stay parameterless: this handler is a plain IExposable nested inside
+        /// <see cref="Eternal_Component"/> via Scribe_Deep without ctorArgs, so RimWorld
+        /// rebuilds it on load through Activator.CreateInstance(type, null).
+        /// </remarks>
+        public EternalCaravanDeathHandler()
         {
             instance = this;
         }
         
         /// <summary>
-        /// Called every game tick to update teleportation states.
+        /// Executes every pending teleportation whose delay has elapsed. Driven by
+        /// <see cref="TickOrchestrator"/>; this handler is not a registered game component.
         /// </summary>
-        public override void GameComponentUpdate()
+        public void ProcessPendingTeleportations()
         {
-            base.GameComponentUpdate();
-            
-            // Process pending teleportations
             for (int i = pendingTeleportations.Count - 1; i >= 0; i--)
             {
                 var teleportation = pendingTeleportations[i];
@@ -368,9 +370,8 @@ namespace Eternal.Caravan
         /// <summary>
         /// Exposes data for save/load functionality.
         /// </summary>
-        public override void ExposeData()
+        public void ExposeData()
         {
-            base.ExposeData();
             Scribe_Collections.Look(ref pendingTeleportations, "pendingTeleportations", LookMode.Deep);
         }
     }

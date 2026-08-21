@@ -1,15 +1,16 @@
 // Relative Path: Eternal/Source/Eternal/Healing/EternalHealingPriority.cs
 // Creation Date: 03-12-2025
-// Last Edit: 11-07-2026
+// Last Edit: 16-07-2026
 // Author: 0Shard
 // Description: Time-based priority system for Eternal healing with uniform healing speed.
 //              Uses extension methods from Eternal.Extensions for hediff classification.
-//              Uses configurable severity-to-nutrition ratio (default 250:1).
+//              Uses the internal severity conversion constant and global nutrition multiplier.
 //              Regrowth work/cost covers the whole missing subtree (part + descendants), scaled by
 //              RegrowthWorkPerPartHP so cost matches the effort the engine actually charges.
 //              Regrowth ETA models the phase-3 overlap (children start at parent 50%).
 //              Healing time calculation uses actual healing rates: severity / (baseHealingRate * bodySize) * tickInterval.
 //              RC4-FIX: HealingItem implements IExposable for save/load persistence in PreCalculatedHealingQueue.
+//              Gate 1: Active queue entries persist Hediff.loadID for deterministic post-load rebinding.
 //              Scalar fields (Severity, Type, EnergyCost, etc.) are saved via Scribe_Values.
 //              Hediff and Pawn references use Scribe_References — they become null after load on dead pawns,
 //              which is acceptable since the pre-calculated queue only uses scalar data when consumed.
@@ -47,9 +48,21 @@ namespace Eternal
         private float _severity;
         private Pawn _pawn;
         private float _energyCost;
+        private int _hediffLoadId = -1;
 
         // Properties — preserve the existing public API unchanged so all callers compile cleanly
-        public Hediff Hediff         { get => _hediff;              set => _hediff = value;              }
+        public Hediff Hediff
+        {
+            get => _hediff;
+            set
+            {
+                _hediff = value;
+                if (_hediff != null && _hediffLoadId < 0)
+                {
+                    _hediffLoadId = _hediff.loadID;
+                }
+            }
+        }
         public float HealingPriority { get => _healingPriority;     set => _healingPriority = value;     }
         public float EstimatedHealingTime { get => _estimatedHealingTime; set => _estimatedHealingTime = value; }
         public HealingType Type      { get => _type;                set => _type = value;                }
@@ -58,6 +71,7 @@ namespace Eternal
         public float Severity        { get => _severity;            set => _severity = value;            }
         public Pawn Pawn             { get => _pawn;                set => _pawn = value;                }
         public float EnergyCost      { get => _energyCost;          set => _energyCost = value;          }
+        public int HediffLoadId      { get => _hediffLoadId;         set => _hediffLoadId = value;         }
 
         /// <summary>
         /// Parameterless constructor required by Scribe_Collections with LookMode.Deep.
@@ -71,6 +85,11 @@ namespace Eternal
         /// </summary>
         public void ExposeData()
         {
+            if (Scribe.mode == LoadSaveMode.Saving && _hediff != null)
+            {
+                _hediffLoadId = _hediff.loadID;
+            }
+
             // Scalar fields — always present and fully recoverable after load
             Scribe_Values.Look(ref _healingPriority, "healingPriority", 0f);
             Scribe_Values.Look(ref _estimatedHealingTime, "estimatedHealingTime", 0f);
@@ -79,12 +98,49 @@ namespace Eternal
             Scribe_Values.Look(ref _isHarmful, "isHarmful", false);
             Scribe_Values.Look(ref _severity, "severity", 0f);
             Scribe_Values.Look(ref _energyCost, "energyCost", 0f);
+            Scribe_Values.Look(ref _hediffLoadId, "hediffLoadId", -1);
 
             // Live references — may be null after load when dead pawn hediffs have been removed.
             // The pre-calculated queue only needs scalar data (Severity, Type, EnergyCost) when
             // consumed by StartCorpseHealing(), so null references here are safe.
             Scribe_References.Look(ref _hediff, "hediff");
             Scribe_References.Look(ref _pawn, "pawn");
+
+            if (Scribe.mode == LoadSaveMode.PostLoadInit && _hediff != null && _hediffLoadId < 0)
+            {
+                _hediffLoadId = _hediff.loadID;
+            }
+        }
+
+        /// <summary>
+        /// Rebinds this item to the current live hediff instance without editing the HediffSet.
+        /// The persisted load ID is the primary identity; a resolved reference is retained as a
+        /// compatibility fallback for queue entries written before the identity field existed.
+        /// </summary>
+        public bool TryRebindHediff(Pawn ownerPawn)
+        {
+            Pawn = ownerPawn;
+            var liveHediffs = ownerPawn?.health?.hediffSet?.hediffs;
+            if (liveHediffs == null)
+            {
+                _hediff = null;
+                return false;
+            }
+
+            Hediff reboundHediff = null;
+            if (_hediffLoadId >= 0)
+            {
+                reboundHediff = liveHediffs.FirstOrDefault(liveHediff =>
+                    liveHediff != null && liveHediff.loadID == _hediffLoadId);
+            }
+
+            if (reboundHediff == null && _hediff != null && liveHediffs.Contains(_hediff))
+            {
+                reboundHediff = _hediff;
+            }
+
+            _hediff = reboundHediff;
+            return _hediff != null;
         }
     }
 
@@ -111,10 +167,8 @@ namespace Eternal
         #region Constants
 
         /// <summary>
-        /// Default energy cost multiplier: 250 severity = 1.0 nutrition.
-        /// Actual ratio is configurable via settings.severityToNutritionRatio.
+        /// Nutrition conversion is internal balance data; the player-facing cost knob is global.
         /// </summary>
-        private const float DEFAULT_ENERGY_COST_MULTIPLIER = 0.004f;
 
         #endregion
 
@@ -251,16 +305,19 @@ namespace Eternal
 
         /// <summary>
         /// Calculates energy cost for a healing item.
-        /// Uses configurable severity-to-nutrition ratio (default 250:1).
+        /// Uses the internal severity conversion and global nutrition multiplier.
         /// No type-specific multipliers - all healing costs the same per severity.
         /// </summary>
         public static float CalculateEnergyCost(HealingItem healingItem)
         {
             if (healingItem == null) return 0f;
 
-            // Uniform cost: severity directly determines nutrition cost
-            // Uses configurable ratio (default 250:1). GetSettings() guarantees non-null (SAFE-08).
-            return healingItem.Severity * Eternal_Mod.GetSettings().severityToNutritionRatio;
+            // Uniform cost: severity directly determines nutrition cost. GetSettings() guarantees
+            // a non-null root; apply the single global multiplier here for priority estimates.
+            var settings = Eternal_Mod.GetSettings();
+            return healingItem.Severity
+                * SettingsDefaults.SeverityToNutritionRatio
+                * settings.nutritionCostMultiplier;
         }
 
         #endregion

@@ -1,7 +1,7 @@
 /*
  * Relative Path: Eternal/Source/Eternal/Healing/EternalHealingProcessor.cs
  * Creation Date: 01-01-2026
- * Last Edit: 21-02-2026
+ * Last Edit: 16-07-2026
  * Author: 0Shard
  * Description: Centralized healing processor that manages all Eternal healing operations.
  *              Optimized to use per-tick cached pawn queries for improved performance.
@@ -14,8 +14,11 @@ using System.Linq;
 using Verse;
 using Eternal.DI;
 using Eternal.Extensions;
+using Eternal.Exceptions;
 using Eternal.Utils;
 using Eternal.Interfaces;
+using Eternal.Infrastructure;
+using Eternal.Healing;
 using Eternal.Resources;
 
 namespace Eternal
@@ -51,6 +54,89 @@ namespace Eternal
         }
 
         /// <summary>
+        /// Reconciles all derived live-health state from the pawn's current HediffSet.
+        /// The pass only registers/prunes scalar state; it never changes hediff severity or
+        /// invokes a healing processor. Each hediff is isolated so one malformed instance
+        /// cannot prevent the remaining current instances from being reconciled.
+        /// </summary>
+        public void ReconcileLiveHealth(Pawn pawn)
+        {
+            if (pawn == null)
+                return;
+
+            try
+            {
+                // Derived live-health state belongs only to a living Eternal or an active/valid
+                // Eternal corpse. Trait loss and stale non-Eternal pawns must clear every live
+                // state owner; corpse healing queues are owned by EternalCorpseHealingProcessor
+                // and are intentionally untouched here.
+                if (!Eternal_Component.ShouldQueueHealthReconciliation(pawn))
+                {
+                    EternalServiceContainer.Instance?.ThresholdTracker?.ClearPawnThresholds(pawn);
+                    hediffHealer?.ClearPawnHealingProgress(pawn);
+                    return;
+                }
+
+                var hediffSet = pawn.health?.hediffSet;
+                if (hediffSet == null)
+                {
+                    EternalServiceContainer.Instance?.ThresholdTracker?.ClearPawnThresholds(pawn);
+                    hediffHealer?.ClearPawnHealingProgress(pawn);
+                    return;
+                }
+
+                var currentHediffs = hediffSet.hediffs;
+                var reconciliableHediffs = new List<Hediff>();
+                var currentKeys = new HashSet<HealingDictionaryKey>();
+                var eligibleThresholdKeys = new HashSet<HealingDictionaryKey>();
+                bool canRegisterLiveThresholds = !pawn.Dead && pawn.IsValidEternal();
+
+                foreach (var hediff in currentHediffs)
+                {
+                    try
+                    {
+                        if (hediff?.def == null)
+                            continue;
+
+                        var key = new HealingDictionaryKey(pawn, hediff);
+                        reconciliableHediffs.Add(hediff);
+                        currentKeys.Add(key);
+
+                        if (!canRegisterLiveThresholds)
+                            continue;
+
+                        var setting = Eternal_Mod.GetSettings().hediffManager
+                            ?.GetHediffSetting(hediff.def.defName);
+                        if (HediffHealingConfig.IsThresholdGated(hediff, setting))
+                            eligibleThresholdKeys.Add(key);
+                    }
+                    catch (Exception ex)
+                    {
+                        EternalLogger.HandleException(
+                            EternalExceptionCategory.Resurrection,
+                            "ReconcileLiveHealth.Hediff",
+                            pawn,
+                            ex);
+                    }
+                }
+
+                EternalServiceContainer.Instance?.ThresholdTracker?.ReconcileLiveHealth(
+                    pawn,
+                    reconciliableHediffs,
+                    eligibleThresholdKeys);
+                hediffHealer?.ReconcileLiveHealth(pawn, reconciliableHediffs, currentKeys);
+            }
+            catch (Exception ex)
+            {
+                EternalLogger.HandleException(
+                    EternalExceptionCategory.Resurrection,
+                    "ReconcileLiveHealth.Pawn",
+                    pawn,
+                    ex);
+            }
+        }
+
+        /// <summary>
         /// Processes normal healing operations for living Eternals.
         /// Called by Eternal_Component at the configured normalTickRate.
         /// Uses cached pawn query for performance - no allocations per tick.
@@ -62,23 +148,35 @@ namespace Eternal
 
             foreach (var pawn in livingEternals)
             {
-                // Check if pawn can heal (has food, not in critical state, etc.)
-                if (!CanHeal(pawn))
+                try
                 {
-                    continue;
+                    // The scheduled live scan is the fallback for mutations that bypass hooks.
+                    ReconcileLiveHealth(pawn);
+
+                    // Check if pawn can heal (has food, not in critical state, etc.)
+                    if (!CanHeal(pawn))
+                        continue;
+
+                    // Process current live hediff instances only after reconciliation.
+                    hediffHealer.ProcessHediffHealing(pawn);
+
+                    // Process scar healing directly
+                    scarHealing.ProcessScarHealing();
+
+                    // Check for excessive food debt and pause if needed
+                    if (FoodDebtSystem.HasExcessiveDebt(pawn))
+                    {
+                        EternalLogger.Info($"{pawn.Name?.ToStringShort ?? "Unknown"} healing paused due to excessive food debt");
+                        continue;
+                    }
                 }
-
-                // Process individual hediff healing directly
-                hediffHealer.ProcessHediffHealing(pawn);
-
-                // Process scar healing directly
-                scarHealing.ProcessScarHealing();
-
-                // Check for excessive food debt and pause if needed
-                if (FoodDebtSystem.HasExcessiveDebt(pawn))
+                catch (Exception ex)
                 {
-                    EternalLogger.Info($"{pawn.Name?.ToStringShort ?? "Unknown"} healing paused due to excessive food debt");
-                    continue;
+                    EternalLogger.HandleException(
+                        EternalExceptionCategory.Resurrection,
+                        "ProcessNormalHealing.Pawn",
+                        pawn,
+                        ex);
                 }
             }
         }
@@ -95,8 +193,19 @@ namespace Eternal
 
             foreach (var pawn in allEternals)
             {
-                // Process both dead and living Eternals for rare healing
-                ProcessPawnRareHealing(pawn);
+                try
+                {
+                    // Process both dead and living Eternals for rare healing
+                    ProcessPawnRareHealing(pawn);
+                }
+                catch (Exception ex)
+                {
+                    EternalLogger.HandleException(
+                        EternalExceptionCategory.Resurrection,
+                        "ProcessRareHealing.Pawn",
+                        pawn,
+                        ex);
+                }
             }
         }
 

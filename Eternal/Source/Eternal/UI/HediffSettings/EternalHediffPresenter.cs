@@ -1,6 +1,6 @@
 // Relative Path: Eternal/Source/Eternal/UI/HediffSettings/EternalHediffPresenter.cs
 // Creation Date: 01-01-2025
-// Last Edit: 11-07-2026
+// Last Edit: 16-07-2026
 // Author: 0Shard
 // Description: Presenter layer for hediff settings UI. Manages UI state and handles events.
 //              Includes FilterBeneficial for filtering beneficial (non-bad) hediffs.
@@ -48,7 +48,7 @@ namespace Eternal.UI.HediffSettings
         #region UI State
 
         public int SelectedTabIndex { get; private set; } = 0;
-        public readonly string[] TabLabels = { "General", "Advanced", "Bulk" };
+        public readonly string[] TabLabels = { "General", "Bulk" };
 
         // Scroll state
         public Vector2 ScrollPosition { get; set; } = Vector2.zero;

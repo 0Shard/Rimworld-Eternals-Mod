@@ -1,14 +1,13 @@
 // Relative Path: Eternal/Source/Eternal/UI/Eternal_Settings.cs
 // Creation Date: 01-01-2025
-// Last Edit: 13-07-2026
+// Last Edit: 16-07-2026
 // Author: 0Shard
 // Description: Settings data class for Eternal mod configuration. Contains all
 //              mod-specific settings and user preferences. UI drawing is delegated
 //              to SettingsDrawer, validation to SettingsValidator.
 //              Hediff settings now use separate XML file storage with auto-migration.
-//              CreateSnapshot() produces an ImmutableSettingsSnapshot for hot-path consumers (PERF-03).
+//              CreateSnapshot() remains a Gate 4 compatibility bridge for now.
 
-using System;
 using UnityEngine;
 using Verse;
 using Eternal.Infrastructure;
@@ -17,101 +16,6 @@ using Eternal.Settings;
 
 namespace Eternal
 {
-    /// <summary>
-    /// Default values for all Eternal mod settings.
-    /// Used for initialization and per-section reset functionality.
-    /// </summary>
-    public static class SettingsDefaults
-    {
-        // General
-        public const bool ModEnabled = true;
-        public const bool DebugMode = false;
-        public const int LoggingLevel = 1;
-
-        // Healing
-        /// <summary>
-        /// Base healing rate: severity reduction per healing pass (normalTickRate ticks).
-        /// Default 1.2f = 0.02 severity/tick per wound, matching the Apex Immortal rate
-        /// from the Immortals mod (0.002 baseHealSpeed x severity 10).
-        /// Range: 0.01 - 3.0
-        /// </summary>
-        public const float BaseHealingRate = 1.2f;
-
-        /// <summary>
-        /// Severity-equivalent work required per body part hit point during regrowth.
-        /// Regrowth progress per pass = healAmount / (partMaxHP x this).
-        /// At defaults (rate 1.2, rareTickRate 250) an arm (30 HP) regrows in ~1 in-game day.
-        /// </summary>
-        public const float RegrowthWorkPerPartHP = 10f;
-
-        /// <summary>
-        /// Regrowth severity at which a part's children may start regrowing in parallel
-        /// (midway through phase 3, Nerve Integration: 0.5-0.75). The Brain is exempt:
-        /// its critical-sequence prerequisites must be fully regrown before it starts.
-        /// </summary>
-        public const float RegrowthChildStartThreshold = 0.625f;
-        public const bool ShowRegrowthEffects = true;
-        public const bool ShowRegrowthProgress = true;
-
-        // Resources
-        public const float NutritionCostMultiplier = 1.0f;
-        public const bool PauseOnResourceDepletion = true;
-        public const float MinimumNutritionThreshold = 0.1f;
-        public const bool AllowResourceBorrowing = false;
-
-        // Food Debt
-        public const float MaxDebtMultiplier = 5.0f;
-        public const float FoodDrainThreshold = 0.15f;     // Stop instant drain at 15% (UrgentlyHungry)
-        public const float SeverityToNutritionRatio = 0.004f; // 250:1 ratio (250 severity = 1 nutrition)
-
-        /// <summary>
-        /// In-game days a debt episode takes to fully repay via the food-bar drain.
-        /// Drain rate = peakDebt / (60000 × days) per tick — constant per episode, so any
-        /// debt fully repays within the window when food is available.
-        /// </summary>
-        public const float DebtRepaymentDays = 1.0f;
-
-        /// <summary>
-        /// Computes display ratio string from SeverityToNutritionRatio.
-        /// Example: 0.004f -> "250 : 1"
-        /// </summary>
-        public static string GetSeverityToNutritionRatioDisplay()
-        {
-            int ratioValue = (int)Math.Round(1.0f / SeverityToNutritionRatio);
-            return $"{ratioValue} : 1";
-        }
-
-        // Performance
-        public const int NormalTickRate = 60;
-        public const int RareTickRate = 250;
-        public const int TraitCheckInterval = 5000;
-        public const int CorpseCheckInterval = 1000;
-        public const int MapCheckInterval = 5000;
-
-        /// <summary>
-        /// Interval in ticks for sweeping stale healing history entries.
-        /// Default: 300000 ticks = ~5 in-game days. Range: 60000 (1 day) to 900000 (15 days).
-        /// </summary>
-        public const int HealingHistorySweepInterval = 300000;
-
-        // Advanced Hediff
-        public const bool EnableIndividualHediffControl = true;
-        public const bool AutoHealEnabled = true;
-
-        // Map Protection
-        public const bool EnableMapAnchors = true;
-        public const int AnchorGracePeriodTicks = 300;
-        public const bool EnableRoofCollapseProtection = true;
-
-        // Effects
-        public const bool ConsciousnessBuffEnabled = true;
-        public const float ConsciousnessMultiplier = 3.0f;
-        public const bool MoodBuffEnabled = true;
-        public const int MoodBuffValue = 40;
-        public const bool PopulationCapEnabled = true;
-        public const int PopulationCap = 3;
-    }
-
     /// <summary>
     /// Settings data class for Eternal mod configuration.
     /// Contains all mod-specific settings and user preferences.
@@ -165,32 +69,40 @@ namespace Eternal
 
         #region General Settings
 
-        public bool modEnabled = true;
-        public bool debugMode = false;
-        public int loggingLevel = 1; // 0=Error, 1=Warning, 2=Info, 3=Debug
+        /// <summary>
+        /// Logging verbosity. Debug mode is derived when this reaches the Debug choice.
+        /// </summary>
+        public int loggingLevel = SettingsDefaults.LoggingLevel;
+
+        private bool legacyDebugMode;
+
+        /// <summary>
+        /// Derived debug state. Keeping this as a read-only compatibility property lets
+        /// existing diagnostic call sites follow the new logging-level source of truth.
+        /// </summary>
+        public bool DebugMode => loggingLevel >= SettingsDefaults.LoggingLevelDebug;
+
+        // Legacy call sites use this read-only alias; it is never serialized or user-editable.
+        public bool debugMode => DebugMode;
 
         #endregion
 
         #region Healing Settings
 
         /// <summary>
-        /// Base healing rate applied to all hediffs (unless overridden per-hediff).
-        /// Range: 0.01 - 3.0 (default 1.2)
-        /// UI displays as ratio format: 250 : 1 (severity : nutrition)
+        /// Base healing rate applied to all hediffs unless overridden per-hediff.
         /// </summary>
-        public float baseHealingRate = 1.2f;
-
-        public bool showRegrowthEffects = true;
-        public bool showRegrowthProgress = true;
+        public float baseHealingRate = SettingsDefaults.BaseHealingRate;
+        public bool showEternalPowerLabel = SettingsDefaults.ShowEternalPowerLabel;
 
         #endregion
 
         #region Resource Settings
 
-        public float nutritionCostMultiplier = 1.0f;
-        public bool pauseOnResourceDepletion = true;
-        public float minimumNutritionThreshold = 0.1f;
-        public bool allowResourceBorrowing = false;
+        /// <summary>
+        /// Global multiplier applied by the food-cost processor to every healing cost.
+        /// </summary>
+        public float nutritionCostMultiplier = SettingsDefaults.NutritionCostMultiplier;
 
         #endregion
 
@@ -200,13 +112,13 @@ namespace Eternal
         /// Maximum debt as a multiplier of pawn's nutrition capacity.
         /// Default: 5.0 (5× nutrition capacity)
         /// </summary>
-        public float maxDebtMultiplier = 5.0f;
+        public float maxDebtMultiplier = SettingsDefaults.MaxDebtMultiplier;
 
         /// <summary>
         /// Food level threshold below which healing costs go to debt instead of draining food.
         /// Default: 0.15 (15% = UrgentlyHungry level)
         /// </summary>
-        public float foodDrainThreshold = 0.15f;
+        public float foodDrainThreshold = SettingsDefaults.FoodDrainThreshold;
 
         /// <summary>
         /// In-game days a debt episode takes to fully repay via the food-bar drain.
@@ -214,52 +126,40 @@ namespace Eternal
         /// </summary>
         public float debtRepaymentDays = SettingsDefaults.DebtRepaymentDays;
 
-        /// <summary>
-        /// Ratio for converting severity healed to nutrition cost.
-        /// Default: 0.004f (250:1 ratio: 250 severity = 1 nutrition)
-        /// Range: 0.001 - 0.1 (1000:1 to 10:1)
-        /// </summary>
-        public float severityToNutritionRatio = 0.004f;
-
         #endregion
 
         #region Performance Settings
 
-        public int normalTickRate = 60;
-        public int rareTickRate = 250;
-        public int traitCheckInterval = 5000;
-        public int corpseCheckInterval = 1000;
-        public int mapCheckInterval = 5000;
+        public int normalTickRate = SettingsDefaults.NormalTickRate;
+        public int rareTickRate = SettingsDefaults.RareTickRate;
+        public int traitCheckInterval = SettingsDefaults.TraitCheckInterval;
+        public int corpseCheckInterval = SettingsDefaults.CorpseCheckInterval;
+        public int mapCheckInterval = SettingsDefaults.MapCheckInterval;
 
         /// <summary>
         /// Interval in ticks for sweeping stale healing history entries.
         /// Range: 60000 (1 day) to 900000 (15 days). Default: 300000 (~5 days).
         /// </summary>
-        public int healingHistorySweepInterval = 300000;
+        public int healingHistorySweepInterval = SettingsDefaults.HealingHistorySweepInterval;
 
         #endregion
 
 
         #region Advanced Hediff Settings
 
+        /// <summary>
+        /// Per-hediff settings are always available; the removed individual-control toggle
+        /// never represented an independent runtime capability.
+        /// </summary>
         public EternalHediffManager hediffManager = new EternalHediffManager();
-        public bool autoHealEnabled = true;
-        public HealingOrder healingOrder = HealingOrder.CheapestFirst;
-        public bool enableIndividualHediffControl = true;
-
-        #endregion
-
-        #region Map Protection Settings
-
-        public string mapProtectionAction = "teleport";
 
         #endregion
 
         #region Map Protection Settings (Anchors)
 
-        public bool enableMapAnchors = true;
-        public int anchorGracePeriodTicks = 300;
-        public bool enableRoofCollapseProtection = true;
+        public bool enableMapAnchors = SettingsDefaults.EnableMapAnchors;
+        public int anchorGracePeriodTicks = SettingsDefaults.AnchorGracePeriodTicks;
+        public bool enableRoofCollapseProtection = SettingsDefaults.EnableRoofCollapseProtection;
 
         #endregion
 
@@ -281,8 +181,6 @@ namespace Eternal
         /// </summary>
         public void ResetGeneralSettings()
         {
-            modEnabled = SettingsDefaults.ModEnabled;
-            debugMode = SettingsDefaults.DebugMode;
             loggingLevel = SettingsDefaults.LoggingLevel;
         }
 
@@ -292,8 +190,7 @@ namespace Eternal
         public void ResetHealingSettings()
         {
             baseHealingRate = SettingsDefaults.BaseHealingRate;
-            showRegrowthEffects = SettingsDefaults.ShowRegrowthEffects;
-            showRegrowthProgress = SettingsDefaults.ShowRegrowthProgress;
+            showEternalPowerLabel = SettingsDefaults.ShowEternalPowerLabel;
         }
 
         /// <summary>
@@ -302,9 +199,6 @@ namespace Eternal
         public void ResetResourceSettings()
         {
             nutritionCostMultiplier = SettingsDefaults.NutritionCostMultiplier;
-            pauseOnResourceDepletion = SettingsDefaults.PauseOnResourceDepletion;
-            minimumNutritionThreshold = SettingsDefaults.MinimumNutritionThreshold;
-            allowResourceBorrowing = SettingsDefaults.AllowResourceBorrowing;
         }
 
         /// <summary>
@@ -315,7 +209,6 @@ namespace Eternal
             maxDebtMultiplier = SettingsDefaults.MaxDebtMultiplier;
             foodDrainThreshold = SettingsDefaults.FoodDrainThreshold;
             debtRepaymentDays = SettingsDefaults.DebtRepaymentDays;
-            severityToNutritionRatio = SettingsDefaults.SeverityToNutritionRatio;
         }
 
         /// <summary>
@@ -329,15 +222,6 @@ namespace Eternal
             corpseCheckInterval = SettingsDefaults.CorpseCheckInterval;
             mapCheckInterval = SettingsDefaults.MapCheckInterval;
             healingHistorySweepInterval = SettingsDefaults.HealingHistorySweepInterval;
-        }
-
-        /// <summary>
-        /// Resets Advanced Hediff settings to defaults.
-        /// </summary>
-        public void ResetAdvancedHediffSettings()
-        {
-            enableIndividualHediffControl = SettingsDefaults.EnableIndividualHediffControl;
-            autoHealEnabled = SettingsDefaults.AutoHealEnabled;
         }
 
         /// <summary>
@@ -403,29 +287,29 @@ namespace Eternal
             {
                 General = new ImmutableSettingsSnapshot.GeneralSection
                 {
-                    ModEnabled  = modEnabled,
-                    DebugMode   = debugMode,
+                    ModEnabled  = SettingsDefaults.LegacySnapshotModEnabled,
+                    DebugMode   = DebugMode,
                     LoggingLevel = loggingLevel,
                 },
                 Healing = new ImmutableSettingsSnapshot.HealingSection
                 {
                     BaseRate    = baseHealingRate,
-                    ShowEffects = showRegrowthEffects,
-                    ShowProgress = showRegrowthProgress,
+                    ShowEffects = SettingsDefaults.LegacySnapshotShowRegrowthEffects,
+                    ShowProgress = showEternalPowerLabel,
                 },
                 Resource = new ImmutableSettingsSnapshot.ResourceSection
                 {
                     NutritionCostMultiplier  = nutritionCostMultiplier,
-                    PauseOnResourceDepletion = pauseOnResourceDepletion,
-                    MinimumNutritionThreshold = minimumNutritionThreshold,
-                    AllowResourceBorrowing   = allowResourceBorrowing,
+                    PauseOnResourceDepletion = SettingsDefaults.LegacySnapshotPauseOnResourceDepletion,
+                    MinimumNutritionThreshold = SettingsDefaults.LegacySnapshotMinimumNutritionThreshold,
+                    AllowResourceBorrowing   = SettingsDefaults.LegacySnapshotAllowResourceBorrowing,
                 },
                 FoodDebt = new ImmutableSettingsSnapshot.FoodDebtSection
                 {
                     MaxDebtMultiplier       = maxDebtMultiplier,
                     FoodDrainThreshold      = foodDrainThreshold,
                     DebtRepaymentDays       = debtRepaymentDays,
-                    SeverityToNutritionRatio = severityToNutritionRatio,
+                    SeverityToNutritionRatio = SettingsDefaults.SeverityToNutritionRatio,
                 },
                 Perf = new ImmutableSettingsSnapshot.PerfSection
                 {
@@ -438,13 +322,13 @@ namespace Eternal
                 },
                 AdvancedHediff = new ImmutableSettingsSnapshot.AdvancedHediffSection
                 {
-                    AutoHealEnabled              = autoHealEnabled,
-                    HealingOrder                 = healingOrder,
-                    EnableIndividualHediffControl = enableIndividualHediffControl,
+                    AutoHealEnabled              = SettingsDefaults.LegacySnapshotAutoHealEnabled,
+                    HealingOrder                 = SettingsDefaults.LegacySnapshotHealingOrder,
+                    EnableIndividualHediffControl = SettingsDefaults.LegacySnapshotIndividualHediffControl,
                 },
                 Map = new ImmutableSettingsSnapshot.MapSection
                 {
-                    MapProtectionAction        = mapProtectionAction,
+                    MapProtectionAction        = SettingsDefaults.LegacySnapshotMapProtectionAction,
                     EnableMapAnchors           = enableMapAnchors,
                     AnchorGracePeriodTicks     = anchorGracePeriodTicks,
                     EnableRoofCollapseProtection = enableRoofCollapseProtection,
@@ -489,50 +373,47 @@ namespace Eternal
         {
             base.ExposeData();
 
-            // General settings
-            Scribe_Values.Look(ref modEnabled, "modEnabled", true);
-            Scribe_Values.Look(ref debugMode, "debugMode", false);
-            Scribe_Values.Look(ref loggingLevel, "loggingLevel", 1);
+            // The old debug key is read only during load. It is deliberately not written again;
+            // after migration DebugMode is derived from loggingLevel.
+            if (Scribe.mode == LoadSaveMode.LoadingVars)
+            {
+                Scribe_Values.Look(ref legacyDebugMode, "debugMode", false);
+            }
 
-            // Healing settings
-            Scribe_Values.Look(ref baseHealingRate, "baseHealingRate", 1.2f);
-            Scribe_Values.Look(ref showRegrowthEffects, "showRegrowthEffects", true);
-            Scribe_Values.Look(ref showRegrowthProgress, "showRegrowthProgress", true);
+            // General settings
+            Scribe_Values.Look(ref loggingLevel, "loggingLevel", SettingsDefaults.LoggingLevel);
+
+            // Healing settings. Keep the old key so existing saves retain the label preference.
+            Scribe_Values.Look(ref baseHealingRate, "baseHealingRate", SettingsDefaults.BaseHealingRate);
+            Scribe_Values.Look(ref showEternalPowerLabel, "showRegrowthProgress", SettingsDefaults.ShowEternalPowerLabel);
 
             // Resource settings
-            Scribe_Values.Look(ref nutritionCostMultiplier, "nutritionCostMultiplier", 1.0f);
-            Scribe_Values.Look(ref pauseOnResourceDepletion, "pauseOnResourceDepletion", true);
-            Scribe_Values.Look(ref minimumNutritionThreshold, "minimumNutritionThreshold", 0.1f);
-            Scribe_Values.Look(ref allowResourceBorrowing, "allowResourceBorrowing", false);
+            Scribe_Values.Look(ref nutritionCostMultiplier, "nutritionCostMultiplier", SettingsDefaults.NutritionCostMultiplier);
 
             // Food debt settings
-            Scribe_Values.Look(ref maxDebtMultiplier, "maxDebtMultiplier", 5.0f);
-            Scribe_Values.Look(ref foodDrainThreshold, "foodDrainThreshold", 0.15f);
+            Scribe_Values.Look(ref maxDebtMultiplier, "maxDebtMultiplier", SettingsDefaults.MaxDebtMultiplier);
+            Scribe_Values.Look(ref foodDrainThreshold, "foodDrainThreshold", SettingsDefaults.FoodDrainThreshold);
             Scribe_Values.Look(ref debtRepaymentDays, "debtRepaymentDays", SettingsDefaults.DebtRepaymentDays);
-            Scribe_Values.Look(ref severityToNutritionRatio, "severityToNutritionRatio", 0.004f);
 
             // Performance settings
-            Scribe_Values.Look(ref normalTickRate, "normalTickRate", 60);
-            Scribe_Values.Look(ref rareTickRate, "rareTickRate", 250);
-            Scribe_Values.Look(ref traitCheckInterval, "traitCheckInterval", 5000);
-            Scribe_Values.Look(ref corpseCheckInterval, "corpseCheckInterval", 1000);
-            Scribe_Values.Look(ref mapCheckInterval, "mapCheckInterval", 5000);
+            Scribe_Values.Look(ref normalTickRate, "normalTickRate", SettingsDefaults.NormalTickRate);
+            Scribe_Values.Look(ref rareTickRate, "rareTickRate", SettingsDefaults.RareTickRate);
+            Scribe_Values.Look(ref traitCheckInterval, "traitCheckInterval", SettingsDefaults.TraitCheckInterval);
+            Scribe_Values.Look(ref corpseCheckInterval, "corpseCheckInterval", SettingsDefaults.CorpseCheckInterval);
+            Scribe_Values.Look(ref mapCheckInterval, "mapCheckInterval", SettingsDefaults.MapCheckInterval);
             Scribe_Values.Look(ref healingHistorySweepInterval, "healingHistorySweepInterval", SettingsDefaults.HealingHistorySweepInterval);
 
-            // Advanced hediff settings
-            // Still load hediffManager for migration purposes (reads old saved data)
-            Scribe_Deep.Look(ref hediffManager, "hediffManager");
-            Scribe_Values.Look(ref autoHealEnabled, "autoHealEnabled", true);
-            Scribe_Values.Look(ref healingOrder, "healingOrder", HealingOrder.CheapestFirst);
-            Scribe_Values.Look(ref enableIndividualHediffControl, "enableIndividualHediffControl", true);
-
-            // Map protection settings
-            Scribe_Values.Look(ref mapProtectionAction, "mapProtectionAction", "teleport");
+            // Read the legacy root only while loading so old saves can migrate. New writes use
+            // the versioned XML store exclusively and cannot preserve obsolete per-hediff fields.
+            if (Scribe.mode != LoadSaveMode.Saving)
+            {
+                Scribe_Deep.Look(ref hediffManager, "hediffManager");
+            }
 
             // Map protection settings (anchors)
-            Scribe_Values.Look(ref enableMapAnchors, "enableMapAnchors", true);
-            Scribe_Values.Look(ref anchorGracePeriodTicks, "anchorGracePeriodTicks", 300);
-            Scribe_Values.Look(ref enableRoofCollapseProtection, "enableRoofCollapseProtection", true);
+            Scribe_Values.Look(ref enableMapAnchors, "enableMapAnchors", SettingsDefaults.EnableMapAnchors);
+            Scribe_Values.Look(ref anchorGracePeriodTicks, "anchorGracePeriodTicks", SettingsDefaults.AnchorGracePeriodTicks);
+            Scribe_Values.Look(ref enableRoofCollapseProtection, "enableRoofCollapseProtection", SettingsDefaults.EnableRoofCollapseProtection);
 
             // Effects settings
             Scribe_Values.Look(ref consciousnessBuffEnabled, "consciousnessBuffEnabled", SettingsDefaults.ConsciousnessBuffEnabled);
@@ -542,10 +423,17 @@ namespace Eternal
             Scribe_Values.Look(ref populationCapEnabled, "populationCapEnabled", SettingsDefaults.PopulationCapEnabled);
             Scribe_Values.Look(ref populationCap, "populationCap", SettingsDefaults.PopulationCap);
 
-            // After loading, initialize hediff settings from XML
-            if (Scribe.mode == LoadSaveMode.LoadingVars || Scribe.mode == LoadSaveMode.PostLoadInit)
+            if (Scribe.mode == LoadSaveMode.PostLoadInit)
             {
-                // Defer initialization until after all loading is complete
+                // A true legacy debug flag is a one-time migration to the explicit Debug level.
+                loggingLevel = SettingsDefaults.MigrateLegacyDebugMode(legacyDebugMode, loggingLevel);
+                legacyDebugMode = false;
+
+                // Load validation runs once after every persisted field is available. The UI
+                // never calls this method during repaint.
+                SettingsValidator.ValidateSettings(this);
+
+                // Defer XML initialization until all game definitions are available.
                 LongEventHandler.ExecuteWhenFinished(InitializeHediffSettings);
             }
 
@@ -554,5 +442,13 @@ namespace Eternal
         }
 
         #endregion
+
+        /// <summary>
+        /// Validates settings immediately before ModSettings writes them to disk.
+        /// </summary>
+        public void ValidateBeforeWrite()
+        {
+            SettingsValidator.ValidateSettings(this);
+        }
     }
 }

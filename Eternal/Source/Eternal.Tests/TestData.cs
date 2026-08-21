@@ -1,11 +1,12 @@
 // Relative Path: Eternal/Source/Eternal.Tests/TestData.cs
 // Creation Date: 24-02-2026
-// Last Edit: 12-07-2026
+// Last Edit: 16-07-2026
 // Author: 0Shard
 // Description: Single source of truth for all expected constants used in tests.
 //              Values must match their production counterparts in SettingsDefaults,
 //              UnifiedHediffHealingCalculator, CriticalPartConstants, and EternalExceptionCategory.
 
+using Eternal;
 using Eternal.Exceptions;
 
 namespace Eternal.Tests
@@ -28,30 +29,31 @@ namespace Eternal.Tests
         // -----------------------------------------------------------------
         // Settings defaults — must match SettingsDefaults
         // -----------------------------------------------------------------
-        public const float DefaultBaseHealingRate = 1.2f;
-        public const float DefaultMaxDebtMultiplier = 5.0f;
-        public const float DefaultNutritionCostMultiplier = 1.0f;
-        public const float DefaultSeverityToNutritionRatio = 0.004f; // 250:1
+        public const float DefaultBaseHealingRate = SettingsDefaults.BaseHealingRate;
+        public const float DefaultMaxDebtMultiplier = SettingsDefaults.MaxDebtMultiplier;
+        public const float DefaultNutritionCostMultiplier = SettingsDefaults.NutritionCostMultiplier;
+        public const float DefaultSeverityToNutritionRatio = SettingsDefaults.SeverityToNutritionRatio;
 
-        public const bool DefaultModEnabled = true;
-        public const bool DefaultDebugMode = false;
-        public const int DefaultLoggingLevel = 1;
-        public const bool DefaultShowRegrowthEffects = true;
-        public const bool DefaultShowRegrowthProgress = true;
-        public const bool DefaultPauseOnResourceDepletion = true;
-        public const float DefaultMinimumNutritionThreshold = 0.1f;
-        public const bool DefaultAllowResourceBorrowing = false;
-        public const float DefaultFoodDrainThreshold = 0.15f;
-        public const float DefaultDebtRepaymentDays = 1.0f;
-        public const int DefaultNormalTickRate = 60;
-        public const int DefaultRareTickRate = 250;
-        public const int DefaultTraitCheckInterval = 5000;
-        public const int DefaultCorpseCheckInterval = 1000;
-        public const int DefaultMapCheckInterval = 5000;
-        public const bool DefaultEnableIndividualHediffControl = true;
-        public const bool DefaultAutoHealEnabled = true;
-        public const bool DefaultEnableMapAnchors = true;
-        public const int DefaultAnchorGracePeriodTicks = 300;
+        // Legacy snapshot contracts remain until Gate 4 removes that snapshot surface.
+        public const bool DefaultModEnabled = SettingsDefaults.LegacySnapshotModEnabled;
+        public const bool DefaultDebugMode = SettingsDefaults.DebugMode;
+        public const int DefaultLoggingLevel = SettingsDefaults.LoggingLevel;
+        public const bool DefaultShowRegrowthEffects = SettingsDefaults.LegacySnapshotShowRegrowthEffects;
+        public const bool DefaultShowRegrowthProgress = SettingsDefaults.ShowEternalPowerLabel;
+        public const bool DefaultPauseOnResourceDepletion = SettingsDefaults.LegacySnapshotPauseOnResourceDepletion;
+        public const float DefaultMinimumNutritionThreshold = SettingsDefaults.LegacySnapshotMinimumNutritionThreshold;
+        public const bool DefaultAllowResourceBorrowing = SettingsDefaults.LegacySnapshotAllowResourceBorrowing;
+        public const float DefaultFoodDrainThreshold = SettingsDefaults.FoodDrainThreshold;
+        public const float DefaultDebtRepaymentDays = SettingsDefaults.DebtRepaymentDays;
+        public const int DefaultNormalTickRate = SettingsDefaults.NormalTickRate;
+        public const int DefaultRareTickRate = SettingsDefaults.RareTickRate;
+        public const int DefaultTraitCheckInterval = SettingsDefaults.TraitCheckInterval;
+        public const int DefaultCorpseCheckInterval = SettingsDefaults.CorpseCheckInterval;
+        public const int DefaultMapCheckInterval = SettingsDefaults.MapCheckInterval;
+        public const bool DefaultEnableIndividualHediffControl = SettingsDefaults.LegacySnapshotIndividualHediffControl;
+        public const bool DefaultAutoHealEnabled = SettingsDefaults.LegacySnapshotAutoHealEnabled;
+        public const bool DefaultEnableMapAnchors = SettingsDefaults.EnableMapAnchors;
+        public const int DefaultAnchorGracePeriodTicks = SettingsDefaults.AnchorGracePeriodTicks;
 
         // -----------------------------------------------------------------
         // Critical part sequence — must match CriticalPartConstants.RegrowthSequence

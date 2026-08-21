@@ -1,6 +1,6 @@
 // Relative Path: Eternal/Source/Eternal/Eternal_Mod.cs
 // Creation Date: 28-10-2025
-// Last Edit: 19-02-2026
+// Last Edit: 16-07-2026
 // Author: 0Shard
 // Description: Main mod class for Eternal mod, handles initialization and component registration with enhanced hediff healing system.
 //              GetSettings() provides the single guaranteed-non-null entry point for settings access (SAFE-08).
@@ -93,6 +93,8 @@ namespace Eternal
         /// </summary>
         public override void WriteSettings()
         {
+            // Validate once at the write boundary; settings UI repaint must remain side-effect free.
+            settings?.ValidateBeforeWrite();
             base.WriteSettings();
 
             // Save hediff settings AFTER base.WriteSettings() completes

@@ -1,6 +1,6 @@
 // Relative Path: Eternal/Source/Eternal/Patches/SaveOurShip2/SOS2_SpaceLossPatches.cs
 // Creation Date: 13-07-2026
-// Last Edit: 13-07-2026
+// Last Edit: 16-07-2026
 // Author: 0Shard
 // Description: Harmony patches for SOS2 destruction paths beyond ship burn-up (which
 //              SOS2_OrbitingShipPatch covers). Verified against SOS2 Steam V2.8.104:
@@ -309,9 +309,16 @@ namespace Eternal.Patches.SaveOurShip2
 
                     if (spawnPos.IsValid)
                     {
-                        GenSpawn.Spawn(corpse, spawnPos, __state.TargetMap);
-                        EternalServiceContainer.Instance?.CorpseManager?.UpdateCorpseLocation(
-                            corpse.InnerPawn, __state.TargetMap, spawnPos);
+                        var corpseManager = EternalServiceContainer.Instance?.CorpseManager;
+                        if (corpseManager != null && corpseManager.IsTracked(corpse.InnerPawn))
+                        {
+                            if (!corpseManager.TryRelocateCorpse(corpse.InnerPawn, __state.TargetMap, spawnPos))
+                                continue;
+                        }
+                        else
+                        {
+                            GenSpawn.Spawn(corpse, spawnPos, __state.TargetMap);
+                        }
                     }
                 }
             }

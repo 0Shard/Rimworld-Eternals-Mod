@@ -1,8 +1,10 @@
 /*
  * Relative Path: Eternal/Source/Eternal/Corpse/EternalMapProtection.cs
  * Creation Date: 09-11-2025
- * Last Edit: 21-02-2026
+ * Last Edit: 16-07-2026
  *              05-02: HandleMapRemoval() event-driven rescue hook called from EternalMapManager.MapRemoved() (PERF-07).
+ *              Gate 1: Pending teleport state is explicitly wired through Eternal_Component and
+ *                       every relocation commits through EternalCorpseManager.
  * Author: 0Shard
  * Description: Prevents destruction of temporary maps containing Eternal corpses and provides corpse transfer mechanisms.
  *              Implements delayed teleportation system with save/load persistence for corpse relocation.
@@ -137,14 +139,13 @@ namespace Eternal.Corpse
                             ? targetLocs[0]
                             : CellFinder.RandomEdgeCell(homeMap);
 
-                        // Despawn from closing map, spawn on home map
-                        entry.Corpse.DeSpawn();
-                        GenSpawn.Spawn(entry.Corpse, targetLoc, homeMap);
-
-                        // Update corpse location tracking
-                        if (entry.OriginalPawn != null)
+                        // The manager owns the physical transfer and index commit. A failed
+                        // transfer leaves this entry eligible for later cleanup/retry.
+                        if (entry.OriginalPawn == null
+                            || !corpseManager.TryRelocateCorpse(entry.OriginalPawn, homeMap, targetLoc))
                         {
-                            corpseManager.UpdateCorpseLocation(entry.OriginalPawn, homeMap, targetLoc);
+                            Log.Warning($"[Eternal] HandleMapRemoval: failed to rescue {pawnName}'s corpse");
+                            continue;
                         }
 
                         // Transient message — not a letter (plan requirement)
@@ -276,7 +277,7 @@ namespace Eternal.Corpse
                 }
 
                 // Determine protection strategy
-                MapProtectionStrategy strategy = DetermineProtectionStrategy(map, eternalCorpses);
+                MapProtectionStrategy strategy = DetermineProtectionStrategy();
 
                 // Apply protection
                 ApplyMapProtection(map, eternalCorpses, strategy);
@@ -324,21 +325,12 @@ namespace Eternal.Corpse
         /// <summary>
         /// Determines the appropriate protection strategy for a map.
         /// </summary>
-        /// <param name="map">The map to determine strategy for</param>
-        /// <param name="eternalCorpses">The Eternal corpses on the map</param>
         /// <returns>Protection strategy to use</returns>
-        private MapProtectionStrategy DetermineProtectionStrategy(MapType map, List<EternalCorpseData> eternalCorpses)
+        private MapProtectionStrategy DetermineProtectionStrategy()
         {
-            // Use setting-defined strategy
-            string settingStrategy = (Eternal_Mod.GetSettings().mapProtectionAction ?? "teleport").ToLowerInvariant();
-
-            return settingStrategy switch
-            {
-                "block" => MapProtectionStrategy.BlockDestruction,
-                "transfer" => MapProtectionStrategy.TransferToNearest,
-                "ask" => MapProtectionStrategy.AskPlayer,
-                _ => MapProtectionStrategy.TeleportToHome
-            };
+            // Teleport-to-home is the only strategy with a complete, reliable implementation.
+            // Keep the decision internal rather than exposing unsafe or no-op choices in settings.
+            return MapProtectionStrategy.TeleportToHome;
         }
 
         /// <summary>
@@ -741,11 +733,10 @@ namespace Eternal.Corpse
                 if (entry.TriggerTick > currentTick)
                     continue;
 
-                toRemove.Add(entry);
-
                 // Validate corpse
                 if (entry.Corpse == null || entry.Corpse.Destroyed)
                 {
+                    toRemove.Add(entry);
                     if (Eternal_Mod.settings?.debugMode == true)
                     {
                         Log.Message("[Eternal] Skipping teleport - corpse is null or destroyed");
@@ -792,7 +783,10 @@ namespace Eternal.Corpse
 
                 try
                 {
-                    ExecuteTeleport(entry);
+                    if (ExecuteTeleport(entry))
+                    {
+                        toRemove.Add(entry);
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -812,32 +806,32 @@ namespace Eternal.Corpse
         /// Executes the actual teleportation of a corpse.
         /// </summary>
         /// <param name="entry">The pending teleport entry to execute</param>
-        private void ExecuteTeleport(PendingTeleport entry)
+        private bool ExecuteTeleport(PendingTeleport entry)
         {
-            // Store source map for logging
+            if (entry?.Corpse == null || entry.TargetMap == null)
+                return false;
+
+            var corpseManager = EternalServiceContainer.Instance?.CorpseManager;
+            var originalPawn = entry.Corpse.InnerPawn;
+            if (corpseManager == null || originalPawn == null)
+                return false;
+
+            // Store source map for logging before the manager performs the transfer.
             var sourceMap = entry.Corpse.Map;
             string sourceLabel = sourceMap?.Parent?.Label ?? "unknown location";
             string targetLabel = entry.TargetMap.Parent?.Label ?? "home map";
 
-            // Despawn from current location if spawned
-            if (entry.Corpse.Spawned)
-            {
-                entry.Corpse.DeSpawn();
-            }
+            if (!corpseManager.TryRelocateCorpse(originalPawn, entry.TargetMap, entry.TargetLocation))
+                return false;
 
-            // Spawn on target map
-            GenSpawn.Spawn(entry.Corpse, entry.TargetLocation, entry.TargetMap);
-
-            // Get pawn name for logging
-            string pawnName = entry.Corpse.InnerPawn?.Name?.ToStringShort ?? "Unknown";
-
+            string pawnName = originalPawn.Name?.ToStringShort ?? "Unknown";
             Log.Message($"[Eternal] Teleported {pawnName}'s corpse from {sourceLabel} to {targetLabel} at {entry.TargetLocation}");
 
-            // Notify player
             Messages.Message(
                 $"The corpse of {pawnName} has been teleported to {targetLabel}.",
                 entry.Corpse,
                 MessageTypeDefOf.NeutralEvent);
+            return true;
         }
 
         /// <summary>
@@ -1014,21 +1008,24 @@ namespace Eternal.Corpse
         {
             Scribe_Collections.Look(ref pendingTeleports, "pendingTeleports", LookMode.Deep);
 
-            // Ensure list is initialized after loading
             if (pendingTeleports == null)
             {
                 pendingTeleports = new List<PendingTeleport>();
             }
+        }
 
-            // Clean up any null entries that may have resulted from references being lost
-            if (Scribe.mode == LoadSaveMode.PostLoadInit)
+        /// <summary>
+        /// Removes entries whose cross-references could not be resolved. The component calls this
+        /// only after the loaded corpse manager and service references are wired.
+        /// </summary>
+        public void PostLoadInit()
+        {
+            pendingTeleports.RemoveAll(pendingTeleport =>
+                pendingTeleport == null || pendingTeleport.Corpse == null);
+
+            if (Eternal_Mod.settings?.debugMode == true && pendingTeleports.Count > 0)
             {
-                pendingTeleports.RemoveAll(p => p == null || p.Corpse == null);
-
-                if (Eternal_Mod.settings?.debugMode == true && pendingTeleports.Count > 0)
-                {
-                    Log.Message($"[Eternal] Loaded {pendingTeleports.Count} pending teleportation(s)");
-                }
+                Log.Message($"[Eternal] Loaded {pendingTeleports.Count} pending teleportation(s)");
             }
         }
 

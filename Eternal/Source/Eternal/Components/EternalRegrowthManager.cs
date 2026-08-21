@@ -1,7 +1,7 @@
 /*
  * Relative Path: Eternal/Source/Eternal/Components/EternalRegrowthManager.cs
  * Creation Date: 28-10-2025
- * Last Edit: 13-07-2026
+ * Last Edit: 16-07-2026
  * Author: 0Shard
  * Description: Refactored regrowth manager using hediff-per-part approach (Immortals pattern).
  *              Adds Eternal_Regrowing hediff to each missing body part with partEfficiencyOffset stages.
@@ -376,6 +376,10 @@ namespace Eternal
                 // DON'T remove Hediff_MissingPart here - it's removed in CompleteRegrowth()
                 // Both hediffs coexist during regrowth, preventing RimWorld from re-adding missing part
 
+                // Part is assigned after AddHediff, so enqueue once more for the final current
+                // identity. The enqueue is deferred; no healing or threshold work occurs here.
+                Eternal_Component.Instance?.EnqueueHealthReconciliation(pawn);
+
                 if (Eternal_Mod.settings?.debugMode == true)
                 {
                     Log.Message($"[Eternal] Started regrowing {part.Label} for {pawn.Name?.ToStringShort}");
@@ -416,6 +420,10 @@ namespace Eternal
 
                 // STEP 2: Remove the regrowth hediff - part is now functional
                 pawn.health.RemoveHediff(hediff);
+
+                // Completion can involve direct list/cache changes in RimWorld. Reconcile after
+                // the mutation on a safe tick rather than attempting any health work inline.
+                Eternal_Component.Instance?.EnqueueHealthReconciliation(pawn);
 
                 if (Eternal_Mod.settings?.debugMode == true)
                 {

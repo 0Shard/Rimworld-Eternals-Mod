@@ -1,6 +1,6 @@
 // Relative Path: Eternal/Source/Eternal/World/SpaceCrashRescueService.cs
 // Creation Date: 13-07-2026
-// Last Edit: 14-07-2026
+// Last Edit: 16-07-2026
 // Author: 0Shard
 // Description: Shared rescue pipeline for Eternals destroyed or stranded in space.
 //              Converts victims to torso-only corpses (terminal-velocity re-entry), updates their
@@ -97,18 +97,48 @@ namespace Eternal.World
                     StripToTorso(corpse.InnerPawn);
                     RefreshPreCalculatedQueue(corpse.InnerPawn);
 
-                    if (corpse.Spawned)
-                    {
-                        corpse.DeSpawn(DestroyMode.WillReplace);
-                    }
-
                     if (crashSite != null)
                     {
-                        crashSite.AddCorpse(corpse);
-                        delivered++;
+                        var corpseManager = EternalServiceContainer.Instance?.CorpseManager;
+                        bool ownershipTransferred;
+                        if (corpseManager != null && corpseManager.IsTracked(corpse.InnerPawn))
+                        {
+                            ownershipTransferred = corpseManager.TryReleaseCorpseToUnspawnedOwner(
+                                corpse.InnerPawn,
+                                () =>
+                                {
+                                    if (corpse.Spawned)
+                                    {
+                                        corpse.DeSpawn(DestroyMode.WillReplace);
+                                    }
+
+                                    crashSite.AddCorpse(corpse);
+                                    return crashSite.GetCrashedPawns().Contains(corpse.InnerPawn);
+                                });
+                        }
+                        else
+                        {
+                            if (corpse.Spawned)
+                            {
+                                corpse.DeSpawn(DestroyMode.WillReplace);
+                            }
+
+                            crashSite.AddCorpse(corpse);
+                            ownershipTransferred = crashSite.GetCrashedPawns().Contains(corpse.InnerPawn);
+                        }
+
+                        if (ownershipTransferred)
+                        {
+                            delivered++;
+                        }
                     }
                     else
                     {
+                        if (corpse.Spawned)
+                        {
+                            corpse.DeSpawn(DestroyMode.WillReplace);
+                        }
+
                         SpawnCorpseAtHomeColony(corpse);
                     }
                 }
@@ -162,19 +192,48 @@ namespace Eternal.World
                 int delivered = 0;
                 foreach (var corpse in rescuedCorpses)
                 {
-                    if (corpse.Spawned)
-                    {
-                        corpse.DeSpawn(DestroyMode.WillReplace);
-                    }
-                    else
-                    {
-                        corpse.holdingOwner?.Remove(corpse);
-                    }
-
                     if (crashSite != null)
                     {
-                        crashSite.AddCorpse(corpse);
-                        delivered++;
+                        var corpseManager = EternalServiceContainer.Instance?.CorpseManager;
+                        bool ownershipTransferred;
+                        if (corpseManager != null && corpseManager.IsTracked(corpse.InnerPawn))
+                        {
+                            ownershipTransferred = corpseManager.TryReleaseCorpseToUnspawnedOwner(
+                                corpse.InnerPawn,
+                                () =>
+                                {
+                                    if (corpse.Spawned)
+                                    {
+                                        corpse.DeSpawn(DestroyMode.WillReplace);
+                                    }
+                                    else
+                                    {
+                                        corpse.holdingOwner?.Remove(corpse);
+                                    }
+
+                                    crashSite.AddCorpse(corpse);
+                                    return crashSite.GetCrashedPawns().Contains(corpse.InnerPawn);
+                                });
+                        }
+                        else
+                        {
+                            if (corpse.Spawned)
+                            {
+                                corpse.DeSpawn(DestroyMode.WillReplace);
+                            }
+                            else
+                            {
+                                corpse.holdingOwner?.Remove(corpse);
+                            }
+
+                            crashSite.AddCorpse(corpse);
+                            ownershipTransferred = crashSite.GetCrashedPawns().Contains(corpse.InnerPawn);
+                        }
+
+                        if (ownershipTransferred)
+                        {
+                            delivered++;
+                        }
                     }
                     else
                     {
@@ -553,9 +612,16 @@ namespace Eternal.World
             var entryCell = CellFinder.RandomEdgeCell(homeMap);
             if (entryCell.IsValid && !corpse.Spawned)
             {
-                GenSpawn.Spawn(corpse, entryCell, homeMap);
-                EternalServiceContainer.Instance?.CorpseManager?.UpdateCorpseLocation(
-                    corpse.InnerPawn, homeMap, entryCell);
+                var corpseManager = EternalServiceContainer.Instance?.CorpseManager;
+                if (corpseManager != null && corpseManager.IsTracked(corpse.InnerPawn))
+                {
+                    if (!corpseManager.TryRelocateCorpse(corpse.InnerPawn, homeMap, entryCell))
+                        return;
+                }
+                else
+                {
+                    GenSpawn.Spawn(corpse, entryCell, homeMap);
+                }
             }
         }
     }

@@ -1,8 +1,9 @@
 // Relative Path: Eternal/Source/Eternal/Components/Eternal_Component.cs
 // Creation Date: 01-01-2025
-// Last Edit: 06-03-2026
+// Last Edit: 21-08-2026
 // SAFE-09: FinalizeInit() early-returns when EternalModState.IsDisabled — prevents SOS2 cache
 //          init and healing processor init from running with null critical defs.
+// Gate 1: Post-load corpse queue hydration and pending teleport cleanup run after service rewiring.
 // Author: 0Shard
 // Description: Main game component for Eternal mod. Serves as the central service locator.
 //              Delegates tick processing to TickOrchestrator for separation of concerns.
@@ -139,7 +140,7 @@ namespace Eternal
 
             // Initialize all managers as new instances (no singletons)
             regrowthManager = new EternalRegrowthManager();
-            caravanDeathHandler = new EternalCaravanDeathHandler(game);
+            caravanDeathHandler = new EternalCaravanDeathHandler();
             healingProcessor = new EternalHealingProcessor();
             corpseManager = new EternalCorpseManager();
             corpseHealingProcessor = new EternalCorpseHealingProcessor();
@@ -214,6 +215,51 @@ namespace Eternal
             {
                 healingProcessor.StartRegrowth(pawn);
             }
+        }
+
+        /// <summary>
+        /// Queues an eligible health mutation for the next safe orchestrator tick. Ordinary
+        /// non-Eternal pawns never enter the pending set; an explicit Eternal_Essence removal
+        /// remains eligible so its derived state can be pruned after the mutation completes.
+        /// </summary>
+        public void EnqueueHealthReconciliation(Pawn pawn, Hediff removedHediff = null)
+        {
+            if (!ShouldQueueHealthReconciliation(pawn, removedHediff))
+                return;
+
+            tickOrchestrator?.EnqueueHealthReconciliation(pawn, removedHediff);
+        }
+
+        /// <summary>
+        /// Determines whether a health mutation belongs to Eternal's deferred reconciliation.
+        /// Dead pawns are accepted when they are valid Eternal corpses or still owned by the
+        /// corpse manager, preserving corpse-driven flows without admitting arbitrary corpses.
+        /// </summary>
+        public static bool ShouldQueueHealthReconciliation(Pawn pawn, Hediff removedHediff = null)
+        {
+            if (pawn == null)
+                return false;
+
+            if (removedHediff?.def != null
+                && removedHediff.def == EternalDefOf.Eternal_Essence)
+            {
+                return true;
+            }
+
+            if (!pawn.Dead)
+                return pawn.IsValidEternal();
+
+            return pawn.IsValidEternalCorpse()
+                || EternalServiceContainer.Instance?.CorpseManager?.IsTracked(pawn) == true;
+        }
+
+        /// <summary>
+        /// Reconciles current live health state without applying healing. Resurrection restore
+        /// paths use this after the saved HediffSet is attached again.
+        /// </summary>
+        public void ReconcileLiveHealth(Pawn pawn)
+        {
+            healingProcessor?.ReconcileLiveHealth(pawn);
         }
 
         #endregion
@@ -368,6 +414,15 @@ namespace Eternal
             Scribe_Deep.Look(ref caravanDeathHandler, "caravanDeathHandler");
             Scribe_Deep.Look(ref corpseManager, "corpseManager");
 
+            // Keep the component-created map protection instance. Its pending queue contains
+            // cross-references and must be exposed in every Scribe phase without replacing the
+            // instance before those references resolve.
+            if (mapProtection == null)
+            {
+                mapProtection = new EternalMapProtection();
+            }
+            mapProtection.ExposeData();
+
             // Food debt system serialization (cast to IExposable)
             if (Scribe.mode == LoadSaveMode.Saving)
             {
@@ -384,8 +439,11 @@ namespace Eternal
                 (foodDebtSystem as IExposable)?.ExposeData();
             }
 
-            // Threshold tracker serialization (stored in service container)
+            // Threshold and live healing history serialization (stored in service container and
+            // the processor). Both use loadID-aware scalar keys and migrate legacy rows during
+            // the next live-health reconciliation.
             EternalServiceContainer.Instance.ThresholdTracker?.ExposeData();
+            healingProcessor?.HediffHealer?.ExposeData();
 
             // Post-load initialization
             if (Scribe.mode == LoadSaveMode.PostLoadInit)
@@ -397,8 +455,6 @@ namespace Eternal
                     corpseHealingProcessor = new EternalCorpseHealingProcessor();
                 if (corpsePreservation == null)
                     corpsePreservation = new EternalCorpsePreservation();
-                if (mapProtection == null)
-                    mapProtection = new EternalMapProtection();
                 if (corpseManager == null)
                     corpseManager = new EternalCorpseManager();
                 if (foodDebtSystem == null)
@@ -412,6 +468,12 @@ namespace Eternal
                     corpsePreservation,
                     mapProtection,
                     regrowthManager);
+
+                // Manager entries have completed PostLoadInit by this point. Rebuild indexes and
+                // then hydrate active queues only after every processor dependency is rewired.
+                corpseManager?.RebuildIndexesAfterLoad();
+                mapProtection?.PostLoadInit();
+                corpseHealingProcessor?.RebuildActiveHealingCorpses();
 
                 // Initialize healing processor
                 healingProcessor?.Initialize();
@@ -465,6 +527,7 @@ namespace Eternal
             // Initialize healing processor now that game world is fully loaded
             // This is the correct lifecycle hook - called after maps and pawns exist
             healingProcessor?.Initialize();
+            corpseHealingProcessor?.RebuildActiveHealingCorpses();
         }
 
         #endregion

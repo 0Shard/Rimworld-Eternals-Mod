@@ -1,10 +1,11 @@
-// file path: Eternal/Source/Eternal/Corpse/EternalCorpseComponent.cs
-// Author Name: 0Shard
-// Date Created: 09-11-2025
-// Date Last Modified: 20-02-2026
-// Description: Component attached to Eternal corpses that manages corpse-specific mechanics and state.
-//              Enhanced to block rot and dessication every tick with cached CompRottable reference.
-//              Implements IRoofCollapseAlert to protect corpses from mountain roof collapse.
+/*
+ * Relative Path: Eternal/Source/Eternal/Corpse/EternalCorpseComponent.cs
+ * Creation Date: 09-11-2025
+ * Last Edit: 16-07-2026
+ * Author: 0Shard
+ * Description: Component attached to Eternal corpses that manages corpse-specific mechanics,
+ *              preservation, progress display, and manager-owned roof-collapse relocation.
+ */
 
 using System;
 using System.Linq;
@@ -393,10 +394,13 @@ namespace Eternal.Corpse
                     }
                 }
 
-                // Teleport corpse immediately (same map, different cell)
+                // The manager performs the transfer and commits the map index only after the
+                // corpse is owned by the target location.
                 MapType map = corpse.Map;
-                corpse.DeSpawn(DestroyMode.WillReplace);
-                GenSpawn.Spawn(corpse, safeCell, map);
+                if (!corpseManager.TryRelocateCorpse(corpse.InnerPawn, map, safeCell))
+                {
+                    return RoofCollapseResponse.None;
+                }
 
                 // Notify player (subtle message)
                 Messages.Message(

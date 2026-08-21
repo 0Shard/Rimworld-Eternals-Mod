@@ -1,7 +1,7 @@
 /*
  * Relative Path: Eternal/Source/Eternal/Components/TickOrchestrator.cs
  * Creation Date: 29-12-2025
- * Last Edit: 12-07-2026
+ * Last Edit: 21-08-2026
  * SAFE-09: ProcessTick() early-returns when EternalModState.IsDisabled to prevent NRE floods
  *          when critical defs are missing.
  * Author: 0Shard
@@ -60,6 +60,59 @@ namespace Eternal.Components
         private int lastCorpseCheckTick = 0;
         private int lastMapCheckTick = 0;
         private int lastHealingSweepTick = 0;
+
+        #endregion
+
+        #region Pending Live Health
+
+        // One deduplicating mutation queue owned by the orchestrator. Hooks store only Pawn
+        // identities; all Hediff inspection happens after the current callback has returned.
+        private readonly HashSet<Pawn> pendingHealthReconciliation = new HashSet<Pawn>();
+        private readonly List<Pawn> pendingHealthBuffer = new List<Pawn>(8);
+
+        /// <summary>
+        /// Enqueues an eligible pawn for deferred live-health reconciliation. No health state is
+        /// read or changed here, which keeps Add/Remove callbacks non-reentrant and guarantees
+        /// direct orchestrator callers cannot insert arbitrary non-Eternal pawns.
+        /// </summary>
+        public void EnqueueHealthReconciliation(Pawn pawn, Hediff removedHediff = null)
+        {
+            if (Eternal_Component.ShouldQueueHealthReconciliation(pawn, removedHediff))
+                pendingHealthReconciliation.Add(pawn);
+        }
+
+        /// <summary>
+        /// Drains pending pawns into a reusable buffer and reconciles each one on a safe tick.
+        /// Per-pawn failures do not prevent later pawns from being processed.
+        /// </summary>
+        public void DrainPendingHealthReconciliation()
+        {
+            if (pendingHealthReconciliation.Count == 0)
+                return;
+
+            pendingHealthBuffer.Clear();
+            foreach (var pawn in pendingHealthReconciliation)
+                pendingHealthBuffer.Add(pawn);
+            pendingHealthReconciliation.Clear();
+
+            foreach (var pawn in pendingHealthBuffer)
+            {
+                try
+                {
+                    _healingProcessor?.ReconcileLiveHealth(pawn);
+                }
+                catch (Exception ex)
+                {
+                    EternalLogger.HandleException(
+                        EternalExceptionCategory.Resurrection,
+                        "DrainPendingHealthReconciliation.Pawn",
+                        pawn,
+                        ex);
+                }
+            }
+
+            pendingHealthBuffer.Clear();
+        }
 
         #endregion
 
@@ -137,6 +190,12 @@ namespace Eternal.Components
             // PERF-08: Capture snapshot once per batch — ImmutableSettingsSnapshot is a readonly record struct
             // (stack-allocated, zero GC pressure). Settings changes apply immediately on the next call.
             var snapshot = Eternal_Mod.GetSettings().CreateSnapshot();
+
+            // Mutations are reconciled before cadence work on the next safe tick. The drain
+            // itself never heals; normal/rare passes remain the only severity mutation paths.
+            // Keep this outside the visible mod-enabled gate so a disabled mod cannot retain
+            // pending Pawn references indefinitely.
+            DrainPendingHealthReconciliation();
 
             if (!snapshot.General.ModEnabled)
                 return;
@@ -355,17 +414,17 @@ namespace Eternal.Components
             // Progress regrowth (advances severity on all regrowing hediffs, HP-scaled)
             _regrowthManager.ProgressRegrowth(pawn, healAmount);
 
-            // Process food cost for regrowth (configurable ratio, default 250:1)
+            // Process food cost for regrowth using the shared internal conversion ratio.
             if (totalHealingEffort > 0f)
             {
-                float severityToNutritionRatio = _settings.SeverityToNutritionRatio;
+                float severityToNutritionRatio = SettingsDefaults.SeverityToNutritionRatio;
                 float nutritionCost = totalHealingEffort * severityToNutritionRatio;
                 EternalServiceContainer.Instance.FoodCostProcessor?.ProcessHealingCost(pawn, nutritionCost);
             }
 
             if (_settings?.DebugMode == true)
             {
-                float severityToNutritionRatio = _settings.SeverityToNutritionRatio;
+                float severityToNutritionRatio = SettingsDefaults.SeverityToNutritionRatio;
                 Log.Message($"[Eternal] Progressed regrowth for {pawn.Name}: " +
                            $"{regrowingHediffs.Count} parts, heal={healAmount:F4}, cost={totalHealingEffort * severityToNutritionRatio:F4}");
             }
@@ -376,7 +435,7 @@ namespace Eternal.Components
         /// </summary>
         private void UpdateCaravanDeaths()
         {
-            _caravanDeathHandler?.GameComponentUpdate();
+            _caravanDeathHandler?.ProcessPendingTeleportations();
         }
 
         /// <summary>

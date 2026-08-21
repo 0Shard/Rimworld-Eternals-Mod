@@ -1,17 +1,13 @@
 /*
  * Relative Path: Eternal/Source/Eternal/Healing/EternalHediffSeverityTracker.cs
  * Creation Date: 12-11-2025
- * Last Edit: 10-07-2026
+ * Last Edit: 16-07-2026
  * Author: 0Shard
- * Description: Tracks hediff severity changes to detect "stuck" hediffs that RimWorld protects from
- *              being fully removed. When detected, these hediffs are forcibly removed.
- *              BUGFIX: Stuck detection is def.minSeverity-aware — hediffs that regen between healing
- *              cycles (e.g. mechanites +0.25/day) oscillate at the clamp floor with a per-attempt
- *              severity change above MIN_CHANGE_THRESHOLD; landing at the floor now counts as stuck.
- *              PERF-04: Replaced string dictionary keys with HealingDictionaryKey composite struct
- *              to eliminate per-tick string allocation. ClearPawnTracking now uses integer comparison
- *              instead of string.StartsWith prefix scanning.
- *              05-02: Added ClearPawnTrackingById(int) overload for sweep callers that hold only a pawn ID.
+ * Description: Tracks per-hediff healing history to detect hediffs protected from reaching
+ *              their removal floor. History identity includes persisted Hediff.loadID so
+ *              duplicate same-def/same-part instances remain independent. Legacy history is
+ *              migrated only for one live candidate; ambiguous rows are discarded safely.
+ *              Reconciliation stores scalar keys and attempts only, never Hediff references.
  */
 
 using System;
@@ -23,140 +19,153 @@ using Eternal.Utils;
 namespace Eternal
 {
     /// <summary>
-    /// Tracks hediff severity changes during healing to detect hediffs that are protected by RimWorld
-    /// and cannot naturally reach zero severity. When detected, these hediffs are forcibly removed.
+    /// Tracks healing attempts during live hediff processing and identifies stuck hediffs.
     /// </summary>
-    public class EternalHediffSeverityTracker
+    public class EternalHediffSeverityTracker : IExposable
     {
-        // Hardcoded thresholds (no settings as requested)
         private const float SEVERITY_THRESHOLD = 0.01f;
         private const float MIN_CHANGE_THRESHOLD = 0.0001f;
         private const int MAX_ATTEMPTS_TO_TRACK = 5;
-        private const int REQUIRED_STUCK_ATTEMPTS = 3; // Must be stuck 3 times before forcing removal
+        private const int REQUIRED_STUCK_ATTEMPTS = 3;
 
-        // PERF-04: Struct key instead of string to avoid per-tick allocation
-        private Dictionary<HealingDictionaryKey, List<HealingAttempt>> healingHistory;
+        private readonly Dictionary<HealingDictionaryKey, List<HealingAttempt>> healingHistory
+            = new Dictionary<HealingDictionaryKey, List<HealingAttempt>>();
+        private readonly Dictionary<LegacyHistoryKey, List<HealingAttempt>> legacyHistory
+            = new Dictionary<LegacyHistoryKey, List<HealingAttempt>>();
 
-        /// <summary>
-        /// Represents a single healing attempt on a hediff.
-        /// </summary>
-        private class HealingAttempt
+        private sealed class HealingAttempt
         {
-            public float SeverityBefore { get; set; }
-            public float SeverityAfter { get; set; }
-            public float HealingApplied { get; set; }
-            public int TickRecorded { get; set; }
+            public float SeverityBefore;
+            public float SeverityAfter;
+            public float HealingApplied;
+            public int TickRecorded;
 
             public float SeverityChange => SeverityBefore - SeverityAfter;
         }
 
         /// <summary>
-        /// Initializes a new instance of the severity tracker.
+        /// Identity used only for pre-Gate-2 history migration. It cannot identify one
+        /// instance when duplicate live hediffs share the same def and body part.
         /// </summary>
+        private readonly struct LegacyHistoryKey : IEquatable<LegacyHistoryKey>
+        {
+            public readonly int PawnThingIDNumber;
+            public readonly string HediffDefName;
+            public readonly string BodyPartLabel;
+
+            public LegacyHistoryKey(int pawnId, string defName, string partLabel)
+            {
+                PawnThingIDNumber = pawnId;
+                HediffDefName = defName ?? string.Empty;
+                BodyPartLabel = partLabel ?? string.Empty;
+            }
+
+            public LegacyHistoryKey(Pawn pawn, Hediff hediff)
+                : this(pawn.thingIDNumber, hediff.def.defName, hediff.Part?.Label)
+            {
+            }
+
+            public bool Equals(LegacyHistoryKey other)
+            {
+                return PawnThingIDNumber == other.PawnThingIDNumber
+                    && HediffDefName == other.HediffDefName
+                    && BodyPartLabel == other.BodyPartLabel;
+            }
+
+            public override bool Equals(object obj)
+            {
+                return obj is LegacyHistoryKey other && Equals(other);
+            }
+
+            public override int GetHashCode()
+            {
+                unchecked
+                {
+                    int hash = PawnThingIDNumber * 397;
+                    hash ^= HediffDefName != null ? HediffDefName.GetHashCode() : 0;
+                    hash = (hash * 397) ^ (BodyPartLabel != null ? BodyPartLabel.GetHashCode() : 0);
+                    return hash;
+                }
+            }
+        }
+
         public EternalHediffSeverityTracker()
         {
-            healingHistory = new Dictionary<HealingDictionaryKey, List<HealingAttempt>>();
             EternalLogger.Info("EternalHediffSeverityTracker initialized");
         }
 
         /// <summary>
-        /// Records a healing attempt for a hediff.
+        /// Records a healing attempt for a current hediff instance.
         /// </summary>
-        /// <param name="pawn">The pawn being healed</param>
-        /// <param name="hediff">The hediff being healed</param>
-        /// <param name="severityBefore">Severity before healing was applied</param>
-        /// <param name="severityAfter">Severity after healing was applied</param>
-        /// <param name="healingApplied">Amount of healing that was attempted</param>
-        public void RecordHealingAttempt(Pawn pawn, Hediff hediff, float severityBefore, float severityAfter, float healingApplied)
+        public void RecordHealingAttempt(
+            Pawn pawn,
+            Hediff hediff,
+            float severityBefore,
+            float severityAfter,
+            float healingApplied)
         {
-            if (pawn == null || hediff == null)
+            if (pawn == null || hediff?.def == null)
                 return;
 
             var key = new HealingDictionaryKey(pawn, hediff);
-
-            // Initialize tracking list if needed
-            if (!healingHistory.ContainsKey(key))
+            if (!healingHistory.TryGetValue(key, out var attempts))
             {
-                healingHistory[key] = new List<HealingAttempt>();
+                attempts = new List<HealingAttempt>();
+                healingHistory[key] = attempts;
             }
 
-            var attempts = healingHistory[key];
-
-            // Add new attempt
             attempts.Add(new HealingAttempt
             {
                 SeverityBefore = severityBefore,
                 SeverityAfter = severityAfter,
                 HealingApplied = healingApplied,
-                TickRecorded = Find.TickManager.TicksGame
+                TickRecorded = Find.TickManager?.TicksGame ?? 0
             });
 
-            // Keep only last N attempts (sliding window)
             if (attempts.Count > MAX_ATTEMPTS_TO_TRACK)
-            {
                 attempts.RemoveAt(0);
-            }
         }
 
         /// <summary>
-        /// Determines if a hediff is "stuck" at a minimum severity and should be forcibly removed.
-        /// A hediff is considered stuck if:
-        /// - Current severity is <= 0.01 (very low)
-        /// - Last 3 consecutive healing attempts resulted in no change or minimal change (less than 0.0001)
+        /// Determines whether a hediff is pinned at its minimum severity after repeated attempts.
         /// </summary>
-        /// <param name="pawn">The pawn with the hediff</param>
-        /// <param name="hediff">The hediff to check</param>
-        /// <returns>True if hediff is stuck and should be forcibly removed</returns>
         public bool IsHediffStuck(Pawn pawn, Hediff hediff)
         {
-            if (pawn == null || hediff == null)
+            if (pawn == null || hediff?.def == null)
                 return false;
 
-            // Check if severity is below threshold.
-            // def.minSeverity is the lowest value the Severity setter allows, so the
-            // "very low" band sits on top of that floor, not on absolute zero.
             float severityFloor = Math.Max(0f, hediff.def.minSeverity);
             if (hediff.Severity > severityFloor + SEVERITY_THRESHOLD)
                 return false;
 
-            var key = new HealingDictionaryKey(pawn, hediff);
-
-            // Check if we have tracking history
-            if (!healingHistory.ContainsKey(key))
+            if (!healingHistory.TryGetValue(new HealingDictionaryKey(pawn, hediff), out var attempts)
+                || attempts.Count < REQUIRED_STUCK_ATTEMPTS)
+            {
                 return false;
+            }
 
-            var attempts = healingHistory[key];
-
-            // Need at least REQUIRED_STUCK_ATTEMPTS to determine if truly stuck
-            if (attempts.Count < REQUIRED_STUCK_ATTEMPTS)
-                return false;
-
-            // Check the last N attempts to see if hediff is consistently stuck
             int stuckCount = 0;
-            for (int i = attempts.Count - 1; i >= Math.Max(0, attempts.Count - REQUIRED_STUCK_ATTEMPTS); i--)
+            for (int i = attempts.Count - 1;
+                 i >= Math.Max(0, attempts.Count - REQUIRED_STUCK_ATTEMPTS);
+                 i--)
             {
                 var attempt = attempts[i];
-
-                // Check if this attempt shows the hediff is stuck: healing was applied but
-                // severity didn't decrease meaningfully, OR it landed on the clamp floor
-                // (regen-oscillating hediffs show a "real" change yet never leave the floor)
                 bool pinnedAtFloor = attempt.SeverityAfter <= severityFloor + MIN_CHANGE_THRESHOLD;
-                if (attempt.HealingApplied > 0f && (attempt.SeverityChange < MIN_CHANGE_THRESHOLD || pinnedAtFloor))
+                if (attempt.HealingApplied > 0f
+                    && (attempt.SeverityChange < MIN_CHANGE_THRESHOLD || pinnedAtFloor))
                 {
                     stuckCount++;
                 }
                 else
                 {
-                    // If any recent attempt was NOT stuck, hediff is not considered stuck
                     break;
                 }
             }
 
-            // Hediff is stuck if all last N attempts were stuck
             if (stuckCount >= REQUIRED_STUCK_ATTEMPTS)
             {
-                EternalLogger.Info($"Detected stuck hediff after {stuckCount} attempts: {hediff.def.defName} " +
-                    $"(Severity: {hediff.Severity:F4}, Last Change: {attempts[attempts.Count - 1].SeverityChange:F4})");
+                EternalLogger.Info($"Detected stuck hediff after {stuckCount} attempts: "
+                    + $"{hediff.def.defName} (Severity: {hediff.Severity:F4})");
                 return true;
             }
 
@@ -164,125 +173,372 @@ namespace Eternal
         }
 
         /// <summary>
-        /// Clears tracking data for a specific pawn.
-        /// PERF-04: Uses integer PawnThingIDNumber comparison instead of string.StartsWith prefix scan.
+        /// Removes history keys that are not present in the current live HediffSet. Legacy rows
+        /// are resolved only when one serialized row maps to one current candidate.
         /// </summary>
-        /// <param name="pawn">The pawn to clear tracking for</param>
+        public void ReconcileLiveHealth(
+            Pawn pawn,
+            IEnumerable<Hediff> currentHediffs,
+            ISet<HealingDictionaryKey> currentKeys)
+        {
+            if (pawn == null)
+                return;
+
+            var liveHediffs = new List<Hediff>();
+            if (currentHediffs != null)
+            {
+                foreach (var hediff in currentHediffs)
+                {
+                    try
+                    {
+                        if (hediff?.def != null)
+                            liveHediffs.Add(hediff);
+                    }
+                    catch (Exception ex)
+                    {
+                        EternalLogger.Error($"Failed to inspect hediff during live history reconciliation for "
+                            + $"pawn {pawn.thingIDNumber}: {ex.Message}");
+                    }
+                }
+            }
+
+            MigrateLegacyEntries(pawn, liveHediffs);
+
+            var staleKeys = new List<HealingDictionaryKey>();
+            foreach (var key in healingHistory.Keys)
+            {
+                if (key.PawnThingIDNumber == pawn.thingIDNumber
+                    && (currentKeys == null || !currentKeys.Contains(key)))
+                {
+                    staleKeys.Add(key);
+                }
+            }
+
+            foreach (var staleKey in staleKeys)
+                healingHistory.Remove(staleKey);
+        }
+
+        /// <summary>
+        /// Clears tracking data for a specific pawn.
+        /// </summary>
         public void ClearPawnTracking(Pawn pawn)
         {
             if (pawn == null)
                 return;
 
-            int pawnId = pawn.thingIDNumber;
-            var keysToRemove = new List<HealingDictionaryKey>();
-
-            foreach (var key in healingHistory.Keys)
-            {
-                if (key.PawnThingIDNumber == pawnId)
-                {
-                    keysToRemove.Add(key);
-                }
-            }
-
-            foreach (var key in keysToRemove)
-            {
-                healingHistory.Remove(key);
-            }
-
-            if (keysToRemove.Count > 0)
-            {
-                EternalLogger.Debug($"Cleared tracking for pawn {pawnId}: {keysToRemove.Count} hediffs");
-            }
+            ClearPawnTrackingById(pawn.thingIDNumber);
         }
 
         /// <summary>
-        /// Clears tracking data for a pawn identified by its integer ID.
-        /// Used by sweep callers that hold only a pawn ID, not a live Pawn reference.
+        /// Clears tracking data for a pawn identified by its persistent integer ID.
         /// </summary>
-        /// <param name="pawnId">The ThingIDNumber of the pawn to clear tracking for</param>
         public void ClearPawnTrackingById(int pawnId)
         {
             var keysToRemove = new List<HealingDictionaryKey>();
-
             foreach (var key in healingHistory.Keys)
             {
                 if (key.PawnThingIDNumber == pawnId)
-                {
                     keysToRemove.Add(key);
-                }
             }
 
             foreach (var key in keysToRemove)
-            {
                 healingHistory.Remove(key);
+
+            var legacyKeysToRemove = new List<LegacyHistoryKey>();
+            foreach (var key in legacyHistory.Keys)
+            {
+                if (key.PawnThingIDNumber == pawnId)
+                    legacyKeysToRemove.Add(key);
             }
 
-            if (keysToRemove.Count > 0)
-            {
-                EternalLogger.Debug($"Cleared severity tracking for stale pawn ID {pawnId}: {keysToRemove.Count} entries");
-            }
+            foreach (var key in legacyKeysToRemove)
+                legacyHistory.Remove(key);
         }
 
         /// <summary>
-        /// Clears tracking data for a specific hediff on a pawn.
+        /// Clears tracking data for one exact hediff instance.
         /// </summary>
-        /// <param name="pawn">The pawn</param>
-        /// <param name="hediff">The hediff to clear tracking for</param>
         public void ClearHediffTracking(Pawn pawn, Hediff hediff)
         {
             if (pawn == null || hediff == null)
                 return;
 
-            var key = new HealingDictionaryKey(pawn, hediff);
-            healingHistory.Remove(key);
+            healingHistory.Remove(new HealingDictionaryKey(pawn, hediff));
         }
 
-        /// <summary>
-        /// Clears all tracking data.
-        /// </summary>
         public void ClearAllTracking()
         {
-            int count = healingHistory.Count;
             healingHistory.Clear();
-            EternalLogger.Info($"Cleared all hediff severity tracking ({count} entries)");
+            legacyHistory.Clear();
+            EternalLogger.Info("Cleared all hediff severity tracking");
         }
 
+        public int TrackedCount => healingHistory.Count + LegacyEntryCount();
+
         /// <summary>
-        /// Performs periodic cleanup of old tracking entries.
-        /// Removes entries for hediffs that haven't been updated in a long time.
-        /// PERF-04: Iterates struct keys — no string allocation during cleanup.
+        /// Removes old attempt lists. Live reconciliation remains the authoritative removal path
+        /// for hediff replacement and direct HediffSet list manipulation.
         /// </summary>
-        /// <param name="maxAge">Maximum age in ticks before an entry is considered stale</param>
-        public void PerformPeriodicCleanup(int maxAge = 60000) // Default: 1 in-game day
+        public void PerformPeriodicCleanup(int maxAge = 60000)
         {
-            int currentTick = Find.TickManager.TicksGame;
+            int currentTick = Find.TickManager?.TicksGame ?? 0;
             var keysToRemove = new List<HealingDictionaryKey>();
 
-            foreach (var kvp in healingHistory)
+            foreach (var pair in healingHistory)
             {
-                if (kvp.Value.Count == 0)
+                if (pair.Value.Count == 0)
                 {
-                    keysToRemove.Add(kvp.Key);
+                    keysToRemove.Add(pair.Key);
                     continue;
                 }
 
-                // Check if the last attempt is too old
-                var lastAttempt = kvp.Value[kvp.Value.Count - 1];
+                var lastAttempt = pair.Value[pair.Value.Count - 1];
                 if (currentTick - lastAttempt.TickRecorded > maxAge)
-                {
-                    keysToRemove.Add(kvp.Key);
-                }
+                    keysToRemove.Add(pair.Key);
             }
 
             foreach (var key in keysToRemove)
-            {
                 healingHistory.Remove(key);
+        }
+
+        #region Serialization
+
+        /// <summary>
+        /// Persists attempt history with the instance-aware key. Rows without an ID remain
+        /// explicitly ambiguous until live reconciliation resolves or discards them.
+        /// </summary>
+        public void ExposeData()
+        {
+            if (Scribe.mode == LoadSaveMode.Saving)
+            {
+                var pawnIds = new List<int>();
+                var defNames = new List<string>();
+                var partLabels = new List<string>();
+                var hediffLoadIds = new List<int>();
+                var severityBefore = new List<float>();
+                var severityAfter = new List<float>();
+                var healingApplied = new List<float>();
+                var tickRecorded = new List<int>();
+
+                foreach (var pair in healingHistory)
+                {
+                    AddSerializedAttempts(pawnIds, defNames, partLabels, hediffLoadIds,
+                        severityBefore, severityAfter, healingApplied, tickRecorded,
+                        pair.Key.PawnThingIDNumber, pair.Key.HediffDefName,
+                        pair.Key.BodyPartLabel, pair.Key.HediffLoadID, pair.Value);
+                }
+
+                foreach (var pair in legacyHistory)
+                {
+                    AddSerializedAttempts(pawnIds, defNames, partLabels, hediffLoadIds,
+                        severityBefore, severityAfter, healingApplied, tickRecorded,
+                        pair.Key.PawnThingIDNumber, pair.Key.HediffDefName,
+                        pair.Key.BodyPartLabel, -1, pair.Value);
+                }
+
+                Scribe_Collections.Look(ref pawnIds, "history_pawnIds", LookMode.Value);
+                Scribe_Collections.Look(ref defNames, "history_defNames", LookMode.Value);
+                Scribe_Collections.Look(ref partLabels, "history_partLabels", LookMode.Value);
+                Scribe_Collections.Look(ref hediffLoadIds, "history_hediffLoadIds", LookMode.Value);
+                Scribe_Collections.Look(ref severityBefore, "history_severityBefore", LookMode.Value);
+                Scribe_Collections.Look(ref severityAfter, "history_severityAfter", LookMode.Value);
+                Scribe_Collections.Look(ref healingApplied, "history_healingApplied", LookMode.Value);
+                Scribe_Collections.Look(ref tickRecorded, "history_tickRecorded", LookMode.Value);
+                return;
             }
 
-            if (keysToRemove.Count > 0)
+            if (Scribe.mode != LoadSaveMode.LoadingVars)
+                return;
+
+            List<int> loadedPawnIds = null;
+            List<string> loadedDefNames = null;
+            List<string> loadedPartLabels = null;
+            List<int> loadedHediffLoadIds = null;
+            List<float> loadedSeverityBefore = null;
+            List<float> loadedSeverityAfter = null;
+            List<float> loadedHealingApplied = null;
+            List<int> loadedTickRecorded = null;
+
+            Scribe_Collections.Look(ref loadedPawnIds, "history_pawnIds", LookMode.Value);
+            Scribe_Collections.Look(ref loadedDefNames, "history_defNames", LookMode.Value);
+            Scribe_Collections.Look(ref loadedPartLabels, "history_partLabels", LookMode.Value);
+            Scribe_Collections.Look(ref loadedHediffLoadIds, "history_hediffLoadIds", LookMode.Value);
+            Scribe_Collections.Look(ref loadedSeverityBefore, "history_severityBefore", LookMode.Value);
+            Scribe_Collections.Look(ref loadedSeverityAfter, "history_severityAfter", LookMode.Value);
+            Scribe_Collections.Look(ref loadedHealingApplied, "history_healingApplied", LookMode.Value);
+            Scribe_Collections.Look(ref loadedTickRecorded, "history_tickRecorded", LookMode.Value);
+
+            healingHistory.Clear();
+            legacyHistory.Clear();
+
+            bool scalarListsValid = ListsMatch(
+                loadedPawnIds,
+                loadedDefNames,
+                loadedPartLabels,
+                loadedSeverityBefore,
+                loadedSeverityAfter,
+                loadedHealingApplied,
+                loadedTickRecorded);
+            bool identityListsValid = scalarListsValid
+                && loadedHediffLoadIds != null
+                && loadedHediffLoadIds.Count == loadedPawnIds.Count;
+
+            if (!scalarListsValid)
+                return;
+
+            for (int i = 0; i < loadedPawnIds.Count; i++)
             {
-                EternalLogger.Debug($"Periodic cleanup: Removed {keysToRemove.Count} stale tracking entries");
+                var attempt = new HealingAttempt
+                {
+                    SeverityBefore = loadedSeverityBefore[i],
+                    SeverityAfter = loadedSeverityAfter[i],
+                    HealingApplied = loadedHealingApplied[i],
+                    TickRecorded = loadedTickRecorded[i]
+                };
+
+                if (identityListsValid && loadedHediffLoadIds[i] >= 0)
+                {
+                    var key = new HealingDictionaryKey(
+                        loadedPawnIds[i],
+                        loadedDefNames[i],
+                        loadedPartLabels[i],
+                        loadedHediffLoadIds[i]);
+                    AddAttempt(healingHistory, key, attempt);
+                }
+                else
+                {
+                    var key = new LegacyHistoryKey(
+                        loadedPawnIds[i], loadedDefNames[i], loadedPartLabels[i]);
+                    AddAttempt(legacyHistory, key, attempt);
+                }
             }
+        }
+
+        #endregion
+
+        private void MigrateLegacyEntries(Pawn pawn, IList<Hediff> liveHediffs)
+        {
+            var candidatesByLegacyKey = new Dictionary<LegacyHistoryKey, List<Hediff>>();
+            foreach (var hediff in liveHediffs)
+            {
+                var legacyKey = new LegacyHistoryKey(pawn, hediff);
+                if (!candidatesByLegacyKey.TryGetValue(legacyKey, out var candidates))
+                {
+                    candidates = new List<Hediff>();
+                    candidatesByLegacyKey[legacyKey] = candidates;
+                }
+                candidates.Add(hediff);
+            }
+
+            var legacyKeysToRemove = new List<LegacyHistoryKey>();
+            foreach (var pair in legacyHistory)
+            {
+                if (pair.Key.PawnThingIDNumber != pawn.thingIDNumber)
+                    continue;
+
+                legacyKeysToRemove.Add(pair.Key);
+                if (pair.Value.Count == 0
+                    || !candidatesByLegacyKey.TryGetValue(pair.Key, out var candidates)
+                    || candidates.Count != 1)
+                {
+                    continue;
+                }
+
+                var liveKey = new HealingDictionaryKey(pawn, candidates[0]);
+                if (!healingHistory.ContainsKey(liveKey))
+                {
+                    healingHistory[liveKey] = pair.Value;
+                }
+            }
+
+            foreach (var key in legacyKeysToRemove)
+                legacyHistory.Remove(key);
+        }
+
+        private static void AddAttempt(
+            IDictionary<HealingDictionaryKey, List<HealingAttempt>> target,
+            HealingDictionaryKey key,
+            HealingAttempt attempt)
+        {
+            if (!target.TryGetValue(key, out var attempts))
+            {
+                attempts = new List<HealingAttempt>();
+                target[key] = attempts;
+            }
+            attempts.Add(attempt);
+        }
+
+        private static void AddAttempt(
+            IDictionary<LegacyHistoryKey, List<HealingAttempt>> target,
+            LegacyHistoryKey key,
+            HealingAttempt attempt)
+        {
+            if (!target.TryGetValue(key, out var attempts))
+            {
+                attempts = new List<HealingAttempt>();
+                target[key] = attempts;
+            }
+            attempts.Add(attempt);
+        }
+
+        private static void AddSerializedAttempts(
+            ICollection<int> pawnIds,
+            ICollection<string> defNames,
+            ICollection<string> partLabels,
+            ICollection<int> hediffLoadIds,
+            ICollection<float> severityBefore,
+            ICollection<float> severityAfter,
+            ICollection<float> healingApplied,
+            ICollection<int> tickRecorded,
+            int pawnId,
+            string defName,
+            string partLabel,
+            int hediffLoadId,
+            IEnumerable<HealingAttempt> attempts)
+        {
+            foreach (var attempt in attempts)
+            {
+                pawnIds.Add(pawnId);
+                defNames.Add(defName);
+                partLabels.Add(partLabel);
+                hediffLoadIds.Add(hediffLoadId);
+                severityBefore.Add(attempt.SeverityBefore);
+                severityAfter.Add(attempt.SeverityAfter);
+                healingApplied.Add(attempt.HealingApplied);
+                tickRecorded.Add(attempt.TickRecorded);
+            }
+        }
+
+        private static bool ListsMatch(
+            IList<int> pawnIds,
+            IList<string> defNames,
+            IList<string> partLabels,
+            IList<float> severityBefore,
+            IList<float> severityAfter,
+            IList<float> healingApplied,
+            IList<int> tickRecorded)
+        {
+            return pawnIds != null
+                && defNames != null
+                && partLabels != null
+                && severityBefore != null
+                && severityAfter != null
+                && healingApplied != null
+                && tickRecorded != null
+                && pawnIds.Count == defNames.Count
+                && pawnIds.Count == partLabels.Count
+                && pawnIds.Count == severityBefore.Count
+                && pawnIds.Count == severityAfter.Count
+                && pawnIds.Count == healingApplied.Count
+                && pawnIds.Count == tickRecorded.Count;
+        }
+
+        private int LegacyEntryCount()
+        {
+            int count = 0;
+            foreach (var attempts in legacyHistory.Values)
+                count += attempts.Count;
+            return count;
         }
     }
 }

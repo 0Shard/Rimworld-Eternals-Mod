@@ -1,6 +1,6 @@
 // Relative Path: Eternal/Source/Eternal/UI/Settings/SettingsDrawer.cs
 // Creation Date: 01-01-2025
-// Last Edit: 13-07-2026
+// Last Edit: 16-07-2026
 // Author: 0Shard
 // Description: UI drawing methods for Eternal mod settings. Features tab-based layout,
 //              13-07: Thresholds tab also lists healing-eligible staged debuffs that BYPASS
@@ -9,7 +9,7 @@
 //              12-07: Added Thresholds tab — live per-pawn list of threshold-gated hediffs
 //              (severity/threshold, Waiting/Healing/Not-rolled status); replaces the removed
 //              Eternal Essence tooltip threshold lines.
-//              10-07: Status tab nutrition formulas now include severityToNutritionRatio (were 250x off vs engine).
+//              16-07: Settings controls, bounds, warnings, previews, and tab heights use the catalog.
 //              11-07: Regrowth status rows are HP-scaled for a reference arm (30 HP); added full-arm
 //              regrowth cost row; default healing rate is 1.2 (Apex pacing).
 //              11-07: DiseaseHealTime uses DEBUFF_RATE_FACTOR (0.01, Immortals parity) — the old
@@ -336,8 +336,6 @@ namespace Eternal.UI.Settings
 
             listing.End();
             Widgets.EndScrollView();
-
-            SettingsValidator.ValidateSettings(settings);
         }
 
         /// <summary>
@@ -449,12 +447,19 @@ namespace Eternal.UI.Settings
         {
             DrawSectionHeader(listing, "General", () => settings.ResetGeneralSettings());
 
-            CheckboxLabeledWithTooltip(listing, "Enable Eternal Mod", ref settings.modEnabled,
-                "Master switch to enable or disable all Eternal mod features.");
-            CheckboxLabeledWithTooltip(listing, "Debug Mode", ref settings.debugMode,
-                "Enable debug mode for detailed logging and diagnostic information.");
-            SliderWithInlineEditInt(listing, "Logging Level", ref settings.loggingLevel, 0, 3,
-                "Set logging verbosity:\n\n• 0 = Errors only\n• 1 = Warnings (default)\n• 2 = Info\n• 3 = Debug (very verbose)");
+            SliderWithInlineEditInt(
+                listing,
+                "Logging Level",
+                ref settings.loggingLevel,
+                SettingsDefaults.LoggingLevelMin,
+                SettingsDefaults.LoggingLevelMax,
+                "Set logging verbosity:\n\n" +
+                $"• {SettingsDefaults.LoggingLevelError} = {SettingsDefaults.LoggingLevelLabels[SettingsDefaults.LoggingLevelError]}\n" +
+                $"• {SettingsDefaults.LoggingLevelWarning} = {SettingsDefaults.LoggingLevelLabels[SettingsDefaults.LoggingLevelWarning]}\n" +
+                $"• {SettingsDefaults.LoggingLevelInfo} = {SettingsDefaults.LoggingLevelLabels[SettingsDefaults.LoggingLevelInfo]}\n" +
+                $"• {SettingsDefaults.LoggingLevelDebug} = {SettingsDefaults.LoggingLevelLabels[SettingsDefaults.LoggingLevelDebug]}");
+            DrawPreviewLabel(listing,
+                $"Debug Mode: {(settings.DebugMode ? "On" : "Off")} ({SettingsDefaults.GetLoggingLevelLabel(settings.loggingLevel)})");
 
             listing.GapLine();
         }
@@ -468,13 +473,12 @@ namespace Eternal.UI.Settings
 
             // Live preview for healing rate - shows in-game time and cost
             DrawPreviewLabel(listing, SettingsPreview.HealingTime(settings.baseHealingRate, settings.normalTickRate));
-            DrawPreviewLabel(listing, $"A severity 50 wound costs {50f * settings.severityToNutritionRatio * settings.nutritionCostMultiplier:F2} nutrition");
+            DrawPreviewLabel(listing,
+                $"A severity 50 wound costs {50f * SettingsDefaults.SeverityToNutritionRatio * settings.nutritionCostMultiplier:F2} nutrition");
 
             listing.Gap();
-            CheckboxLabeledWithTooltip(listing, "Show Regrowth Effects", ref settings.showRegrowthEffects,
-                "Display visual effects during body part regrowth.");
-            CheckboxLabeledWithTooltip(listing, "Show Regrowth Progress", ref settings.showRegrowthProgress,
-                "Show progress bars and notifications for ongoing regrowth.");
+            CheckboxLabeledWithTooltip(listing, "Show Eternal Power Label", ref settings.showEternalPowerLabel,
+                "Show the Eternal Power value on the Essence hediff in the Health tab.");
 
             listing.GapLine();
         }
@@ -489,14 +493,20 @@ namespace Eternal.UI.Settings
             // Tooltip for healing rate
             string tooltip = "Severity reduced per healing tick.\n\n" +
                 $"Cost formula: {SettingsDefaults.GetSeverityToNutritionRatioDisplay()} (severity : nutrition)\n\n" +
-                "• 0.01 = Very slow\n" +
+                $"• {SettingsDefaults.BaseHealingRateMin:F2} = Very slow\n" +
                 "• 0.5 = Moderate\n" +
-                "• 1.2 = Apex pacing (default)\n" +
-                "• 3.0 = Very fast\n\n" +
+                $"• {SettingsDefaults.BaseHealingRate:F1} = Apex pacing (default)\n" +
+                $"• {SettingsDefaults.BaseHealingRateMax:F1} = Very fast\n\n" +
                 "Individual hediffs can override this.";
 
             // Use the working SliderWithInlineEdit pattern
-            SliderWithInlineEdit(listing, "Base Healing Rate", ref healingRate, 0.01f, 3.0f, tooltip);
+            SliderWithInlineEdit(
+                listing,
+                "Base Healing Rate",
+                ref healingRate,
+                SettingsDefaults.BaseHealingRateMin,
+                SettingsDefaults.BaseHealingRateMax,
+                tooltip);
 
             // Display cost ratio on separate line
             Text.Font = GameFont.Tiny;
@@ -510,17 +520,13 @@ namespace Eternal.UI.Settings
         {
             DrawSectionHeader(listing, "Resources", () => settings.ResetResourceSettings());
 
-            SliderWithInlineEdit(listing, "Nutrition Cost Multiplier", ref settings.nutritionCostMultiplier, 0.1f, 5.0f,
-                "Multiplier for nutrition cost of healing and regrowth.\n1.0 = normal cost, 2.0 = twice as expensive.");
-
-            CheckboxLabeledWithTooltip(listing, "Pause on Resource Depletion", ref settings.pauseOnResourceDepletion,
-                "Automatically pause healing when nutrition drops below threshold.");
-
-            SliderWithInlineEdit(listing, "Min Nutrition Threshold", ref settings.minimumNutritionThreshold, 0.01f, 1.0f,
-                "Minimum nutrition level before pausing healing/regrowth.");
-
-            CheckboxLabeledWithTooltip(listing, "Allow Resource Borrowing", ref settings.allowResourceBorrowing,
-                "Allow pawns to temporarily go into food debt for critical healing.");
+            SliderWithInlineEdit(
+                listing,
+                "Nutrition Cost Multiplier",
+                ref settings.nutritionCostMultiplier,
+                SettingsDefaults.NutritionCostMultiplierMin,
+                SettingsDefaults.NutritionCostMultiplierMax,
+                $"Multiplier for every healing nutrition cost.\n{SettingsDefaults.NutritionCostMultiplier:F1} = normal cost, 2.0 = twice as expensive.");
 
             listing.GapLine();
         }
@@ -533,26 +539,46 @@ namespace Eternal.UI.Settings
             DrawInfoBox(listing, "Healing drains food bar directly until threshold. Additional costs go to debt. Debt gradually drains food bar until repaid.");
 
             // Food drain threshold
-            SliderWithInlineEdit(listing, "Food Drain Threshold", ref settings.foodDrainThreshold, 0.05f, 0.5f,
+            SliderWithInlineEdit(
+                listing,
+                "Food Drain Threshold",
+                ref settings.foodDrainThreshold,
+                SettingsDefaults.FoodDrainThresholdMin,
+                SettingsDefaults.FoodDrainThresholdMax,
                 "Food level below which healing costs go to debt instead of draining food.\n\n" +
-                "• 0.15 = UrgentlyHungry level (default)\n• 0.25 = Hungry level\n• 0.05 = Nearly starving\n\n" +
+                $"• {SettingsDefaults.FoodDrainThreshold:F2} = UrgentlyHungry level (default)\n" +
+                "• 0.25 = Hungry level\n• 0.05 = Nearly starving\n\n" +
                 "Protects pawns from starving during healing.");
             DrawPreviewLabel(listing, $"Stop draining at {settings.foodDrainThreshold * 100:F0}% food");
 
             listing.Gap();
 
             // Max debt multiplier
-            SliderWithInlineEdit(listing, "Max Debt Multiplier", ref settings.maxDebtMultiplier, 1.0f, 10.0f,
+            SliderWithInlineEdit(
+                listing,
+                "Max Debt Multiplier",
+                ref settings.maxDebtMultiplier,
+                SettingsDefaults.MaxDebtMultiplierMin,
+                SettingsDefaults.MaxDebtMultiplierMax,
                 "Maximum debt as a multiplier of pawn's nutrition capacity.\n\n" +
-                "• 5.0 = Default (can owe 5 meals worth)\n• 2.0 = Conservative\n• 10.0 = Very generous");
+                $"• {SettingsDefaults.MaxDebtMultiplier:F1} = Default (can owe 5 meals worth)\n" +
+                "• 2.0 = Conservative\n" +
+                $"• {SettingsDefaults.MaxDebtMultiplierMax:F1} = Very generous");
             DrawPreviewLabel(listing, $"Max debt: {settings.maxDebtMultiplier:F0}× nutrition capacity");
 
             listing.Gap();
             DrawSubsectionLabel(listing, "Debt Repayment (Food-Bar Drain)");
 
-            SliderWithInlineEdit(listing, "Repayment Days", ref settings.debtRepaymentDays, 0.25f, 5.0f,
+            SliderWithInlineEdit(
+                listing,
+                "Repayment Days",
+                ref settings.debtRepaymentDays,
+                SettingsDefaults.DebtRepaymentDaysMin,
+                SettingsDefaults.DebtRepaymentDaysMax,
                 "In-game days a debt fully repays over via the food-bar drain (given enough food).\n\n" +
-                "• 1.0 = Any debt repaid within a day (default)\n• 0.25 = Very fast (quarter day)\n• 5.0 = Slow burn\n\n" +
+                $"• {SettingsDefaults.DebtRepaymentDays:F1} = Any debt repaid within a day (default)\n" +
+                $"• {SettingsDefaults.DebtRepaymentDaysMin:F2} = Very fast (quarter day)\n" +
+                $"• {SettingsDefaults.DebtRepaymentDaysMax:F1} = Slow burn\n\n" +
                 "The drain never pulls the food bar below the Food Drain Threshold.", 2);
             DrawPreviewLabel(listing, $"Full repayment in {settings.debtRepaymentDays:F2} day(s) with food available");
 
@@ -563,14 +589,24 @@ namespace Eternal.UI.Settings
         {
             DrawSectionHeader(listing, "Performance", () => settings.ResetPerformanceSettings());
 
-            SliderWithInlineEditInt(listing, "Normal Tick Rate", ref settings.normalTickRate, 30, 250,
-                "Ticks between healing checks for injuries.\n\n• Lower = faster healing, more CPU\n• Higher = slower healing, better performance\n\n60 ticks ≈ 1 second. Default: 60");
+            SliderWithInlineEditInt(
+                listing,
+                "Normal Tick Rate",
+                ref settings.normalTickRate,
+                SettingsDefaults.NormalTickRateMin,
+                SettingsDefaults.NormalTickRateMax,
+                $"Ticks between healing checks for injuries.\n\n• Lower = faster healing, more CPU\n• Higher = slower healing, better performance\n\n60 ticks ≈ 1 second. Default: {SettingsDefaults.NormalTickRate}");
 
             // Live preview for normal tick rate
             DrawPreviewLabel(listing, SettingsPreview.TickInterval(settings.normalTickRate));
 
-            SliderWithInlineEditInt(listing, "Rare Tick Rate", ref settings.rareTickRate, 100, 1000,
-                "Ticks between regrowth/scar healing checks.\n\n• Lower = faster regrowth, more CPU\n• Higher = slower regrowth, better performance\n\n250 ticks ≈ 4 seconds. Default: 250");
+            SliderWithInlineEditInt(
+                listing,
+                "Rare Tick Rate",
+                ref settings.rareTickRate,
+                SettingsDefaults.RareTickRateMin,
+                SettingsDefaults.RareTickRateMax,
+                $"Ticks between regrowth/scar healing checks.\n\n• Lower = faster regrowth, more CPU\n• Higher = slower regrowth, better performance\n\n250 ticks ≈ 4 seconds. Default: {SettingsDefaults.RareTickRate}");
 
             // Live preview for rare tick rate
             DrawPreviewLabel(listing, SettingsPreview.TickInterval(settings.rareTickRate));
@@ -578,28 +614,44 @@ namespace Eternal.UI.Settings
             listing.Gap();
             DrawSubsectionLabel(listing, "System Check Intervals");
 
-            SliderWithInlineEditInt(listing, "Trait Check", ref settings.traitCheckInterval, 1000, 15000,
-                "How often to verify trait-hediff consistency.\n5000 = default (~83 seconds)");
-            SliderWithInlineEditInt(listing, "Corpse Check", ref settings.corpseCheckInterval, 250, 5000,
-                "How often to check corpse preservation.\n1000 = default (~17 seconds)");
-            SliderWithInlineEditInt(listing, "Map Check", ref settings.mapCheckInterval, 100, 2000,
-                "How often to check map protection.\n500 = default (~8 seconds)");
+            SliderWithInlineEditInt(
+                listing,
+                "Trait Check",
+                ref settings.traitCheckInterval,
+                SettingsDefaults.TraitCheckIntervalMin,
+                SettingsDefaults.TraitCheckIntervalMax,
+                $"How often to verify trait-hediff consistency.\n{SettingsDefaults.TraitCheckInterval} = default (~83 seconds)");
+            SliderWithInlineEditInt(
+                listing,
+                "Corpse Check",
+                ref settings.corpseCheckInterval,
+                SettingsDefaults.CorpseCheckIntervalMin,
+                SettingsDefaults.CorpseCheckIntervalMax,
+                $"How often to check corpse preservation.\n{SettingsDefaults.CorpseCheckInterval} = default (~17 seconds)");
+            SliderWithInlineEditInt(
+                listing,
+                "Map Check",
+                ref settings.mapCheckInterval,
+                SettingsDefaults.MapCheckIntervalMin,
+                SettingsDefaults.MapCheckIntervalMax,
+                $"Fallback interval for map protection checks.\n{SettingsDefaults.MapCheckInterval} = default (~83 seconds)");
+            SliderWithInlineEditInt(
+                listing,
+                "Healing History Sweep",
+                ref settings.healingHistorySweepInterval,
+                SettingsDefaults.HealingHistorySweepIntervalMin,
+                SettingsDefaults.HealingHistorySweepIntervalMax,
+                $"How often stale healing history is removed.\n{SettingsDefaults.HealingHistorySweepInterval} = default (~5 in-game days)");
 
             listing.GapLine();
         }
 
         private void DrawAdvancedHediffSettings(Listing_Standard listing)
         {
-            DrawSectionHeader(listing, "Advanced Hediff Healing", () => settings.ResetAdvancedHediffSettings());
+            DrawSectionHeaderNoReset(listing, "Hediff Healing");
 
-            CheckboxLabeledWithTooltip(listing, "Enable Individual Hediff Control", ref settings.enableIndividualHediffControl,
-                "Enable per-hediff configuration system for fine-grained healing control.");
-            CheckboxLabeledWithTooltip(listing, "Auto-heal on Resurrection", ref settings.autoHealEnabled,
-                "Automatically heal configured hediffs when Eternal pawns resurrect.");
-
-            listing.Gap();
-
-            // Show hediff manager summary
+            // Per-hediff settings are always available; there is no separate enable toggle.
+            // Show the manager summary
             // configuredCount = hediffs with custom settings, totalCount = all hediffs in game
             int configuredCount = settings.hediffManager?.GetConfiguredCount() ?? 0;
             int totalCount = settings.hediffManager?.GetTotalCount() ?? 0;
@@ -634,8 +686,13 @@ namespace Eternal.UI.Settings
             CheckboxLabeledWithTooltip(listing, "Enable Map Protection", ref settings.enableMapAnchors,
                 "Prevents temporary maps from closing when Eternal pawns die.\nRequired for resurrection on temporary maps.");
 
-            SliderWithInlineEditInt(listing, "Protection Duration", ref settings.anchorGracePeriodTicks, 60, 1200,
-                "How long to keep temporary maps open after Eternal pawn resurrection.\n\n• 60 = 1 second (minimum)\n• 300 = 5 seconds (default)\n• 1200 = 20 seconds (maximum)");
+            SliderWithInlineEditInt(
+                listing,
+                "Protection Duration",
+                ref settings.anchorGracePeriodTicks,
+                SettingsDefaults.AnchorGracePeriodTicksMin,
+                SettingsDefaults.AnchorGracePeriodTicksMax,
+                $"How long to keep temporary maps open after Eternal pawn resurrection.\n\n• {SettingsDefaults.AnchorGracePeriodTicksMin} = 1 second (minimum)\n• {SettingsDefaults.AnchorGracePeriodTicks} = 5 seconds (default)\n• {SettingsDefaults.AnchorGracePeriodTicksMax} = 1 minute (maximum)");
 
             // Live preview for protection duration
             DrawPreviewLabel(listing, SettingsPreview.MapProtection(settings.anchorGracePeriodTicks));
@@ -674,15 +731,15 @@ namespace Eternal.UI.Settings
             // Section 2: Nutrition Costs
             DrawSectionHeaderNoReset(listing, "Nutrition Costs");
             DrawStatusRow(listing, "Per normal tick",
-                StatusCalculator.NormalTickCost(settings.baseHealingRate, settings.nutritionCostMultiplier, settings.severityToNutritionRatio));
+                StatusCalculator.NormalTickCost(settings.baseHealingRate, settings.nutritionCostMultiplier, SettingsDefaults.SeverityToNutritionRatio));
             DrawStatusRow(listing, "Per rare tick",
-                StatusCalculator.RareTickCost(settings.baseHealingRate, settings.nutritionCostMultiplier, settings.severityToNutritionRatio));
+                StatusCalculator.RareTickCost(settings.baseHealingRate, settings.nutritionCostMultiplier, SettingsDefaults.SeverityToNutritionRatio));
             DrawStatusRow(listing, "Full injury heal",
-                StatusCalculator.FullInjuryCost(settings.nutritionCostMultiplier, settings.severityToNutritionRatio));
+                StatusCalculator.FullInjuryCost(settings.nutritionCostMultiplier, SettingsDefaults.SeverityToNutritionRatio));
             DrawStatusRow(listing, "Full scar heal",
-                StatusCalculator.FullScarCost(settings.nutritionCostMultiplier, settings.severityToNutritionRatio));
+                StatusCalculator.FullScarCost(settings.nutritionCostMultiplier, SettingsDefaults.SeverityToNutritionRatio));
             DrawStatusRow(listing, "Full arm regrowth",
-                StatusCalculator.FullLimbRegrowthCost(settings.nutritionCostMultiplier, settings.severityToNutritionRatio));
+                StatusCalculator.FullLimbRegrowthCost(settings.nutritionCostMultiplier, SettingsDefaults.SeverityToNutritionRatio));
             DrawStatusRow(listing, "Full resurrection",
                 StatusCalculator.ResurrectionCost(humanNutritionCap));
 
@@ -695,9 +752,9 @@ namespace Eternal.UI.Settings
             DrawStatusRow(listing, $"Maximum debt (x{settings.maxDebtMultiplier:F0})",
                 StatusCalculator.MaxDebt(humanNutritionCap, settings.maxDebtMultiplier));
             DrawStatusRow(listing, "Can heal injuries",
-                StatusCalculator.InjuriesCoveredByDebt(maxDebt, settings.nutritionCostMultiplier, settings.severityToNutritionRatio));
+                StatusCalculator.InjuriesCoveredByDebt(maxDebt, settings.nutritionCostMultiplier, SettingsDefaults.SeverityToNutritionRatio));
             DrawStatusRow(listing, "Can heal scars",
-                StatusCalculator.ScarsCoveredByDebt(maxDebt, settings.nutritionCostMultiplier, settings.severityToNutritionRatio));
+                StatusCalculator.ScarsCoveredByDebt(maxDebt, settings.nutritionCostMultiplier, SettingsDefaults.SeverityToNutritionRatio));
 
         }
 
@@ -898,15 +955,20 @@ namespace Eternal.UI.Settings
 
             // --- Consciousness Buff ---
             DrawSectionHeader(listing, "Consciousness Buff", () => settings.ResetConsciousnessBuffSettings());
-            DrawInfoBox(listing, "Multiplies consciousness capacity for Eternal pawns. Minimum 1.0x ensures no debuff is possible.");
+            DrawInfoBox(listing,
+                $"Multiplies consciousness capacity for Eternal pawns. Minimum {SettingsDefaults.ConsciousnessMultiplierMin:F1}x ensures no debuff is possible.");
 
             CheckboxLabeledWithTooltip(listing, "Enable Consciousness Buff", ref settings.consciousnessBuffEnabled,
                 "Toggle the consciousness capacity multiplier for all Eternal pawns.");
 
             GUI.enabled = settings.consciousnessBuffEnabled;
-            SliderWithInlineEdit(listing, "Consciousness Multiplier",
-                ref settings.consciousnessMultiplier, 1.0f, 10.0f,
-                "Consciousness capacity multiplier. 3.0x = triple consciousness. Steps: 0.5x.");
+            SliderWithInlineEdit(
+                listing,
+                "Consciousness Multiplier",
+                ref settings.consciousnessMultiplier,
+                SettingsDefaults.ConsciousnessMultiplierMin,
+                SettingsDefaults.ConsciousnessMultiplierMax,
+                $"Consciousness capacity multiplier. {SettingsDefaults.ConsciousnessMultiplier:F1}x = triple consciousness. Steps: 0.5x.");
             if (settings.consciousnessBuffEnabled)
             {
                 // Round to nearest 0.5 step so slider snaps cleanly (1.0, 1.5, 2.0 ... 10.0)
@@ -922,9 +984,13 @@ namespace Eternal.UI.Settings
                 "Toggle the permanent mood bonus for all Eternal pawns.");
 
             GUI.enabled = settings.moodBuffEnabled;
-            SliderWithInlineEditInt(listing, "Mood Buff Value",
-                ref settings.moodBuffValue, 1, 200,
-                "Mood bonus amount. Default: 40. Higher values make Eternals happier.");
+            SliderWithInlineEditInt(
+                listing,
+                "Mood Buff Value",
+                ref settings.moodBuffValue,
+                SettingsDefaults.MoodBuffValueMin,
+                SettingsDefaults.MoodBuffValueMax,
+                $"Mood bonus amount. Default: {SettingsDefaults.MoodBuffValue}. Higher values make Eternals happier.");
             GUI.enabled = true;
 
             // --- Population Cap ---
@@ -938,8 +1004,12 @@ namespace Eternal.UI.Settings
             int currentCount = GetCurrentEternalCount();
             // Dynamic minimum: cannot set cap below current Eternal count when a game is loaded
             int sliderMin = Math.Max(1, currentCount);
-            SliderWithInlineEditInt(listing, "Maximum Eternals",
-                ref settings.populationCap, sliderMin, 30,
+            SliderWithInlineEditInt(
+                listing,
+                "Maximum Eternals",
+                ref settings.populationCap,
+                sliderMin,
+                SettingsDefaults.PopulationCapMax,
                 "Maximum number of Eternals allowed. Cannot be set below current count.");
             GUI.enabled = true;
 
@@ -1281,11 +1351,11 @@ namespace Eternal.UI.Settings
         {
             float height = 0f;
 
-            // General Settings (header + 3 controls + gap)
-            height += 40f + 30f + 30f + 50f + 20f;
+            // General Settings (header + logging slider + derived debug preview + gap)
+            height += 40f + 50f + 30f + 20f;
 
-            // Healing Settings (header + slider + preview + gap + 2 checkboxes + gap)
-            height += 40f + 70f + 20f + 10f + 30f + 30f + 20f;
+            // Healing Settings (header + rate/ratio + two previews + label toggle + gap)
+            height += 40f + 70f + 40f + 30f + 20f;
 
             // Padding
             height += 30f;
@@ -1297,11 +1367,11 @@ namespace Eternal.UI.Settings
         {
             float height = 0f;
 
-            // Resource Settings (header + slider + checkbox + slider + checkbox + gap)
-            height += 40f + 50f + 30f + 50f + 30f + 20f;
+            // Resource Settings (header + global multiplier + gap)
+            height += 40f + 50f + 20f;
 
-            // Food Debt Settings (header + info box + slider + preview + slider + preview + gap)
-            height += 40f + 50f + 70f + 20f + 10f + 70f + 20f + 20f;
+            // Food Debt Settings (header + info + threshold/max/repayment sliders and previews)
+            height += 40f + 70f + 50f + 20f + 10f + 50f + 20f + 10f + 25f + 50f + 20f + 20f;
 
             // Padding
             height += 30f;
@@ -1313,8 +1383,8 @@ namespace Eternal.UI.Settings
         {
             float height = 0f;
 
-            // Performance Settings (header + 2 sliders with previews + subsection + 3 sliders + gap)
-            height += 40f + 50f + 20f + 50f + 20f + 30f + 50f + 50f + 50f + 20f;
+            // Performance Settings (header + 2 sliders with previews + subsection + 4 interval sliders + gap)
+            height += 40f + 50f + 20f + 50f + 20f + 30f + 50f + 50f + 50f + 50f + 20f;
 
             // Padding
             height += 30f;
@@ -1326,8 +1396,8 @@ namespace Eternal.UI.Settings
         {
             float height = 0f;
 
-            // Advanced Hediff Healing (header + 2 checkboxes + summary + button + gap)
-            height += 40f + 30f + 30f + 10f + 25f + 35f + 20f;
+            // Hediff Healing (header + summary + button + gap)
+            height += 40f + 10f + 25f + 35f + 20f;
 
             // Map Protection Settings (header + info box + checkbox + slider + preview + gap + subsection + checkbox)
             height += 40f + 50f + 30f + 50f + 20f + 10f + 20f + 30f;

@@ -1,6 +1,6 @@
 // Relative Path: Eternal/Source/Eternal/UI/HediffSettings/EternalHediffView.cs
 // Creation Date: 09-11-2025
-// Last Edit: 12-07-2026
+// Last Edit: 16-07-2026
 // Author: 0Shard
 // Description: View layer for hediff settings UI. Pure UI rendering, delegates to Presenter.
 //              12-07: Advanced/Bulk tab visual cleanup — capped CheckboxLabeled widths (toggle
@@ -11,7 +11,7 @@
 //              SIMPLIFIED: Single compact row per hediff with only 3 options:
 //              - Heal toggle
 //              - Healing rate slider + input
-//              - Nutrition cost slider + input
+//              - Threshold-aware healing controls
 //              Per-hediff and global reset buttons.
 //              PERF-02: Render loop uses GetFilteredHediffsCached() instead of per-frame scan.
 
@@ -37,6 +37,7 @@ namespace Eternal.UI.HediffSettings
         private const float FILTER_HEIGHT = 180f;
         private const float TAB_HEIGHT = 30f;
         private const float ENTRY_HEIGHT = 36f;  // Compact single row
+        private const float CHECKBOX_ROW_WIDTH = 280f;
 
         public EternalHediffView(EternalHediffManager manager)
         {
@@ -86,9 +87,6 @@ namespace Eternal.UI.HediffSettings
                     DrawGeneralTabContent(contentRect);
                     break;
                 case 1:
-                    DrawAdvancedTabContent(contentRect);
-                    break;
-                case 2:
                     DrawBulkTabContent(contentRect);
                     break;
             }
@@ -484,7 +482,7 @@ namespace Eternal.UI.HediffSettings
                 curX += 25f;  // Keep alignment consistent
             }
 
-            // Healing rate slider + input (range: 0.0001 - 0.1)
+            // Healing rate slider + input (range comes from SettingsDefaults).
             float rateSliderWidth = 180f;
             Rect rateRect = new Rect(curX, centerY - 2f, rateSliderWidth, 28f);
             float displayRate = setting.HasCustomHealingRate
@@ -493,29 +491,22 @@ namespace Eternal.UI.HediffSettings
             // Show "G:" prefix for global rate, rate value with 4 decimals
             string rateLabel = setting.HasCustomHealingRate ? $"{displayRate:F4}" : $"G:{displayRate:F4}";
             string rateTooltip = setting.HasCustomHealingRate
-                ? $"Custom rate: {displayRate:F4} (overrides global)\nCost: 250 severity = 1 nutrition"
-                : $"Using global rate: {displayRate:F4}\nCost: 250 severity = 1 nutrition";
+                ? $"Custom rate: {displayRate:F4} (overrides global)\nCost: {SettingsDefaults.GetSeverityToNutritionRatioDisplay()} severity = 1 nutrition"
+                : $"Using global rate: {displayRate:F4}\nCost: {SettingsDefaults.GetSeverityToNutritionRatioDisplay()} severity = 1 nutrition";
 
-            float newRate = DrawCompactSliderWithInput(rateRect, displayRate, 0.0001f, 0.1f, rateLabel, rateTooltip);
+            float newRate = DrawCompactSliderWithInput(
+                rateRect,
+                displayRate,
+                SettingsDefaults.HediffHealingRateMin,
+                SettingsDefaults.HediffHealingRateMax,
+                rateLabel,
+                rateTooltip);
             if (Math.Abs(newRate - displayRate) > 0.00001f)
             {
                 setting.healingRate = newRate;
                 presenter.NotifyHediffSettingChanged();
             }
             curX += rateSliderWidth + 10f;
-
-            // Nutrition cost slider + input
-            float nutritionSliderWidth = 140f;
-            Rect nutritionRect = new Rect(curX, centerY - 2f, nutritionSliderWidth, 28f);
-            string nutritionLabel = $"{setting.nutritionCostMultiplier:F1}x";
-            string nutritionTooltip = $"Nutrition cost multiplier: {setting.nutritionCostMultiplier:F2}x";
-
-            float newNutrition = DrawCompactSliderWithInput(nutritionRect, setting.nutritionCostMultiplier, 0.1f, 5f, nutritionLabel, nutritionTooltip);
-            if (Math.Abs(newNutrition - setting.nutritionCostMultiplier) > 0.01f)
-            {
-                setting.nutritionCostMultiplier = newNutrition;
-                presenter.NotifyHediffSettingChanged();
-            }
 
             // Reset button
             Rect resetRect = new Rect(rect.width - 35f, centerY, 30f, 24f);
@@ -569,35 +560,7 @@ namespace Eternal.UI.HediffSettings
 
         #endregion
 
-        #region Advanced Tab
 
-        /// <summary>Capped control width so CheckboxLabeled draws its toggle beside the label
-        /// instead of at the far right edge of a near-window-wide rect.</summary>
-        private const float CHECKBOX_ROW_WIDTH = 280f;
-
-        private void DrawAdvancedTabContent(Rect rect)
-        {
-            float curY = rect.y + 10f;
-
-            // Content-fitted background: paint only where the controls are, not the
-            // entire content rect (avoids a large empty gray box on this sparse tab).
-            Rect bgRect = new Rect(rect.x + 10f, curY, rect.width - 20f, 75f);
-            GUI.color = new Color(0.2f, 0.2f, 0.2f, 1f);
-            GUI.DrawTexture(bgRect, BaseContent.WhiteTex);
-            GUI.color = Color.white;
-
-            curY += 10f;
-            Widgets.Label(new Rect(rect.x + 20f, curY, rect.width - 40f, 25f), "Global Healing Settings:");
-            curY += 30f;
-
-            bool autoHeal = Eternal_Settings.instance.autoHealEnabled;
-            Rect autoHealRect = new Rect(rect.x + 20f, curY, CHECKBOX_ROW_WIDTH, 25f);
-            CheckboxLabeledWithTooltip(autoHealRect, "Auto-heal on Resurrection", ref autoHeal,
-                "Automatically heal configured hediffs when an Eternal pawn resurrects.");
-            Eternal_Settings.instance.autoHealEnabled = autoHeal;
-        }
-
-        #endregion
 
         #region Bulk Tab
 
@@ -690,7 +653,10 @@ namespace Eternal.UI.HediffSettings
             float templateSliderWidth = template.HasCustomHealingRate ? columnWidth - 70f : columnWidth - 20f;
             Rect healRateRect = new Rect(curX, curY, templateSliderWidth, 30f);
             float newTemplateRate = DrawSliderWithNumericInput(
-                healRateRect, templateRate, 0.001f, 0.1f,
+                healRateRect,
+                templateRate,
+                SettingsDefaults.HediffHealingRateMin,
+                SettingsDefaults.HediffHealingRateMax,
                 templateRateLabel,
                 "Template healing rate. When applied, this rate will override global for each hediff.");
 
@@ -722,11 +688,7 @@ namespace Eternal.UI.HediffSettings
                 "Template setting for scar removal.");
             curY += 25f;
 
-            Rect nutritionRect = new Rect(curX, curY, columnWidth - 20f, 30f);
-            template.nutritionCostMultiplier = DrawSliderWithNumericInput(
-                nutritionRect, template.nutritionCostMultiplier, 0.1f, 5f,
-                $"Nutrition: {template.nutritionCostMultiplier:F2}x",
-                "Template nutrition cost multiplier.");
+
         }
 
         #endregion

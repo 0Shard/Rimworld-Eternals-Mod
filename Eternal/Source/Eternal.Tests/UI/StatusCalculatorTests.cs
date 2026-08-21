@@ -1,6 +1,6 @@
 // Relative Path: Eternal/Source/Eternal.Tests/UI/StatusCalculatorTests.cs
 // Creation Date: 10-07-2026
-// Last Edit: 11-07-2026
+// Last Edit: 16-07-2026
 // Author: 0Shard
 // Description: Unit tests for StatusCalculator display formulas. Guards the Status tab
 //              against drifting from the engine again: nutrition costs must include
@@ -13,16 +13,17 @@
 //              the removed 0.1x low-maxSeverity multiplier.
 
 using Xunit;
+using Eternal;
 using Eternal.UI.Settings;
 
 namespace Eternal.Tests.UI
 {
     public class StatusCalculatorTests
     {
-        // Defaults: baseHealingRate 1.2, nutritionCostMultiplier 1.0, severityToNutritionRatio 0.004 (250:1)
-        private const float DefaultRate = 1.2f;
-        private const float DefaultMult = 1.0f;
-        private const float DefaultRatio = 0.004f;
+        // Defaults are sourced from the production catalog so UI formula tests cannot drift.
+        private const float DefaultRate = SettingsDefaults.BaseHealingRate;
+        private const float DefaultMult = SettingsDefaults.NutritionCostMultiplier;
+        private const float DefaultRatio = SettingsDefaults.SeverityToNutritionRatio;
 
         // -----------------------------------------------------------------
         // Nutrition costs — must apply the severity-to-nutrition ratio
@@ -69,19 +70,19 @@ namespace Eternal.Tests.UI
         public void InjuriesCoveredByDebt_AppliesRatio()
         {
             // maxDebt 5.0 / (1.0 × 0.004 × 1.0) = 1250 injuries (NOT ~5 — the pre-fix bug)
-            Assert.Equal("~1250 injuries", StatusCalculator.InjuriesCoveredByDebt(5.0f, DefaultMult, DefaultRatio));
+            Assert.Equal("~1250 injuries", StatusCalculator.InjuriesCoveredByDebt(SettingsDefaults.MaxDebtMultiplier, DefaultMult, DefaultRatio));
         }
 
         [Fact]
         public void InjuriesCoveredByDebt_ZeroCost_ReturnsUnlimited()
         {
-            Assert.Equal("unlimited", StatusCalculator.InjuriesCoveredByDebt(5.0f, DefaultMult, 0f));
+            Assert.Equal("unlimited", StatusCalculator.InjuriesCoveredByDebt(SettingsDefaults.MaxDebtMultiplier, DefaultMult, 0f));
         }
 
         [Fact]
         public void ScarsCoveredByDebt_AppliesRatio()
         {
-            Assert.Equal("~1250 scars", StatusCalculator.ScarsCoveredByDebt(5.0f, DefaultMult, DefaultRatio));
+            Assert.Equal("~1250 scars", StatusCalculator.ScarsCoveredByDebt(SettingsDefaults.MaxDebtMultiplier, DefaultMult, DefaultRatio));
         }
 
         // -----------------------------------------------------------------
@@ -93,7 +94,7 @@ namespace Eternal.Tests.UI
         {
             // cycles = 1 / (1.2 × 1.0 × 0.01) = 83.3 cycles × 60 ticks = 5000 ticks = 2 in-game hours
             // (Immortals parity: 0.0002 severity/tick)
-            Assert.Equal("~2.0 hours", StatusCalculator.DiseaseHealTime(DefaultRate, 60, 0));
+            Assert.Equal("~2.0 hours", StatusCalculator.DiseaseHealTime(DefaultRate, SettingsDefaults.NormalTickRate, 0));
         }
 
         [Fact]
@@ -101,8 +102,8 @@ namespace Eternal.Tests.UI
         {
             // Stage 3 (0.4x) must report a longer time than stage 0 (1.0x).
             // Compare via the underlying cycle math: both are minutes at defaults.
-            string stage0 = StatusCalculator.DiseaseHealTime(DefaultRate, 60, 0);
-            string stage3 = StatusCalculator.DiseaseHealTime(DefaultRate, 60, 3);
+            string stage0 = StatusCalculator.DiseaseHealTime(DefaultRate, SettingsDefaults.NormalTickRate, 0);
+            string stage3 = StatusCalculator.DiseaseHealTime(DefaultRate, SettingsDefaults.NormalTickRate, 3);
             Assert.NotEqual(stage0, stage3);
         }
 
@@ -114,14 +115,14 @@ namespace Eternal.Tests.UI
         public void FullLimbRegrowth_ReferenceArm_TakesAboutOneDay()
         {
             // 30 HP × 10 work/HP / 1.2 per pass = 250 passes × 250 ticks = 62500 ticks = 25 h ≈ 1.0 days
-            Assert.Equal("~1.0 days", StatusCalculator.FullLimbRegrowth(DefaultRate, 250));
+            Assert.Equal("~1.0 days", StatusCalculator.FullLimbRegrowth(DefaultRate, SettingsDefaults.RareTickRate));
         }
 
         [Fact]
         public void RegrowthPhaseTime_IsQuarterOfFullLimb()
         {
             // One phase spans 0.25 severity: 62.5 passes × 250 ticks = 15625 ticks = 6.25 h
-            Assert.Equal("~6.3 hours", StatusCalculator.RegrowthPhaseTime(DefaultRate, 250));
+            Assert.Equal("~6.3 hours", StatusCalculator.RegrowthPhaseTime(DefaultRate, SettingsDefaults.RareTickRate));
         }
 
         [Fact]
@@ -136,7 +137,7 @@ namespace Eternal.Tests.UI
         {
             // (1 / 1.2) × 250 ticks = 208 ticks ≈ 5 minutes — matches EternalScarHealing,
             // whose ScarCostCalculator normalizes healing by rareTickRate
-            Assert.Equal("~5 minutes", StatusCalculator.ScarHealTime(DefaultRate, 250));
+            Assert.Equal("~5 minutes", StatusCalculator.ScarHealTime(DefaultRate, SettingsDefaults.RareTickRate));
         }
     }
 }

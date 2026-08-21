@@ -1,17 +1,16 @@
 // Relative Path: Eternal/Source/Eternal/Settings/SettingsAdapter.cs
 // Creation Date: 29-12-2025
-// Last Edit: 12-07-2026
+// Last Edit: 16-07-2026
 // Author: 0Shard
-// Description: Adapter that wraps Eternal_Mod.settings to provide ISettingsProvider interface.
-//              Eliminates direct static dependencies on Eternal_Mod.settings throughout codebase.
+// Description: Adapter that wraps Eternal_Mod.settings at the active runtime boundary.
+//              Every fallback comes from the canonical SettingsDefaults catalog.
 
 using Eternal.Interfaces;
 
 namespace Eternal.Settings
 {
     /// <summary>
-    /// Adapter that provides ISettingsProvider access to Eternal_Settings.
-    /// Wraps the static Eternal_Mod.settings to enable constructor injection.
+    /// Provides constructor-injectable access to the active Eternal settings.
     /// </summary>
     public class SettingsAdapter : ISettingsProvider
     {
@@ -19,60 +18,48 @@ namespace Eternal.Settings
 
         #region General Settings
 
-        public bool ModEnabled => Settings?.modEnabled ?? true;
-        public bool DebugMode => Settings?.debugMode ?? false;
-        public int LoggingLevel => Settings?.loggingLevel ?? 1;
+        public bool DebugMode => Settings?.DebugMode ?? SettingsDefaults.DebugMode;
+        public int LoggingLevel => Settings?.loggingLevel ?? SettingsDefaults.LoggingLevel;
 
         #endregion
 
         #region Healing Settings
 
         public float BaseHealingRate => Settings?.baseHealingRate ?? SettingsDefaults.BaseHealingRate;
-        public bool ShowRegrowthEffects => Settings?.showRegrowthEffects ?? true;
-        public bool ShowRegrowthProgress => Settings?.showRegrowthProgress ?? true;
+        public bool ShowEternalPowerLabel => Settings?.showEternalPowerLabel ?? SettingsDefaults.ShowEternalPowerLabel;
 
         #endregion
 
-        #region Resource Settings
+        #region Nutrition Settings
 
-        public float NutritionCostMultiplier => Settings?.nutritionCostMultiplier ?? 1.0f;
-        public bool PauseOnResourceDepletion => Settings?.pauseOnResourceDepletion ?? true;
-        public float MinimumNutritionThreshold => Settings?.minimumNutritionThreshold ?? 0.1f;
-        public bool AllowResourceBorrowing => Settings?.allowResourceBorrowing ?? false;
+        public float NutritionCostMultiplier => Settings?.nutritionCostMultiplier ?? SettingsDefaults.NutritionCostMultiplier;
 
         #endregion
 
         #region Food Debt Settings
 
-        public float MaxDebtMultiplier => Settings?.maxDebtMultiplier ?? 5.0f;
-        public float FoodDrainThreshold => Settings?.foodDrainThreshold ?? 0.15f;
+        public float MaxDebtMultiplier => Settings?.maxDebtMultiplier ?? SettingsDefaults.MaxDebtMultiplier;
+        public float FoodDrainThreshold => Settings?.foodDrainThreshold ?? SettingsDefaults.FoodDrainThreshold;
         public float DebtRepaymentDays => Settings?.debtRepaymentDays ?? SettingsDefaults.DebtRepaymentDays;
-        public float SeverityToNutritionRatio => Settings?.severityToNutritionRatio ?? 0.004f;
 
         #endregion
 
         #region Performance Settings
 
-        public int NormalTickRate => Settings?.normalTickRate ?? 60;
-        public int RareTickRate => Settings?.rareTickRate ?? 250;
-        public int TraitCheckInterval => Settings?.traitCheckInterval ?? 5000;
-        public int CorpseCheckInterval => Settings?.corpseCheckInterval ?? 1000;
-        public int MapCheckInterval => Settings?.mapCheckInterval ?? 500;
-
-        #endregion
-
-        #region Advanced Settings
-
-        public bool EnableIndividualHediffControl => Settings?.enableIndividualHediffControl ?? true;
-        public bool AutoHealEnabled => Settings?.autoHealEnabled ?? true;
-        public HealingOrder HealingOrder => Settings?.healingOrder ?? HealingOrder.CheapestFirst;
+        public int NormalTickRate => Settings?.normalTickRate ?? SettingsDefaults.NormalTickRate;
+        public int RareTickRate => Settings?.rareTickRate ?? SettingsDefaults.RareTickRate;
+        public int TraitCheckInterval => Settings?.traitCheckInterval ?? SettingsDefaults.TraitCheckInterval;
+        public int CorpseCheckInterval => Settings?.corpseCheckInterval ?? SettingsDefaults.CorpseCheckInterval;
+        public int MapCheckInterval => Settings?.mapCheckInterval ?? SettingsDefaults.MapCheckInterval;
+        public int HealingHistorySweepInterval => Settings?.healingHistorySweepInterval
+            ?? SettingsDefaults.HealingHistorySweepInterval;
 
         #endregion
 
         #region Map Protection Settings
 
-        public bool EnableMapAnchors => Settings?.enableMapAnchors ?? true;
-        public int AnchorGracePeriodTicks => Settings?.anchorGracePeriodTicks ?? 300;
+        public bool EnableMapAnchors => Settings?.enableMapAnchors ?? SettingsDefaults.EnableMapAnchors;
+        public int AnchorGracePeriodTicks => Settings?.anchorGracePeriodTicks ?? SettingsDefaults.AnchorGracePeriodTicks;
 
         #endregion
     }

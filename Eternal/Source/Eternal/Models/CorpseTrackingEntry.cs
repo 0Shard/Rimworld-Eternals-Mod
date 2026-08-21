@@ -1,11 +1,13 @@
 /*
  * Relative Path: Eternal/Source/Eternal/Models/CorpseTrackingEntry.cs
  * Creation Date: 03-12-2025
- * Last Edit: 21-02-2026
+ * Last Edit: 16-07-2026
  *              BUGFIX: Cached component properties now validate corpse isn't destroyed before returning.
  *              Added PreCalculatedHealingQueue to capture injuries at death before RimWorld removes them.
  *              SAFE-04: Added CaravanId (WorldObject.ID) field for persistent caravan reference across save/load.
  *                       PostLoadInit resolves CaravanId back to live caravan; logs warning if dissolved.
+ *              Gate 1: Persist active HealingQueue state, rebind queued hediff references after load,
+ *                       and preserve source ownership when relocation fails.
  * Author: 0Shard
  * Description: Consolidated data structure for corpse tracking, eliminating parallel dictionaries.
  *              Implements IExposable for save/load persistence.
@@ -13,6 +15,7 @@
  *              Optimized with cached component references to avoid GetComp() lookups per tick.
  */
 
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using Verse;
@@ -93,10 +96,22 @@ namespace Eternal.Models
         public int HealingStartTick;
 
         /// <summary>
-        /// Queue of healing items to process.
-        /// Note: Healing queue is recalculated on load for simplicity.
+        /// Queue of healing items to process. The queue is persisted while active so a save
+        /// cannot reset resurrection progress or lose the ordering of queued work.
         /// </summary>
         public List<HealingItem> HealingQueue = new List<HealingItem>();
+
+        private bool healingQueueHydrated;
+
+        /// <summary>
+        /// Indicates that HealingQueue is safe to consume. Old saves without the queue remain
+        /// false until the corpse healing processor reconstructs the queue deterministically.
+        /// </summary>
+        public bool HealingQueueHydrated
+        {
+            get => healingQueueHydrated;
+            set => healingQueueHydrated = value;
+        }
 
         /// <summary>
         /// Pre-calculated healing queue captured at death, before RimWorld removes injuries.
@@ -193,7 +208,10 @@ namespace Eternal.Models
         /// </summary>
         public void CacheComponents()
         {
-            if (Corpse == null) return;
+            if (Corpse == null)
+            {
+                return;
+            }
 
             _cachedRottableComponent = Corpse.GetComp<CompRottable>();
             _rottableCached = true;
@@ -223,6 +241,7 @@ namespace Eternal.Models
         public CorpseTrackingEntry()
         {
             HealingQueue = new List<HealingItem>();
+            HealingQueueHydrated = false;
         }
 
         /// <summary>
@@ -243,6 +262,7 @@ namespace Eternal.Models
             TotalHealingCost = 0f;
             HealingStartTick = 0;
             HealingQueue = new List<HealingItem>();
+            HealingQueueHydrated = false;
 
             // PERF: Pre-cache component references on registration
             CacheComponents();
@@ -278,8 +298,21 @@ namespace Eternal.Models
             // Pre-calculated healing queue captured at death (before RimWorld removes injuries)
             Scribe_Collections.Look(ref PreCalculatedHealingQueue, "preCalculatedHealingQueue", LookMode.Deep);
 
-            // Note: HealingQueue is NOT saved - it will be recalculated when healing resumes
-            // This simplifies serialization and ensures queue is always consistent with pawn state
+            // Active queue persistence was added after the original corpse format. Clearing the
+            // field before Scribe lets a missing key be distinguished from a serialized empty queue.
+            if (Scribe.mode == LoadSaveMode.LoadingVars)
+            {
+                HealingQueue = null;
+            }
+
+            Scribe_Collections.Look(ref HealingQueue, "healingQueue", LookMode.Deep);
+            Scribe_Values.Look(ref healingQueueHydrated, "healingQueueHydrated", false);
+
+            if (Scribe.mode == LoadSaveMode.LoadingVars && HealingQueue == null)
+            {
+                HealingQueue = new List<HealingItem>();
+                healingQueueHydrated = false;
+            }
 
             // Reconstruct map reference and re-cache components after loading
             if (Scribe.mode == LoadSaveMode.PostLoadInit)
@@ -287,11 +320,16 @@ namespace Eternal.Models
                 if (Corpse != null)
                 {
                     CurrentMap = Corpse.Map;
-                    if (CurrentMap != null && Position.IsValid)
+                    if (Corpse.Spawned)
                     {
-                        // Update position to corpse's actual position (may have moved)
+                        // The corpse owns the authoritative position after cross-reference resolution.
                         Position = Corpse.Position;
                     }
+
+                    // Rebind references without changing the live HediffSet. The processor owns
+                    // old-save queue reconstruction; this phase only repairs references in a queue
+                    // that was actually serialized.
+                    RebindHealingQueueReferences();
 
                     // PERF: Re-cache component references after loading
                     CacheComponents();
@@ -313,6 +351,63 @@ namespace Eternal.Models
                     // No live reference field needed — FindCaravanContainingCorpse() uses CaravanId for fast lookup.
                 }
             }
+        }
+
+        /// <summary>
+        /// Rebinds queued hediff references to the current live HediffSet by persisted load ID.
+        /// Missing references remain represented by their scalar queue state and are handled by
+        /// the processor's deterministic fallback rather than mutating the HediffSet directly.
+        /// </summary>
+        public void RebindHealingQueueReferences()
+        {
+            RebindQueue(HealingQueue);
+            RebindQueue(PreCalculatedHealingQueue);
+        }
+
+        private void RebindQueue(List<HealingItem> healingQueue)
+        {
+            if (healingQueue == null)
+                return;
+
+            foreach (var healingItem in healingQueue)
+            {
+                if (healingItem == null)
+                    continue;
+
+                healingItem.Pawn = OriginalPawn;
+                healingItem.TryRebindHediff(OriginalPawn);
+            }
+        }
+
+        /// <summary>
+        /// Hydrates an active queue from the persisted death-time queue or a deterministic
+        /// calculator fallback. The queue is marked safe only after reconstruction succeeds.
+        /// </summary>
+        public bool TryHydrateHealingQueue(Func<List<HealingItem>> fallbackCalculator)
+        {
+            if (HealingQueueHydrated && HealingQueue != null)
+            {
+                RebindHealingQueueReferences();
+                return true;
+            }
+
+            List<HealingItem> hydratedQueue = null;
+            if (PreCalculatedHealingQueue != null && PreCalculatedHealingQueue.Count > 0)
+            {
+                hydratedQueue = new List<HealingItem>(PreCalculatedHealingQueue);
+            }
+            else if (fallbackCalculator != null)
+            {
+                hydratedQueue = fallbackCalculator();
+            }
+
+            if (hydratedQueue == null)
+                return false;
+
+            HealingQueue = hydratedQueue;
+            HealingQueueHydrated = true;
+            RebindHealingQueueReferences();
+            return true;
         }
 
         /// <summary>

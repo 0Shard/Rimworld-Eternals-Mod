@@ -1,6 +1,6 @@
 // Relative Path: Eternal/Source/Eternal/Settings/HediffSettingsXmlStore.cs
 // Creation Date: 03-01-2026
-// Last Edit: 21-02-2026
+// Last Edit: 16-07-2026
 // Author: 0Shard
 // Description: XML file I/O for hediff settings using RimWorld's SafeSaver.
 //              Stores settings in Config folder as Eternal_HediffSettings.xml.
@@ -28,7 +28,7 @@ namespace Eternal.Settings
     {
         private const string FILENAME = "Eternal_HediffSettings.xml";
         private const string ROOT_ELEMENT = "EternalHediffSettings";
-        private const int CURRENT_VERSION = 1;
+        internal const int CURRENT_VERSION = 2;
 
         /// <summary>
         /// XML element names as they appear in the saved file (matching ExposeData labels).
@@ -39,6 +39,8 @@ namespace Eternal.Settings
             "defName",
             "canHeal",
             "healingRate",
+            "noThreshold",
+            // Accepted only as a legacy v1 input and discarded during migration.
             "nutritionCost",
         };
 
@@ -63,12 +65,13 @@ namespace Eternal.Settings
         /// Only saves settings that have been customized (non-default values).
         /// </summary>
         /// <param name="settings">Dictionary of defName -> slim setting</param>
-        public static void Save(Dictionary<string, HediffSettingSlim> settings)
+        /// <returns>True only when SafeSaver completes and the target file exists.</returns>
+        public static bool Save(Dictionary<string, HediffSettingSlim> settings)
         {
             if (settings == null)
             {
                 Log.Warning("[Eternal] Attempted to save null settings dictionary");
-                return;
+                return false;
             }
 
             string path = GetFilePath();
@@ -93,21 +96,27 @@ namespace Eternal.Settings
                     Scribe_Collections.Look(ref customizedSettings, "settings", LookMode.Deep);
                 });
 
+                if (!File.Exists(path))
+                {
+                    Log.Warning($"[Eternal] Hediff settings save did not produce {path}");
+                    return false;
+                }
+
                 Log.Message($"[Eternal] Saved {customizedSettings.Count} customized hediff settings to {path}");
+                return true;
             }
             catch (Exception ex)
             {
                 EternalLogger.HandleException(EternalExceptionCategory.ConfigurationError,
                     "HediffSettingsXmlStore.Save", null, ex);
+                return false;
             }
         }
 
         /// <summary>
-        /// Loads hediff settings from XML file.
-        /// After loading, performs a validation pass that clamps out-of-bounds values
-        /// and writes corrections back to disk. Unknown XML elements are detected via
-        /// a pre-load XDocument pass and reported with typo suggestions.
-        /// Returns empty dictionary if file doesn't exist or loading fails.
+        /// Loads hediff settings from XML. Version 1 is deserialized into an explicit legacy
+        /// shape first, then converted to the v2 shape. Write-back happens only after
+        /// FinalizeLoading and a successful recoverable migration.
         /// </summary>
         public static Dictionary<string, HediffSettingSlim> Load()
         {
@@ -120,15 +129,33 @@ namespace Eternal.Settings
                 return result;
             }
 
-            // Pre-load pass: detect unknown elements before the Scribe context opens.
-            // This is non-blocking — warnings are emitted but loading continues.
-            var unknownElementWarnings = DetectUnknownElements(path);
-            foreach (var w in unknownElementWarnings)
+            XDocument sourceDocument = null;
+            try
             {
-                Log.Warning($"[Eternal] HediffSettings.xml: {w}");
+                sourceDocument = XDocument.Load(path);
+            }
+            catch (Exception ex)
+            {
+                Log.Warning($"[Eternal] HediffSettings.xml schema preflight failed: {ex.Message}");
+            }
+
+            int detectedVersion = ReadVersion(sourceDocument);
+            bool migratingV1 = detectedVersion <= 1;
+            if (migratingV1 && sourceDocument != null
+                && !HediffSettingsXmlMigration.TryMigrateV1(sourceDocument, out _))
+            {
+                Log.Warning("[Eternal] HediffSettings.xml v1 migration was not recoverable; keeping the source file unchanged.");
+                return result;
+            }
+
+            // Pre-load pass: detect unknown elements before the Scribe context opens.
+            foreach (string warning in DetectUnknownElements(path))
+            {
+                Log.Warning($"[Eternal] HediffSettings.xml: {warning}");
             }
 
             int missingCount = 0;
+            bool migrationSucceeded = !migratingV1;
 
             try
             {
@@ -136,29 +163,61 @@ namespace Eternal.Settings
 
                 try
                 {
-                    int version = 1;
+                    int version = detectedVersion;
                     Scribe_Values.Look(ref version, "version", 1);
 
-                    // Handle version migrations if needed in the future
                     if (version > CURRENT_VERSION)
                     {
                         Log.Warning($"[Eternal] Settings file version {version} is newer than supported version {CURRENT_VERSION}");
                     }
 
-                    List<HediffSettingSlim> settingsList = null;
-                    Scribe_Collections.Look(ref settingsList, "settings", LookMode.Deep);
-
-                    if (settingsList != null)
+                    if (version <= 1)
                     {
-                        foreach (var setting in settingsList)
+                        // Explicit v1 DTO: nutritionCost is read as a float and discarded.
+                        // It can never be consumed by the v2 noThreshold bool.
+                        List<HediffSettingV1> legacySettings = null;
+                        Scribe_Collections.Look(ref legacySettings, "settings", LookMode.Deep);
+
+                        if (legacySettings != null)
                         {
-                            if (setting != null && !string.IsNullOrEmpty(setting.defName))
+                            foreach (HediffSettingV1 legacySetting in legacySettings)
                             {
-                                result[setting.defName] = setting;
+                                if (legacySetting != null && !string.IsNullOrEmpty(legacySetting.defName))
+                                {
+                                    result[legacySetting.defName] = new HediffSettingSlim
+                                    {
+                                        defName = legacySetting.defName,
+                                        canHeal = legacySetting.canHeal,
+                                        healingRate = legacySetting.healingRate,
+                                        noThreshold = SettingsDefaults.HediffNoThreshold
+                                    };
+                                }
+                                else
+                                {
+                                    missingCount++;
+                                }
                             }
-                            else
+                        }
+
+                        migrationSucceeded = true;
+                    }
+                    else
+                    {
+                        List<HediffSettingSlim> settingsList = null;
+                        Scribe_Collections.Look(ref settingsList, "settings", LookMode.Deep);
+
+                        if (settingsList != null)
+                        {
+                            foreach (HediffSettingSlim setting in settingsList)
                             {
-                                missingCount++;
+                                if (setting != null && !string.IsNullOrEmpty(setting.defName))
+                                {
+                                    result[setting.defName] = setting;
+                                }
+                                else
+                                {
+                                    missingCount++;
+                                }
                             }
                         }
                     }
@@ -167,7 +226,7 @@ namespace Eternal.Settings
                 }
                 finally
                 {
-                    // FinalizeLoading MUST complete before any Save() call (Pitfall 1).
+                    // FinalizeLoading MUST complete before any SafeSaver write-back.
                     Scribe.loader.FinalizeLoading();
                 }
             }
@@ -179,19 +238,15 @@ namespace Eternal.Settings
                 return result;
             }
 
-            // Validation pass — runs AFTER FinalizeLoading() to avoid Scribe context corruption.
             bool anyCorrection = false;
             int clampedFieldCount = 0;
-
-            foreach (var setting in result.Values)
+            foreach (HediffSettingSlim setting in result.Values)
             {
                 var fieldWarnings = new List<string>();
                 bool corrected = setting.Validate(fieldWarnings);
 
-                foreach (var w in fieldWarnings)
-                {
-                    Log.Warning($"[Eternal] HediffSettings.xml: {w}");
-                }
+                foreach (string warning in fieldWarnings)
+                    Log.Warning($"[Eternal] HediffSettings.xml: {warning}");
 
                 if (corrected)
                 {
@@ -200,7 +255,6 @@ namespace Eternal.Settings
                 }
             }
 
-            // Summary log — only emitted when there is something to report.
             if (anyCorrection || missingCount > 0)
             {
                 Log.Warning(
@@ -208,11 +262,9 @@ namespace Eternal.Settings
                     $"{missingCount} missing/invalid entry(s) skipped.");
             }
 
-            // Write-back — only if corrections were made. Safe because FinalizeLoading is done.
-            if (anyCorrection)
-            {
+            // SafeSaver writes only after the legacy DTO has loaded and Scribe finalized.
+            if (migrationSucceeded && (migratingV1 || anyCorrection))
                 Save(result);
-            }
 
             return result;
         }
@@ -249,6 +301,36 @@ namespace Eternal.Settings
         // -------------------------------------------------------------------------
         // Private helpers
         // -------------------------------------------------------------------------
+
+        private static int ReadVersion(XDocument sourceDocument)
+        {
+            if (sourceDocument?.Root == null)
+                return 1;
+
+            return int.TryParse(sourceDocument.Root.Element("version")?.Value, out int version)
+                ? version
+                : 1;
+        }
+
+        /// <summary>
+        /// Legacy v1 DTO. The obsolete nutritionCost is intentionally a float so malformed
+        /// legacy values cannot be interpreted as the v2 noThreshold flag.
+        /// </summary>
+        private sealed class HediffSettingV1 : IExposable
+        {
+            public string defName = "";
+            public bool canHeal = SettingsDefaults.HediffCanHeal;
+            public float healingRate = SettingsDefaults.HediffHealingRateUseGlobal;
+            public float nutritionCost;
+
+            public void ExposeData()
+            {
+                Scribe_Values.Look(ref defName, "defName", "");
+                Scribe_Values.Look(ref canHeal, "canHeal", SettingsDefaults.HediffCanHeal);
+                Scribe_Values.Look(ref healingRate, "healingRate", SettingsDefaults.HediffHealingRateUseGlobal);
+                Scribe_Values.Look(ref nutritionCost, "nutritionCost", 0f);
+            }
+        }
 
         /// <summary>
         /// Performs a pre-load XDocument pass over the settings file to detect XML
@@ -366,14 +448,11 @@ namespace Eternal.Settings
         /// </summary>
         private static bool IsCustomized(HediffSettingSlim setting)
         {
-            // A setting is customized if:
-            // - It has a custom healing rate (not using global)
-            // - Or it has a custom nutrition cost
-            // - Or canHeal differs from the hediff's default
-            // Note: We can't easily check canHeal default here, so we save it if ANY field is non-default
+            // A v2 setting is customized when it has a custom rate, disables healing, or
+            // explicitly bypasses the activation threshold. Legacy nutrition cost is gone.
             return setting.HasCustomHealingRate ||
-                   setting.nutritionCostMultiplier != 1.0f ||
-                   !setting.canHeal; // Save if canHeal is false (since default varies, we conservatively save disabled hediffs)
+                   setting.noThreshold ||
+                   !setting.canHeal;
         }
     }
 }

@@ -1,6 +1,6 @@
 // Relative Path: Eternal/Source/Eternal/Settings/HediffSettingsMigrator.cs
 // Creation Date: 03-01-2026
-// Last Edit: 03-01-2026
+// Last Edit: 16-07-2026
 // Author: 0Shard
 // Description: Migrates old ModSettings hediff data to the new XML format.
 //              Also fixes beneficial hediffs that incorrectly had canHeal=true.
@@ -16,17 +16,12 @@ namespace Eternal.Settings
     /// </summary>
     public static class HediffSettingsMigrator
     {
-        private static bool _migrationCompleted = false;
-
         /// <summary>
         /// Checks if migration is needed.
         /// Migration is needed if: old ModSettings data exists AND new XML file doesn't exist.
         /// </summary>
         public static bool NeedsMigration(HediffSettingsStore store)
         {
-            if (_migrationCompleted)
-                return false;
-
             if (store == null)
                 return false;
 
@@ -41,12 +36,13 @@ namespace Eternal.Settings
         /// Performs migration from old ModSettings to new XML format.
         /// Also fixes beneficial hediffs that incorrectly had canHeal=true.
         /// </summary>
-        public static void Migrate(HediffSettingsStore store)
+        /// <returns>True only after the v2 XML has been durably written.</returns>
+        public static bool Migrate(HediffSettingsStore store)
         {
             if (store == null)
             {
                 Log.Warning("[Eternal] Cannot migrate: store is null");
-                return;
+                return false;
             }
 
             Log.Message("[Eternal] Starting hediff settings migration to XML format...");
@@ -88,24 +84,25 @@ namespace Eternal.Settings
                         defName = defName,
                         canHeal = oldSetting.canHeal,
                         healingRate = oldSetting.healingRate,
-                        nutritionCostMultiplier = oldSetting.nutritionCostMultiplier
+                        noThreshold = oldSetting.noThreshold
                     };
                     migratedCount++;
                 }
             }
 
-            // Save to XML file
-            if (newSettings.Count > 0)
+            // Persist even an empty v2 document: XML presence is the durable completion marker.
+            // Legacy data is cleared only after SafeSaver has completed successfully.
+            bool saveSucceeded = HediffSettingsXmlStore.Save(newSettings);
+            if (!saveSucceeded)
             {
-                HediffSettingsXmlStore.Save(newSettings);
+                Log.Warning("[Eternal] Hediff settings migration could not persist XML; legacy data was retained for retry.");
+                return false;
             }
 
-            // Clear old ModSettings data (will be removed on next save)
             store.ClearOldSavedSettings();
 
-            _migrationCompleted = true;
-
             Log.Message($"[Eternal] Migration complete: {migratedCount} settings migrated, {fixedBeneficialCount} beneficial hediffs fixed");
+            return true;
         }
 
         /// <summary>
@@ -115,7 +112,7 @@ namespace Eternal.Settings
         private static bool GetDefaultCanHeal(HediffDef hediffDef)
         {
             if (hediffDef == null)
-                return true; // Unknown hediffs default to healing
+                return SettingsDefaults.HediffCanHeal; // Unknown hediffs default to healing
 
             // Beneficial hediffs should NOT heal by default
             if (!hediffDef.isBad)
@@ -134,18 +131,11 @@ namespace Eternal.Settings
         /// </summary>
         private static bool IsCustomized(EternalHediffSetting setting, bool defaultCanHeal)
         {
-            // Check the 3 user-configurable fields
+            // Check the active v2 user-configurable fields.
             return setting.canHeal != defaultCanHeal ||
                    setting.HasCustomHealingRate ||
-                   setting.nutritionCostMultiplier != 1.0f;
+                   setting.noThreshold;
         }
 
-        /// <summary>
-        /// Forces re-running migration on next check (for testing/manual reset).
-        /// </summary>
-        public static void ResetMigrationFlag()
-        {
-            _migrationCompleted = false;
-        }
     }
 }

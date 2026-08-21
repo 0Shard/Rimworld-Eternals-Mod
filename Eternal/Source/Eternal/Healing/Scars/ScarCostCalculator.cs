@@ -1,6 +1,6 @@
 // Relative Path: Eternal/Source/Eternal/Healing/Scars/ScarCostCalculator.cs
 // Creation Date: 01-01-2025
-// Last Edit: 13-01-2026
+// Last Edit: 16-07-2026
 // Author: 0Shard
 // Description: Calculates healing costs and time estimates for scars.
 //              Uses unified healing formula matching EternalHediffHealer for consistency.
@@ -20,12 +20,7 @@ namespace Eternal.Healing.Scars
     /// </summary>
     public class ScarCostCalculator
     {
-        /// <summary>
-        /// Base nutrition cost: 250 severity = 1 nutrition.
-        /// Matches SettingsDefaults.SeverityToNutritionRatio.
-        /// Simplified system with no type-specific multipliers.
-        /// </summary>
-        private const float BASE_NUTRITION_COST_PER_SEVERITY = 0.004f;
+
 
         private readonly ISettingsProvider _settings;
 
@@ -88,8 +83,8 @@ namespace Eternal.Healing.Scars
         }
 
         /// <summary>
-        /// Calculates nutrition cost for healing a scar.
-        /// Uses simplified formula: severity × 0.01 (100 severity = 1 nutrition).
+        /// Calculates nutrition cost for healing a scar using the shared severity conversion
+        /// and global nutrition multiplier.
         /// </summary>
         public float CalculateNutritionCost(ScarHealingRecord record)
         {
@@ -98,7 +93,7 @@ namespace Eternal.Healing.Scars
 
             // Uniform cost: severity directly determines nutrition cost
             // No part-specific multipliers
-            float baseCost = record.InitialSeverity * BASE_NUTRITION_COST_PER_SEVERITY;
+            float baseCost = record.InitialSeverity * SettingsDefaults.SeverityToNutritionRatio;
 
             // Apply global nutrition cost multiplier from settings
             float nutritionMultiplier = _settings.NutritionCostMultiplier;
@@ -143,9 +138,9 @@ namespace Eternal.Healing.Scars
         /// </summary>
         public bool HasSufficientNutrition(Pawn pawn, float cost)
         {
-            float minThreshold = _settings.MinimumNutritionThreshold;
+            float drainThreshold = (pawn?.needs?.food?.MaxLevel ?? 1f) * _settings.FoodDrainThreshold;
             float availableNutrition = pawn?.needs?.food?.CurLevel ?? 0f;
-            return availableNutrition > (cost + minThreshold);
+            return availableNutrition > (cost + drainThreshold);
         }
 
         /// <summary>

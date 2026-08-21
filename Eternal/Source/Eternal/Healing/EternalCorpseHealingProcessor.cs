@@ -1,7 +1,7 @@
 /*
  * Relative Path: Eternal/Source/Eternal/Healing/EternalCorpseHealingProcessor.cs
  * Creation Date: 09-11-2025
- * Last Edit: 14-07-2026
+ * Last Edit: 16-07-2026
  * Author: 0Shard
  * Description: Processes healing and regrowth on Eternal corpses, accumulating debt and managing resurrection completion.
  *              Integrates with EternalRegrowthState for proper 4-phase body part regrowth.
@@ -42,6 +42,8 @@
  *              14-07: Both TryResurrect calls wrapped with Mark/UnmarkExpectedDestruction so the
  *                     Corpse_Destroy_Patch anti-vaporize guard lets resurrection consume the
  *                     still-tracked corpse (UnregisterCorpse runs AFTER TryResurrect).
+ *              Gate 1: Persisted corpse queues are hydrated after service rewiring, indexed active
+ *                     iteration waits for hydration, and completed queues compact in linear time.
  */
 
 using System;
@@ -73,6 +75,7 @@ namespace Eternal.Healing
     {
         private readonly EternalResurrectionCalculator resurrectionCalculator;
         private readonly HashSet<Pawn> activeHealingCorpses = new HashSet<Pawn>();
+        private bool activeHealingCorpsesHydrated;
 
         // PERF-01: Pre-allocated buffers — reused every call, zero allocation after construction.
         // Sized conservatively for typical Eternal counts; List<T> auto-grows if exceeded (rare).
@@ -81,7 +84,7 @@ namespace Eternal.Healing
         private readonly List<Pawn>              _toRemoveBuffer    = new List<Pawn>(4);
         private readonly List<HealingItem>       _nonRegrowthBuffer = new List<HealingItem>(16);
         private readonly List<HealingItem>       _regrowthBuffer    = new List<HealingItem>(8);
-        private readonly List<HealingItem>       _completedBuffer   = new List<HealingItem>(16);
+        private readonly HashSet<HealingItem>    _completedBuffer   = new HashSet<HealingItem>();
         private readonly List<Pawn>              _cleanupBuffer     = new List<Pawn>(4);
 
         // Unified services (injected via service container)
@@ -95,6 +98,80 @@ namespace Eternal.Healing
         public EternalCorpseHealingProcessor()
         {
             resurrectionCalculator = new EternalResurrectionCalculator();
+        }
+
+        /// <summary>
+        /// Indicates whether the active-corpse index was rebuilt from fully hydrated manager entries.
+        /// Until this is true, processing uses the manager scan fallback.
+        /// </summary>
+        public bool ActiveHealingCorpsesHydrated => activeHealingCorpsesHydrated;
+
+        /// <summary>
+        /// Returns the number of entries currently owned by the active-corpse index.
+        /// </summary>
+        public int ActiveHealingCorpseCount => activeHealingCorpses.Count;
+
+        /// <summary>
+        /// Rebuilds active corpse ownership after corpse entries, queues, and service references
+        /// have completed post-load initialization. Old saves without an active queue are rebuilt
+        /// from the death-time queue or the deterministic resurrection calculator fallback.
+        /// </summary>
+        public void RebuildActiveHealingCorpses()
+        {
+            activeHealingCorpses.Clear();
+            activeHealingCorpsesHydrated = false;
+
+            if (CorpseManager == null)
+                return;
+
+            bool allQueuesHydrated = true;
+            try
+            {
+                foreach (var corpseData in GetManagerScanActiveHealingCorpses())
+                {
+                    if (corpseData?.OriginalPawn == null)
+                        continue;
+
+                    activeHealingCorpses.Add(corpseData.OriginalPawn);
+                    if (!EnsureHealingQueueHydrated(corpseData))
+                    {
+                        allQueuesHydrated = false;
+                    }
+                }
+
+                // The set is trusted only after every active entry was inspected. A failed
+                // hydration leaves the scan fallback enabled so it can be retried safely.
+                activeHealingCorpsesHydrated = allQueuesHydrated;
+            }
+            catch (Exception ex)
+            {
+                EternalLogger.HandleException(EternalExceptionCategory.Resurrection,
+                    "RebuildActiveHealingCorpses", null, ex);
+            }
+        }
+
+        private bool EnsureHealingQueueHydrated(EternalCorpseData corpseData)
+        {
+            if (corpseData == null || corpseData.OriginalPawn == null)
+                return false;
+
+            if (corpseData.HealingQueueHydrated && corpseData.HealingQueue != null)
+            {
+                corpseData.RebindHealingQueueReferences();
+                return true;
+            }
+
+            try
+            {
+                return corpseData.TryHydrateHealingQueue(() =>
+                    resurrectionCalculator.CalculateHealingQueue(corpseData.OriginalPawn));
+            }
+            catch (Exception ex)
+            {
+                EternalLogger.HandleException(EternalExceptionCategory.Resurrection,
+                    "HydrateHealingQueue", corpseData.OriginalPawn, ex);
+                return false;
+            }
         }
 
         /// <summary>
@@ -239,33 +316,21 @@ namespace Eternal.Healing
                     return false;
                 }
 
-                // Calculate healing queue if not already calculated
+                // Calculate or restore the queue before marking the entry active. An empty queue
+                // is valid only after hydration has completed; an unhydrated old save must wait.
                 if (corpseData.HealingQueue == null || corpseData.HealingQueue.Count == 0)
                 {
-                    // Use pre-calculated healing queue if available (captured at death before RimWorld removes injuries)
-                    if (corpseData.PreCalculatedHealingQueue != null && corpseData.PreCalculatedHealingQueue.Count > 0)
-                    {
-                        corpseData.HealingQueue = new List<HealingItem>(corpseData.PreCalculatedHealingQueue);
-
-                        if (Eternal_Mod.settings?.debugMode == true)
-                        {
-                            Log.Message($"[Eternal] Using pre-calculated healing queue for {corpseData.OriginalPawn.Name}: {corpseData.HealingQueue.Count} items");
-                        }
-                    }
-                    else
-                    {
-                        // Fallback: calculate now (may miss injuries if RimWorld already removed them)
-                        corpseData.HealingQueue = resurrectionCalculator.CalculateHealingQueue(corpseData.OriginalPawn);
-
-                        if (Eternal_Mod.settings?.debugMode == true)
-                        {
-                            Log.Warning($"[Eternal] No pre-calculated queue for {corpseData.OriginalPawn.Name}, calculating now: {corpseData.HealingQueue?.Count ?? 0} items (injuries may be missing)");
-                        }
-                    }
-
-                    corpseData.TotalHealingCost = resurrectionCalculator.CalculateTotalCost(
-                        corpseData.HealingQueue);
+                    corpseData.HealingQueueHydrated = false;
                 }
+
+                if (!EnsureHealingQueueHydrated(corpseData))
+                {
+                    Log.Warning($"[Eternal] Cannot start healing for {corpseData.OriginalPawn.Name} - healing queue hydration failed");
+                    return false;
+                }
+
+                corpseData.TotalHealingCost = resurrectionCalculator.CalculateTotalCost(
+                    corpseData.HealingQueue);
 
                 if (corpseData.HealingQueue.Count == 0)
                 {
@@ -342,8 +407,12 @@ namespace Eternal.Healing
         /// <param name="corpseData">The corpse data to process.</param>
         private void ProcessCorpseInjuryTick(EternalCorpseData corpseData)
         {
-            if (corpseData?.HealingQueue == null || corpseData.HealingQueue.Count == 0)
+            if (!EnsureHealingQueueHydrated(corpseData)
+                || corpseData.HealingQueue == null
+                || corpseData.HealingQueue.Count == 0)
+            {
                 return;
+            }
 
             float totalHeal = CalculateHealingPerTick(corpseData.OriginalPawn);
 
@@ -403,11 +472,7 @@ namespace Eternal.Healing
 
             corpseData.FoodDebt = DebtSystem.GetDebt(corpseData.OriginalPawn);
 
-            foreach (var completed in _completedBuffer)
-            {
-                corpseData.HealingQueue.Remove(completed);
-            }
-
+            CompactCompletedQueue(corpseData.HealingQueue, _completedBuffer);
             UpdateHealingProgress(corpseData);
         }
 
@@ -420,8 +485,12 @@ namespace Eternal.Healing
         /// <param name="corpseData">The corpse data to process.</param>
         private void ProcessCorpseRegrowthTick(EternalCorpseData corpseData)
         {
-            if (corpseData?.HealingQueue == null || corpseData.HealingQueue.Count == 0)
+            if (!EnsureHealingQueueHydrated(corpseData)
+                || corpseData.HealingQueue == null
+                || corpseData.HealingQueue.Count == 0)
+            {
                 return;
+            }
 
             float totalHeal = CalculateHealingPerTick(corpseData.OriginalPawn);
 
@@ -461,8 +530,10 @@ namespace Eternal.Healing
                 // Effort-based debt, identical to the living-pawn regrowth path:
                 // each regrowing part consumes the full healAmount of effort per pass.
                 int regrowingPartCount = regrowthManager.GetRegrowingHediffs(corpseData.OriginalPawn).Count();
-                float severityToNutritionRatio = Eternal_Mod.GetSettings().severityToNutritionRatio;
-                float regrowthDebtPerTick = regrowingPartCount * regrowthHeal * severityToNutritionRatio;
+                float severityToNutritionRatio = SettingsDefaults.SeverityToNutritionRatio;
+                float nutritionCostMultiplier = Eternal_Mod.GetSettings().nutritionCostMultiplier;
+                float regrowthDebtPerTick = regrowingPartCount * regrowthHeal
+                    * severityToNutritionRatio * nutritionCostMultiplier;
                 DebtAccumulator?.AddResurrectionDebt(corpseData.OriginalPawn, regrowthDebtPerTick);
 
                 // Check if regrowth is complete (all body parts restored)
@@ -514,12 +585,33 @@ namespace Eternal.Healing
 
             corpseData.FoodDebt = DebtSystem.GetDebt(corpseData.OriginalPawn);
 
-            foreach (var completed in _completedBuffer)
+            CompactCompletedQueue(corpseData.HealingQueue, _completedBuffer);
+            UpdateHealingProgress(corpseData);
+        }
+
+        /// <summary>
+        /// Removes completed queue entries in one stable write pass. Null entries are also
+        /// discarded so a malformed or old queue cannot wait forever on an unprocessable item.
+        /// </summary>
+        internal static void CompactCompletedQueue(List<HealingItem> healingQueue, ISet<HealingItem> completedItems)
+        {
+            if (healingQueue == null || healingQueue.Count == 0)
+                return;
+
+            int writeIndex = 0;
+            for (int readIndex = 0; readIndex < healingQueue.Count; readIndex++)
             {
-                corpseData.HealingQueue.Remove(completed);
+                HealingItem healingItem = healingQueue[readIndex];
+                if (healingItem == null || (completedItems != null && completedItems.Contains(healingItem)))
+                    continue;
+
+                healingQueue[writeIndex++] = healingItem;
             }
 
-            UpdateHealingProgress(corpseData);
+            if (writeIndex < healingQueue.Count)
+            {
+                healingQueue.RemoveRange(writeIndex, healingQueue.Count - writeIndex);
+            }
         }
 
         /// <summary>
@@ -630,11 +722,12 @@ namespace Eternal.Healing
         /// <returns>True if healing is complete and pawn is ready for resurrection</returns>
         private bool IsHealingComplete(EternalCorpseData corpseData)
         {
-            // Basic queue check
-            if (corpseData?.HealingQueue == null)
-                return true;
+            // An unhydrated queue is not evidence that healing finished. This guard prevents
+            // old saves from resurrecting immediately or waiting on a permanently empty queue.
+            if (corpseData == null || !EnsureHealingQueueHydrated(corpseData))
+                return false;
 
-            if (corpseData.HealingQueue.Count > 0)
+            if (corpseData.HealingQueue == null || corpseData.HealingQueue.Count > 0)
                 return false;
 
             // Verify pawn state
@@ -857,6 +950,10 @@ namespace Eternal.Healing
                 pawn.health.hediffSet = savedHediffSet;
                 pawn.health.immunity = savedImmunity;
                 swapActive = false; // Swap complete — post-work exceptions no longer need atomic rollback
+
+                // Reconcile immediately after the saved HediffSet is attached. This reads and
+                // prunes scalar state only; healing remains owned by the scheduled passes.
+                Eternal_Component.Instance?.ReconcileLiveHealth(pawn);
 
                 // === Post-resurrection work ===
                 // swapActive is false here: hediffs are restored, so exceptions below are
@@ -1199,6 +1296,10 @@ namespace Eternal.Healing
                 pawn.health.immunity = savedImmunity;
                 swapActive = false; // Swap complete — post-work exceptions no longer need atomic rollback
 
+                // Keep the immediate-resurrection path symmetrical with the active-healing path.
+                // Reconciliation does not apply severity changes or retain Hediff references.
+                Eternal_Component.Instance?.ReconcileLiveHealth(pawn);
+
                 // === Post-resurrection work ===
                 // swapActive is false here: hediffs are restored, so exceptions below are
                 // caught by the catch block and logged without triggering AttemptHediffRestore.
@@ -1395,8 +1496,39 @@ namespace Eternal.Healing
         /// <returns>Collection of active healing corpse data</returns>
         private IEnumerable<EternalCorpseData> GetActiveHealingCorpses()
         {
-            return (CorpseManager?.GetAllCorpses() ?? Enumerable.Empty<EternalCorpseData>())
-                .Where(corpse => corpse != null && corpse.OriginalPawn != null && corpse.IsHealingActive);
+            if (activeHealingCorpsesHydrated)
+            {
+                foreach (var pawn in activeHealingCorpses)
+                {
+                    var indexedCorpse = CorpseManager?.GetCorpseData(pawn);
+                    if (indexedCorpse != null && indexedCorpse.IsHealingActive)
+                    {
+                        yield return indexedCorpse;
+                    }
+                }
+
+                yield break;
+            }
+
+            foreach (var corpseData in GetManagerScanActiveHealingCorpses())
+            {
+                yield return corpseData;
+            }
+        }
+
+        private IEnumerable<EternalCorpseData> GetManagerScanActiveHealingCorpses()
+        {
+            var trackedCorpses = CorpseManager?.GetAllCorpses();
+            if (trackedCorpses == null)
+                yield break;
+
+            foreach (var corpseData in trackedCorpses)
+            {
+                if (corpseData != null && corpseData.OriginalPawn != null && corpseData.IsHealingActive)
+                {
+                    yield return corpseData;
+                }
+            }
         }
 
         /// <summary>

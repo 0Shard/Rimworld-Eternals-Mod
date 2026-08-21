@@ -1,32 +1,26 @@
 // Relative Path: Eternal/Source/Eternal/Interfaces/ISettingsProvider.cs
 // Creation Date: 29-12-2025
-// Last Edit: 12-07-2026
+// Last Edit: 16-07-2026
 // Author: 0Shard
-// Description: Abstraction for accessing Eternal mod settings. Enables constructor injection
-//              and eliminates direct static dependencies on Eternal_Mod.settings.
+// Description: Read-only settings boundary for runtime services. It exposes only active
+//              controls and keeps removed UI toggles out of dependency-injected consumers.
 
 namespace Eternal.Interfaces
 {
     /// <summary>
-    /// Provides read-only access to Eternal mod settings.
-    /// Abstracts away static settings access for better testability and dependency injection.
+    /// Provides read-only access to active Eternal settings.
     /// </summary>
     public interface ISettingsProvider
     {
         #region General Settings
 
         /// <summary>
-        /// Whether the mod is enabled.
-        /// </summary>
-        bool ModEnabled { get; }
-
-        /// <summary>
-        /// Whether debug mode is active.
+        /// Debug mode derived from the logging-level choice.
         /// </summary>
         bool DebugMode { get; }
 
         /// <summary>
-        /// Logging level (0=Error, 1=Warning, 2=Info, 3=Debug).
+        /// Logging level (0=Errors only, 1=Warnings, 2=Info, 3=Debug).
         /// </summary>
         int LoggingLevel { get; }
 
@@ -35,133 +29,59 @@ namespace Eternal.Interfaces
         #region Healing Settings
 
         /// <summary>
-        /// Base healing rate applied to all hediffs (unless overridden per-hediff).
-        /// Range: 0.001 - 0.1 (default 0.01)
+        /// Base healing rate applied to all hediffs unless overridden per-hediff.
         /// </summary>
         float BaseHealingRate { get; }
 
         /// <summary>
-        /// Whether to show regrowth visual effects.
+        /// Whether the Essence hediff displays the Eternal Power label.
         /// </summary>
-        bool ShowRegrowthEffects { get; }
-
-        /// <summary>
-        /// Whether to show regrowth progress indicators.
-        /// </summary>
-        bool ShowRegrowthProgress { get; }
+        bool ShowEternalPowerLabel { get; }
 
         #endregion
 
-        #region Resource Settings
+        #region Nutrition Settings
 
         /// <summary>
-        /// Multiplier for nutrition costs during healing.
+        /// Global multiplier for every healing nutrition cost.
         /// </summary>
         float NutritionCostMultiplier { get; }
-
-        /// <summary>
-        /// Whether to pause healing when resources are depleted.
-        /// </summary>
-        bool PauseOnResourceDepletion { get; }
-
-        /// <summary>
-        /// Minimum nutrition threshold before healing pauses.
-        /// </summary>
-        float MinimumNutritionThreshold { get; }
-
-        /// <summary>
-        /// Whether pawns can borrow resources (accumulate debt).
-        /// </summary>
-        bool AllowResourceBorrowing { get; }
 
         #endregion
 
         #region Food Debt Settings
 
         /// <summary>
-        /// Maximum debt as a multiplier of pawn's nutrition capacity.
-        /// Default: 5.0 (5× nutrition capacity)
+        /// Maximum debt as a multiplier of pawn nutrition capacity.
         /// </summary>
         float MaxDebtMultiplier { get; }
 
         /// <summary>
-        /// Food level threshold below which healing costs go to debt instead of draining food.
-        /// Default: 0.15 (15% = UrgentlyHungry level)
+        /// Food level threshold below which costs become debt.
         /// </summary>
         float FoodDrainThreshold { get; }
 
         /// <summary>
-        /// In-game days a debt episode takes to fully repay via the food-bar drain.
-        /// Drain rate = peakDebt / (60000 × days) per tick. Default: 1.0.
+        /// In-game days over which a debt episode repays through food-bar drain.
         /// </summary>
         float DebtRepaymentDays { get; }
-
-        /// <summary>
-        /// Ratio for converting severity healed to nutrition cost.
-        /// Default: 0.004f (250:1 ratio: 250 severity = 1 nutrition)
-        /// </summary>
-        float SeverityToNutritionRatio { get; }
 
         #endregion
 
         #region Performance Settings
 
-        /// <summary>
-        /// Tick rate for normal healing (injuries).
-        /// </summary>
         int NormalTickRate { get; }
-
-        /// <summary>
-        /// Tick rate for rare processing (scars, regrowth, corpse healing).
-        /// </summary>
         int RareTickRate { get; }
-
-        /// <summary>
-        /// Interval for trait-hediff consistency checks.
-        /// </summary>
         int TraitCheckInterval { get; }
-
-        /// <summary>
-        /// Interval for corpse preservation checks.
-        /// </summary>
         int CorpseCheckInterval { get; }
-
-        /// <summary>
-        /// Interval for map protection checks.
-        /// </summary>
         int MapCheckInterval { get; }
-
-        #endregion
-
-        #region Advanced Settings
-
-        /// <summary>
-        /// Whether individual hediff control is enabled.
-        /// </summary>
-        bool EnableIndividualHediffControl { get; }
-
-        /// <summary>
-        /// Whether auto-healing is enabled.
-        /// </summary>
-        bool AutoHealEnabled { get; }
-
-        /// <summary>
-        /// Current healing order preference.
-        /// </summary>
-        HealingOrder HealingOrder { get; }
+        int HealingHistorySweepInterval { get; }
 
         #endregion
 
         #region Map Protection Settings
 
-        /// <summary>
-        /// Whether map anchors are enabled.
-        /// </summary>
         bool EnableMapAnchors { get; }
-
-        /// <summary>
-        /// Grace period in ticks for anchor cleanup.
-        /// </summary>
         int AnchorGracePeriodTicks { get; }
 
         #endregion

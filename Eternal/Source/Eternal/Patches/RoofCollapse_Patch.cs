@@ -1,6 +1,6 @@
 // Relative Path: Eternal/Source/Eternal/Patches/RoofCollapse_Patch.cs
 // Creation Date: 20-01-2026
-// Last Edit: 21-02-2026
+// Last Edit: 16-07-2026
 // Author: 0Shard
 // Description: FALLBACK Harmony patch and helper for roof collapse protection.
 //              Primary protection: IRoofCollapseAlert interface on EternalCorpseComponent (RimWorld's built-in hook).
@@ -95,9 +95,19 @@ namespace Eternal.Patches
                         }
                     }
 
-                    // Teleport corpse to safety
-                    corpse.DeSpawn(DestroyMode.WillReplace);
-                    GenSpawn.Spawn(corpse, safeCell, map);
+                    // Tracked corpses use the manager-owned transfer so the map index stays
+                    // atomic. The direct branch remains only for an unregistered Eternal that
+                    // arrived before corpse registration could run.
+                    if (isTracked)
+                    {
+                        if (!corpseManager.TryRelocateCorpse(pawn, map, safeCell))
+                            continue;
+                    }
+                    else
+                    {
+                        corpse.DeSpawn(DestroyMode.WillReplace);
+                        GenSpawn.Spawn(corpse, safeCell, map);
+                    }
 
                     // Notify player
                     Messages.Message(
