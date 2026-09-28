@@ -2,12 +2,17 @@
 <!--
   Relative Path: Eternal/Defs/ThingDefs/ThingDefs_ElixirOfEternity.xml
   Creation Date: 12-03-2026
-  Last Edit: 12-03-2026
+  Last Edit: 28-09-2026
   Author: 0Shard
   Description: ThingDef for the Elixir of Eternity — a consumable item that grants
                the Eternal_GeneticMarker trait to a target pawn, making them immortal.
                Gated behind Ultra-tier research and requires a Fabrication bench to craft.
                Can also appear as a rare quest reward via RewardStandardLowFreq tag.
+               28-09-2026 (PR #1 fix): the elixir now grants the trait to the player-chosen
+               recipient instead of the administering pawn. CompProperties_Targetable's
+               compClass points at CompTargetable_EternalElixir (target-side validation) and a
+               new CompProperties_UseEffect-less CompTargetEffect_EternalElixir entry performs
+               the trait grant, per vanilla's own CompTargetable -> CompTargetEffect dispatch.
 -->
 <Defs>
 
@@ -43,11 +48,21 @@
                 <useDuration>600</useDuration>
                 <showUseGizmo>true</showUseGizmo>
             </li>
-            <!-- Restricts use to a single targeted pawn (self or other) -->
+            <!-- Restricts use to a single targeted pawn (self or other); validates the
+                 recipient (dead / no-trait-storage / already-Eternal / population cap) at
+                 selection time -->
             <li Class="CompProperties_Targetable">
-                <compClass>CompTargetable_SinglePawn</compClass>
+                <compClass>Eternal.Elixir.CompTargetable_EternalElixir</compClass>
             </li>
-            <!-- Custom comp that validates the target and applies the Eternal trait -->
+            <!-- Grants the Eternal trait to the RECIPIENT selected above. Dispatched by
+                 vanilla CompTargetable.DoEffect with the player-chosen target, not the user —
+                 no Class= attribute needed, matching vanilla's own CompTargetEffect_MoodBoost
+                 declaration (CompTargetEffect never overrides props). -->
+            <li>
+                <compClass>Eternal.Elixir.CompTargetEffect_EternalElixir</compClass>
+            </li>
+            <!-- Kill-switch gate + target-named confirmation dialog. Fires on the USER pawn
+                 before targeting begins; does not grant the trait itself. -->
             <li Class="CompProperties_UseEffect">
                 <compClass>Eternal.Elixir.CompUseEffect_EternalElixir</compClass>
             </li>

@@ -1,167 +1,72 @@
 /*
  * Relative Path: Eternal/Source/Eternal/Elixir/CompUseEffect_EternalElixir.cs
  * Creation Date: 12-03-2026
- * Last Edit: 12-03-2026
+ * Last Edit: 28-09-2026
  * Author: 0Shard
- * Description: CompUseEffect subclass for the Elixir of Eternity. Grants the
- *              Eternal_GeneticMarker trait to a target pawn with population cap
- *              enforcement, dead/duplicate rejection, and a confirmation dialog
- *              that shows the current Eternal count. Follows vanilla mech serum
- *              comp stack pattern (CompUsable + CompTargetable + CompUseEffect).
- *              TraitSet_Patch auto-adds Eternal_Essence hediff on trait gain.
+ * Description: CompUseEffect subclass for the Elixir of Eternity. Slimmed to the two checks
+ *              that fire on the USER pawn before targeting begins: the kill-switch reject
+ *              (CanBeUsedBy) and a target-named confirmation dialog (ConfirmMessage). Target-side
+ *              validation (dead / no-trait-storage / already-Eternal / population cap) moved to
+ *              CompTargetable_EternalElixir.ValidateTarget, and the trait grant itself moved to
+ *              CompTargetEffect_EternalElixir.DoEffectOn — fixing PR #1's bug where the trait
+ *              landed on the administering pawn instead of the chosen recipient, because a plain
+ *              CompUseEffect always receives the USER from CompUsable.UsedBy, never the target.
  */
 
-using System;
 using RimWorld;
 using Verse;
-using Eternal.DI;
-using Eternal.Exceptions;
-using Eternal.Extensions;
-using Eternal.Utils;
 
 namespace Eternal.Elixir
 {
     /// <summary>
-    /// Grants the Eternal_GeneticMarker trait to a target pawn when the Elixir of Eternity
-    /// is used. Validates against kill-switch, dead targets, duplicate trait, and population
-    /// cap before allowing use. Returns localized rejection reasons via AcceptanceReport.
+    /// User-side gate and confirmation dialog for the Elixir of Eternity. Both
+    /// <see cref="CanBeUsedBy"/> and <see cref="ConfirmMessage"/> fire with the administering
+    /// pawn, not the recipient (<c>CompUsable.CanBeUsedBy</c> / <c>TryStartUseJob</c> both pass
+    /// the user) — see <see cref="CompTargetable_EternalElixir"/> for recipient-side validation
+    /// and <see cref="CompTargetEffect_EternalElixir"/> for the trait grant itself.
     /// </summary>
     public class CompUseEffect_EternalElixir : CompUseEffect
     {
         /// <summary>
-        /// Fire before CompUseEffect_DestroySelf so the trait is added before item consumption.
-        /// DestroySelf defaults to 0f; 10f guarantees this comp runs first in CompUsable.UsedBy().
-        /// </summary>
-        public override float OrderPriority => 10f;
-
-        /// <summary>
-        /// Validates whether the elixir can be used on the target pawn.
-        /// Returns AcceptanceReport with a reason string on rejection — CompUsable formats
-        /// this as "Cannot: [reason]" in both float menus and gizmo targeting feedback.
+        /// Gates use of the item at all. `pawn` here is the USER (CompUsable.CanBeUsedBy always
+        /// passes the administering pawn), which is why target-only checks (dead,
+        /// already-Eternal, no-trait-storage, population cap) live in
+        /// CompTargetable_EternalElixir.ValidateTarget instead of here — leaving them here was
+        /// itself a smaller instance of the same user/target confusion this fix addresses.
         /// </summary>
         public override AcceptanceReport CanBeUsedBy(Pawn pawn)
         {
-            // Kill-switch: mod disabled due to missing critical defs
             if (EternalModState.IsDisabled)
                 return "Eternal_Elixir_RejectModDisabled".Translate();
-
-            // ELIX-03: dead pawns cannot receive the elixir
-            if (pawn.Dead)
-                return "Eternal_Elixir_RejectDead".Translate();
-
-            // ELIX-04: already-Eternal pawns are rejected
-            if (pawn.IsValidEternal())
-                return "Eternal_Elixir_RejectAlreadyEternal".Translate();
-
-            // ELIX-05, POP-02, POP-03: population cap enforcement
-            if (IsPopulationCapReached(out int totalEternals, out int cap))
-                return "Eternal_Elixir_RejectCapReached".Translate(totalEternals, cap);
 
             return true;
         }
 
         /// <summary>
-        /// Returns a confirmation dialog message shown before the use job starts.
-        /// When population cap is enabled, includes current Eternal count.
-        /// CompUsable wraps this in Dialog_MessageBox.CreateConfirmation().
+        /// Returns a confirmation dialog message shown before the use job starts. `pawn` here is
+        /// the USER — the displayed recipient name is resolved via the sibling
+        /// CompTargetable_EternalElixir, whose selectedTarget field is already set by
+        /// CompTargetable.OrderForceTarget before CompUsable.TryStartUseJob calls this method.
+        /// Falls back to a target-agnostic message when the target cannot be resolved.
         /// </summary>
         public override TaggedString ConfirmMessage(Pawn pawn)
         {
-            string pawnName = pawn.Name?.ToStringShort ?? pawn.LabelShort;
+            Pawn targetPawn = parent.GetComp<CompTargetable_EternalElixir>()?.SelectedTargetPawn;
 
-            try
-            {
-                var snapshot = Eternal_Mod.settings?.CreateSnapshot();
-                if (snapshot?.Effects.PopulationCapEnabled == true)
-                {
-                    int livingCount = PawnExtensions.GetAllLivingEternalPawnsCached()?.Count ?? 0;
-                    int healingCount = EternalServiceContainer.Instance?.CorpseManager?.GetHealingCorpseCount() ?? 0;
-                    int totalEternals = livingCount + healingCount;
-                    int cap = snapshot.Value.Effects.PopulationCap;
+            CompTargetable_EternalElixir.TryGetPopulationState(out bool capEnabled, out int totalEternals, out int cap);
 
-                    return "Eternal_Elixir_ConfirmMessageWithCap".Translate(
-                        pawnName, pawnName, totalEternals, cap);
-                }
-            }
-            catch (Exception ex)
+            if (targetPawn != null)
             {
-                EternalLogger.HandleException(
-                    EternalExceptionCategory.ConfigurationError,
-                    "CompUseEffect_EternalElixir.ConfirmMessage", null, ex);
+                string targetName = targetPawn.Name?.ToStringShort ?? targetPawn.LabelShort;
+
+                return capEnabled
+                    ? "Eternal_Elixir_ConfirmMessageWithCap".Translate(targetName, targetName, totalEternals, cap)
+                    : "Eternal_Elixir_ConfirmMessage".Translate(targetName, targetName);
             }
 
-            return "Eternal_Elixir_ConfirmMessage".Translate(pawnName, pawnName);
-        }
-
-        /// <summary>
-        /// Grants the Eternal_GeneticMarker trait to the target pawn.
-        /// TraitSet_Patch.Postfix automatically adds the Eternal_Essence hediff
-        /// when this trait is gained — no additional hediff code needed here.
-        /// </summary>
-        public override void DoEffect(Pawn usedBy)
-        {
-            base.DoEffect(usedBy);
-
-            try
-            {
-                if (usedBy.story?.traits == null)
-                {
-                    Log.Error($"[Eternal] Cannot grant Eternal trait to {usedBy.LabelShort} — pawn has no trait storage (story.traits is null).");
-                    return;
-                }
-
-                // Belt-and-suspenders: re-check in case state changed between CanBeUsedBy and DoEffect
-                if (usedBy.IsValidEternal())
-                {
-                    Log.Warning($"[Eternal] {usedBy.LabelShort} already has Eternal trait at DoEffect time — skipping duplicate trait addition.");
-                    return;
-                }
-
-                Trait eternalTrait = new Trait(EternalDefOf.Eternal_GeneticMarker);
-                usedBy.story.traits.GainTrait(eternalTrait);
-
-                if (Eternal_Mod.settings?.debugMode == true)
-                {
-                    Log.Message($"[Eternal] Elixir of Eternity used on {usedBy.LabelShort} — Eternal_GeneticMarker trait granted. TraitSet_Patch will auto-add Eternal_Essence hediff.");
-                }
-            }
-            catch (Exception ex)
-            {
-                EternalLogger.HandleException(
-                    EternalExceptionCategory.Resurrection,
-                    "CompUseEffect_EternalElixir.DoEffect", usedBy, ex);
-            }
-        }
-
-        /// <summary>
-        /// Checks whether the population cap is enabled and currently reached.
-        /// Count includes both living Eternals and corpses being healed (POP-02).
-        /// </summary>
-        private bool IsPopulationCapReached(out int totalEternals, out int cap)
-        {
-            totalEternals = 0;
-            cap = 0;
-
-            try
-            {
-                var snapshot = Eternal_Mod.settings?.CreateSnapshot();
-                if (snapshot == null || !snapshot.Value.Effects.PopulationCapEnabled)
-                    return false;
-
-                cap = snapshot.Value.Effects.PopulationCap;
-                int livingCount = PawnExtensions.GetAllLivingEternalPawnsCached()?.Count ?? 0;
-                int healingCount = EternalServiceContainer.Instance?.CorpseManager?.GetHealingCorpseCount() ?? 0;
-                totalEternals = livingCount + healingCount;
-
-                return totalEternals >= cap;
-            }
-            catch (Exception ex)
-            {
-                EternalLogger.HandleException(
-                    EternalExceptionCategory.ConfigurationError,
-                    "CompUseEffect_EternalElixir.IsPopulationCapReached", null, ex);
-                return false;
-            }
+            return capEnabled
+                ? "Eternal_Elixir_ConfirmMessageNoTargetWithCap".Translate(totalEternals, cap)
+                : "Eternal_Elixir_ConfirmMessageNoTarget".Translate();
         }
     }
 }

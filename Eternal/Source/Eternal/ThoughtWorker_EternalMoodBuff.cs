@@ -1,12 +1,15 @@
 // Relative Path: Eternal/Source/Eternal/ThoughtWorker_EternalMoodBuff.cs
 // Creation Date: 12-03-2026
-// Last Edit: 12-03-2026
+// Last Edit: 28-09-2026
 // Author: 0Shard
 // Description: Custom ThoughtWorker for the Eternal mood buff thought.
 //              Returns ThoughtState.Inactive when the mood buff is disabled in settings,
 //              so the thought vanishes entirely from the needs tab (no ghost "+0" entry).
 //              MoodMultiplier returns the configured moodBuffValue, multiplied by baseMoodEffect=1
 //              in the XML def to produce the final mood offset.
+//              28-09-2026: added EternalModState.IsDisabled kill-switch guard (folded in from
+//              elixir targeting fix PR #1) — the mood thought must not evaluate while the mod
+//              is disabled due to missing critical defs.
 
 using Eternal.Extensions;
 using RimWorld;
@@ -36,6 +39,8 @@ namespace Eternal
         /// Determines whether the Eternal mood buff thought is active for the given pawn.
         ///
         /// Guard order matters:
+        /// 0. Kill-switch — if the mod is disabled due to missing critical defs, return
+        ///    Inactive immediately, before touching any pawn state.
         /// 1. Null/dead check — corpses and null pawns never receive mood thoughts.
         /// 2. Settings toggle — if disabled, return Inactive immediately (no "+0" entry).
         /// 3. Trait check  — belt-and-suspenders; requiredHediffs in XML already filters
@@ -45,6 +50,9 @@ namespace Eternal
         /// </summary>
         protected override ThoughtState CurrentStateInternal(Pawn p)
         {
+            if (EternalModState.IsDisabled)
+                return ThoughtState.Inactive;
+
             if (p == null || p.Dead)
                 return ThoughtState.Inactive;
 

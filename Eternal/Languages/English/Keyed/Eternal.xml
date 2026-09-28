@@ -94,12 +94,21 @@
     <EternalRoofCollapseSaved>The corpse of {0} was saved from roof collapse!</EternalRoofCollapseSaved>
 
     <!-- Elixir of Eternity — confirmation dialogs and rejection reasons -->
-    <!-- Used by CompUseEffect_EternalElixir when the player targets a pawn -->
+    <!-- ConfirmMessage/CanBeUsedBy fire on the USER via CompUseEffect_EternalElixir; target
+         rejects fire at selection time via CompTargetable_EternalElixir.ValidateTarget -->
     <Eternal_Elixir_ConfirmMessage>Grant immortality to {0}?\n\nThis action is irreversible. {1} will gain the Eternal Genetic Marker and can never be used as a target again.</Eternal_Elixir_ConfirmMessage>
     <Eternal_Elixir_ConfirmMessageWithCap>Grant immortality to {0}?\n\nThis action is irreversible. {1} will gain the Eternal Genetic Marker and can never be used as a target again.\n\n(Eternals: {2}/{3})</Eternal_Elixir_ConfirmMessageWithCap>
-    <!-- Rejection reasons — surfaced as "Cannot use: [reason]" via FloatMenu -->
+    <!-- Fallback confirmation text when the selected target cannot be resolved (reflection
+         read of vanilla's private selectedTarget field failed) -->
+    <Eternal_Elixir_ConfirmMessageNoTarget>Grant immortality to the selected pawn?\n\nThis action is irreversible. The recipient will gain the Eternal Genetic Marker and can never be used as a target again.</Eternal_Elixir_ConfirmMessageNoTarget>
+    <Eternal_Elixir_ConfirmMessageNoTargetWithCap>Grant immortality to the selected pawn?\n\nThis action is irreversible. The recipient will gain the Eternal Genetic Marker and can never be used as a target again.\n\n(Eternals: {0}/{1})</Eternal_Elixir_ConfirmMessageNoTargetWithCap>
+    <!-- Rejection reasons — surfaced as "Cannot use: [reason]" via FloatMenu and as
+         Eternal_Elixir_RejectMessage on ValidateTarget click rejection -->
     <Eternal_Elixir_RejectDead>target is dead</Eternal_Elixir_RejectDead>
+    <Eternal_Elixir_RejectNoTraits>target cannot receive traits</Eternal_Elixir_RejectNoTraits>
     <Eternal_Elixir_RejectAlreadyEternal>already Eternal</Eternal_Elixir_RejectAlreadyEternal>
     <Eternal_Elixir_RejectCapReached>population cap reached ({0}/{1})</Eternal_Elixir_RejectCapReached>
     <Eternal_Elixir_RejectModDisabled>Eternal mod is disabled</Eternal_Elixir_RejectModDisabled>
+    <!-- Shown via Messages.Message on a rejected click in CompTargetable_EternalElixir.ValidateTarget -->
+    <Eternal_Elixir_RejectMessage>Cannot use {0} on {1}: {2}</Eternal_Elixir_RejectMessage>
 </LanguageData>
