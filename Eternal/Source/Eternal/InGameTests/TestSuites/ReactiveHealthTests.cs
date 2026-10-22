@@ -29,22 +29,20 @@ namespace Eternal.InGameTests.TestSuites
     {
         public static TestSuiteResult RunAll(Verse.Map map)
         {
-            int passed = 0;
-            int failed = 0;
-            var failures = new List<string>();
+            var result = new TestSuiteResult(0, 0, new List<string>());
 
-            RunTest("AddMutationDefersThresholdRegistration", () =>
-                AddMutationDefersThresholdRegistration(map), ref passed, ref failed, failures);
-            RunTest("NonEternalHealthMutationsAreNotQueued", () =>
-                NonEternalHealthMutationsAreNotQueued(map), ref passed, ref failed, failures);
-            RunTest("NonEternalReconciliationClearsDerivedState", () =>
-                NonEternalReconciliationClearsDerivedState(map), ref passed, ref failed, failures);
-            RunTest("AmbiguousLegacyRowsResetForDuplicateHediffs", () =>
-                AmbiguousLegacyRowsResetForDuplicateHediffs(map), ref passed, ref failed, failures);
-            RunTest("DirectHediffSetRemovalIsPruned", () =>
-                DirectHediffSetRemovalIsPruned(map), ref passed, ref failed, failures);
+            result.RunTest("ReactiveHealth", "AddMutationDefersThresholdRegistration", () =>
+                AddMutationDefersThresholdRegistration(map));
+            result.RunTest("ReactiveHealth", "NonEternalHealthMutationsAreNotQueued", () =>
+                NonEternalHealthMutationsAreNotQueued(map));
+            result.RunTest("ReactiveHealth", "NonEternalReconciliationClearsDerivedState", () =>
+                NonEternalReconciliationClearsDerivedState(map));
+            result.RunTest("ReactiveHealth", "AmbiguousLegacyRowsResetForDuplicateHediffs", () =>
+                AmbiguousLegacyRowsResetForDuplicateHediffs(map));
+            result.RunTest("ReactiveHealth", "DirectHediffSetRemovalIsPruned", () =>
+                DirectHediffSetRemovalIsPruned(map));
 
-            return new TestSuiteResult(passed, failed, failures);
+            return result;
         }
 
         private static void AddMutationDefersThresholdRegistration(Verse.Map map)
@@ -53,34 +51,41 @@ namespace Eternal.InGameTests.TestSuites
             var definition = DefDatabase<HediffDef>.GetNamedSilentFail("Flu");
             TestAssert.IsNotNull(definition, "Flu definition should exist");
 
+            TestAssert.Available(Eternal_Mod.settings, "ReactiveHealth settings");
             var setting = Eternal_Mod.GetSettings().hediffManager.GetHediffSetting(definition.defName);
             bool originalCanHeal = setting.canHeal;
             bool originalNoThreshold = setting.noThreshold;
-            setting.canHeal = true;
-            setting.noThreshold = false;
+            try
+            {
+                setting.canHeal = true;
+                setting.noThreshold = false;
 
-            var hediff = HediffMaker.MakeHediff(definition, pawn);
-            hediff.Severity = 0.2f;
-            var tracker = EternalServiceContainer.Instance.ThresholdTracker;
-            tracker.RemoveThreshold(pawn, hediff);
+                var hediff = HediffMaker.MakeHediff(definition, pawn);
+                hediff.Severity = 0.2f;
+                var tracker = EternalServiceContainer.Instance.ThresholdTracker;
+                tracker.RemoveThreshold(pawn, hediff);
 
-            pawn.health.AddHediff(hediff);
-            TestAssert.IsFalse(
-                tracker.TryGetThreshold(pawn, hediff, out _, out _),
-                "AddHediff callback must enqueue only; it must not register threshold inline");
+                pawn.health.AddHediff(hediff);
+                TestAssert.IsFalse(
+                    tracker.TryGetThreshold(pawn, hediff, out _, out _),
+                    "AddHediff callback must enqueue only; it must not register threshold inline");
 
-            float severityBeforeSafeTick = hediff.Severity;
-            TickAdvancer.AdvanceTicks(1);
-            TestAssert.IsTrue(
-                tracker.TryGetThreshold(pawn, hediff, out _, out _),
-                "The next safe tick must reconcile the current hediff");
-            TestAssert.IsTrue(
-                hediff.Severity <= severityBeforeSafeTick,
-                "Only a scheduled healing pass may change severity after the callback returns");
+                float severityBeforeSafeTick = hediff.Severity;
+                TickAdvancer.AdvanceTicks(1);
+                TestAssert.IsTrue(
+                    tracker.TryGetThreshold(pawn, hediff, out _, out _),
+                    "The next safe tick must reconcile the current hediff");
+                TestAssert.IsTrue(
+                    hediff.Severity <= severityBeforeSafeTick,
+                    "Only a scheduled healing pass may change severity after the callback returns");
 
-            setting.canHeal = originalCanHeal;
-            setting.noThreshold = originalNoThreshold;
-            RemoveAll(pawn, definition);
+                RemoveAll(pawn, definition);
+            }
+            finally
+            {
+                setting.canHeal = originalCanHeal;
+                setting.noThreshold = originalNoThreshold;
+            }
         }
 
         private static void NonEternalHealthMutationsAreNotQueued(Verse.Map map)
@@ -88,39 +93,44 @@ namespace Eternal.InGameTests.TestSuites
             var pawn = TestPawnFactory.SpawnNonEternalPawn(map);
             var existingEssence = pawn.health?.hediffSet?.GetFirstHediffOfDef(EternalDefOf.Eternal_Essence);
             if (existingEssence != null)
+            {
                 pawn.health.RemoveHediff(existingEssence);
+            }
 
             var pendingPawns = GetPendingHealthPawns();
-            pendingPawns.Clear();
+            TestAssert.IsFalse(pendingPawns.Contains(pawn), "Fresh non-Eternal pawn must not be queued");
 
             var fluDefinition = DefDatabase<HediffDef>.GetNamedSilentFail("Flu");
             TestAssert.IsNotNull(fluDefinition, "Flu definition should exist");
             var flu = HediffMaker.MakeHediff(fluDefinition, pawn);
             pawn.health.AddHediff(flu);
             TestAssert.AreEqual(
-                0,
-                pendingPawns.Count,
+                false,
+                pendingPawns.Contains(pawn),
                 "Adding a non-Eternal hediff must not enqueue its pawn");
 
             pawn.health.RemoveHediff(flu);
             TestAssert.AreEqual(
-                0,
-                pendingPawns.Count,
+                false,
+                pendingPawns.Contains(pawn),
                 "Removing a non-Eternal hediff must not enqueue its pawn");
 
-            var part = pawn.RaceProps?.body?.AllParts?.FirstOrDefault();
+            var part = pawn.RaceProps?.body?.AllParts?.FirstOrDefault(p => p.def.defName == "Finger" || p.def.defName == "Toe");
             TestAssert.IsNotNull(part, "Non-Eternal test pawn should have a body part");
             var missingPart = pawn.health.AddHediff(HediffDefOf.MissingBodyPart, part);
             TestAssert.AreEqual(
-                0,
-                pendingPawns.Count,
+                false,
+                pendingPawns.Contains(pawn),
                 "Adding a missing part to a non-Eternal pawn must not enqueue it");
 
             if (missingPart != null)
+            {
                 pawn.health.RemoveHediff(missingPart);
+            }
+
             TestAssert.AreEqual(
-                0,
-                pendingPawns.Count,
+                false,
+                pendingPawns.Contains(pawn),
                 "Removing a missing part from a non-Eternal pawn must not enqueue it");
         }
 
@@ -130,105 +140,131 @@ namespace Eternal.InGameTests.TestSuites
             var fluDefinition = DefDatabase<HediffDef>.GetNamedSilentFail("Flu");
             TestAssert.IsNotNull(fluDefinition, "Flu definition should exist");
 
+            TestAssert.Available(Eternal_Mod.settings, "ReactiveHealth settings");
             var setting = Eternal_Mod.GetSettings().hediffManager.GetHediffSetting(fluDefinition.defName);
             bool originalCanHeal = setting.canHeal;
             bool originalNoThreshold = setting.noThreshold;
-            setting.canHeal = true;
-            setting.noThreshold = false;
+            try
+            {
+                setting.canHeal = true;
+                setting.noThreshold = false;
 
-            var flu = AddDirect(fluDefinition, pawn, null, 0.2f);
-            var container = EternalServiceContainer.Instance;
-            var thresholdTracker = container.ThresholdTracker;
-            var hediffHealer = container.HealingProcessor.HediffHealer;
-            var severityTracker = GetSeverityTracker();
+                var flu = AddDirect(fluDefinition, pawn, null, 0.2f);
+                var container = EternalServiceContainer.Instance;
+                var thresholdTracker = container.ThresholdTracker;
+                var hediffHealer = container.HealingProcessor.HediffHealer;
+                var severityTracker = GetSeverityTracker();
 
-            Eternal_Component.Current.ReconcileLiveHealth(pawn);
-            TestAssert.IsTrue(
-                thresholdTracker.TryGetThreshold(pawn, flu, out _, out _),
-                "The Eternal pawn should have derived threshold state before trait loss");
+                Eternal_Component.Current.ReconcileLiveHealth(pawn);
+                TestAssert.IsTrue(
+                    thresholdTracker.TryGetThreshold(pawn, flu, out _, out _),
+                    "The Eternal pawn should have derived threshold state before trait loss");
 
-            InjectProgress(hediffHealer, pawn, flu, 1f);
-            severityTracker.RecordHealingAttempt(pawn, flu, 0.2f, 0.19f, 0.01f);
-            InjectLegacyProgress(hediffHealer, pawn, flu, 2f);
-            InjectLegacyThreshold(thresholdTracker, pawn, flu, 0.99f);
-            InjectLegacyHistory(severityTracker, pawn, flu);
+                InjectProgress(hediffHealer, pawn, flu, 1f);
+                severityTracker.RecordHealingAttempt(pawn, flu, 0.2f, 0.19f, 0.01f);
+                InjectLegacyProgress(hediffHealer, pawn, flu, 2f);
+                InjectLegacyThreshold(thresholdTracker, pawn, flu, 0.99f);
+                InjectLegacyHistory(severityTracker, pawn, flu);
 
-            var essence = pawn.health.hediffSet.GetFirstHediffOfDef(EternalDefOf.Eternal_Essence);
-            TestAssert.IsNotNull(essence, "Eternal pawn should have Essence before trait loss");
-            pawn.health.RemoveHediff(essence);
-            var eternalTrait = pawn.story?.traits?.GetTrait(EternalDefOf.Eternal_GeneticMarker);
-            if (eternalTrait != null)
-                pawn.story.traits.RemoveTrait(eternalTrait);
+                var essence = pawn.health.hediffSet.GetFirstHediffOfDef(EternalDefOf.Eternal_Essence);
+                TestAssert.IsNotNull(essence, "Eternal pawn should have Essence before trait loss");
+                pawn.health.RemoveHediff(essence);
+                var eternalTrait = pawn.story?.traits?.GetTrait(EternalDefOf.Eternal_GeneticMarker);
+                if (eternalTrait != null)
+                {
+                    pawn.story.traits.RemoveTrait(eternalTrait);
+                }
 
-            Eternal_Component.Current.ReconcileLiveHealth(pawn);
+                Eternal_Component.Current.ReconcileLiveHealth(pawn);
 
-            TestAssert.IsFalse(pawn.IsValidEternal(), "Pawn should no longer be Eternal after trait loss");
-            TestAssert.AreEqual(
-                0,
-                thresholdTracker.TrackedCount,
-                "Invalid live pawn must lose threshold and legacy threshold state");
-            TestAssert.AreEqual(
-                0,
-                severityTracker.TrackedCount,
-                "Invalid live pawn must lose severity history, including legacy rows");
-            TestAssert.AreEqual(
-                0,
-                CountDictionary(hediffHealer, "healingProgress"),
-                "Invalid live pawn must lose healing progress");
-            TestAssert.AreEqual(
-                0,
-                CountDictionary(hediffHealer, "legacyHealingProgress"),
-                "Invalid live pawn must lose legacy healing progress");
+                TestAssert.IsFalse(pawn.IsValidEternal(), "Pawn should no longer be Eternal after trait loss");
+                TestAssert.AreEqual(
+                    0,
+                    CountDictionary(thresholdTracker, "_thresholds", pawn) + CountDictionary(thresholdTracker, "_legacyThresholds", pawn),
+                    "Invalid live pawn must lose threshold and legacy threshold state");
+                TestAssert.AreEqual(
+                    0,
+                    CountDictionary(severityTracker, "healingHistory", pawn) + CountDictionary(severityTracker, "legacyHistory", pawn),
+                    "Invalid live pawn must lose severity history, including legacy rows");
+                TestAssert.AreEqual(
+                    0,
+                    CountDictionary(hediffHealer, "healingProgress", pawn),
+                    "Invalid live pawn must lose healing progress");
+                TestAssert.AreEqual(
+                    0,
+                    CountDictionary(hediffHealer, "legacyHealingProgress", pawn),
+                    "Invalid live pawn must lose legacy healing progress");
 
-            setting.canHeal = originalCanHeal;
-            setting.noThreshold = originalNoThreshold;
-            RemoveAll(pawn, fluDefinition);
+                RemoveAll(pawn, fluDefinition);
+            }
+            finally
+            {
+                setting.canHeal = originalCanHeal;
+                setting.noThreshold = originalNoThreshold;
+            }
         }
 
         private static void AmbiguousLegacyRowsResetForDuplicateHediffs(Verse.Map map)
         {
             var pawn = TestPawnFactory.SpawnEternalPawn(map);
-            var definition = DefDatabase<HediffDef>.GetNamedSilentFail("Infection");
-            TestAssert.IsNotNull(definition, "Infection definition should exist");
-            var part = pawn.RaceProps?.body?.AllParts?.FirstOrDefault();
+            var definition = DefDatabase<HediffDef>.GetNamedSilentFail("WoundInfection");
+            TestAssert.IsNotNull(definition, "Native WoundInfection definition should exist");
+            var part = pawn.RaceProps?.body?.AllParts?.FirstOrDefault(p => p.def.defName == "Finger" || p.def.defName == "Toe");
             TestAssert.IsNotNull(part, "Test pawn should have a body part");
 
+            TestAssert.Available(Eternal_Mod.settings, "ReactiveHealth settings");
             var setting = Eternal_Mod.GetSettings().hediffManager.GetHediffSetting(definition.defName);
             bool originalCanHeal = setting.canHeal;
             bool originalNoThreshold = setting.noThreshold;
-            setting.canHeal = true;
-            setting.noThreshold = false;
+            try
+            {
+                setting.canHeal = true;
+                setting.noThreshold = false;
 
-            var first = AddDirect(definition, pawn, part, 0.2f);
-            var second = AddDirect(definition, pawn, part, 0.3f);
-            var tracker = EternalServiceContainer.Instance.ThresholdTracker;
-            tracker.ClearPawnThresholds(pawn);
+                var first = AddDirect(definition, pawn, part, 0.2f);
+                // Native infections merge when added with the same def and Part. Prepare the
+                // legacy collision by adding a distinct native identity, then assigning its
+                // final Part before observing reconciliation, as the regrowth manager does.
+                var second = AddDirect(definition, pawn, null, 0.3f);
+                second.Part = part;
+                pawn.health.hediffSet.DirtyCache();
+                TestAssert.IsTrue(pawn.health.hediffSet.hediffs.Contains(first)
+                    && pawn.health.hediffSet.hediffs.Contains(second) && !ReferenceEquals(first, second),
+                    "Ambiguous fixture must contain both distinct native hediff instances");
+                TestAssert.AreEqual(2, pawn.health.hediffSet.hediffs.Count(h => h.def == definition && h.Part == part),
+                    "Ambiguous fixture must have exactly two instances with the same native def and exact Part");
+                var tracker = EternalServiceContainer.Instance.ThresholdTracker;
+                tracker.ClearPawnThresholds(pawn);
 
-            InjectLegacyThreshold(tracker, pawn, first, 0.99f);
-            var severityTracker = GetSeverityTracker();
-            severityTracker.ClearPawnTracking(pawn);
-            InjectLegacyHistory(severityTracker, pawn, first);
+                InjectLegacyThreshold(tracker, pawn, first, 0.99f);
+                var severityTracker = GetSeverityTracker();
+                severityTracker.ClearPawnTracking(pawn);
+                InjectLegacyHistory(severityTracker, pawn, first);
 
-            Eternal_Component.Current.ReconcileLiveHealth(pawn);
+                Eternal_Component.Current.ReconcileLiveHealth(pawn);
 
-            TestAssert.IsTrue(
-                tracker.TryGetThreshold(pawn, first, out _, out _),
-                "First duplicate must receive freshly registered threshold state");
-            TestAssert.IsTrue(
-                tracker.TryGetThreshold(pawn, second, out _, out _),
-                "Second duplicate must receive freshly registered threshold state");
-            TestAssert.AreEqual(
-                2,
-                tracker.TrackedCount,
-                "Ambiguous legacy threshold row must not be assigned to either duplicate");
-            TestAssert.AreEqual(
-                0,
-                severityTracker.TrackedCount,
-                "Ambiguous legacy severity history must be discarded rather than inherited");
+                TestAssert.IsTrue(
+                    tracker.TryGetThreshold(pawn, first, out _, out _),
+                    "First duplicate must receive freshly registered threshold state");
+                TestAssert.IsTrue(
+                    tracker.TryGetThreshold(pawn, second, out _, out _),
+                    "Second duplicate must receive freshly registered threshold state");
+                TestAssert.AreEqual(
+                    2,
+                    CountDictionary(tracker, "_thresholds", pawn) + CountDictionary(tracker, "_legacyThresholds", pawn),
+                    "Ambiguous legacy threshold row must not be assigned to either duplicate");
+                TestAssert.AreEqual(
+                    0,
+                    CountDictionary(severityTracker, "healingHistory", pawn) + CountDictionary(severityTracker, "legacyHistory", pawn),
+                    "Ambiguous legacy severity history must be discarded rather than inherited");
 
-            setting.canHeal = originalCanHeal;
-            setting.noThreshold = originalNoThreshold;
-            RemoveAll(pawn, definition);
+                RemoveAll(pawn, definition);
+            }
+            finally
+            {
+                setting.canHeal = originalCanHeal;
+                setting.noThreshold = originalNoThreshold;
+            }
         }
 
         private static void DirectHediffSetRemovalIsPruned(Verse.Map map)
@@ -237,23 +273,31 @@ namespace Eternal.InGameTests.TestSuites
             var definition = DefDatabase<HediffDef>.GetNamedSilentFail("Flu");
             TestAssert.IsNotNull(definition, "Flu definition should exist");
 
+            TestAssert.Available(Eternal_Mod.settings, "ReactiveHealth settings");
             var setting = Eternal_Mod.GetSettings().hediffManager.GetHediffSetting(definition.defName);
             bool originalCanHeal = setting.canHeal;
-            setting.canHeal = true;
+            try
+            {
+                setting.canHeal = true;
 
-            var hediff = AddDirect(definition, pawn, null, 0.2f);
-            Eternal_Component.Current.ReconcileLiveHealth(pawn);
-            TestAssert.IsTrue(
-                EternalServiceContainer.Instance.ThresholdTracker.TryGetThreshold(pawn, hediff, out _, out _),
-                "Current hediff must be registered before direct removal");
+                var hediff = AddDirect(definition, pawn, null, 0.2f);
+                Eternal_Component.Current.ReconcileLiveHealth(pawn);
+                TestAssert.IsTrue(
+                    EternalServiceContainer.Instance.ThresholdTracker.TryGetThreshold(pawn, hediff, out _, out _),
+                    "Current hediff must be registered before direct removal");
 
-            pawn.health.hediffSet.hediffs.Remove(hediff);
-            Eternal_Component.Current.ReconcileLiveHealth(pawn);
-            TestAssert.IsFalse(
-                EternalServiceContainer.Instance.ThresholdTracker.TryGetThreshold(pawn, hediff, out _, out _),
-                "Reconciliation must prune state for a hediff absent from the current set");
+                pawn.health.hediffSet.hediffs.Remove(hediff);
+                Eternal_Component.Current.ReconcileLiveHealth(pawn);
+                TestAssert.IsFalse(
+                    EternalServiceContainer.Instance.ThresholdTracker.TryGetThreshold(pawn, hediff, out _, out _),
+                    "Reconciliation must prune state for a hediff absent from the current set");
 
-            setting.canHeal = originalCanHeal;
+                setting.canHeal = originalCanHeal;
+            }
+            finally
+            {
+                setting.canHeal = originalCanHeal;
+            }
         }
 
         private static Hediff AddDirect(HediffDef definition, Pawn pawn, BodyPartRecord part, float severity)
@@ -278,13 +322,23 @@ namespace Eternal.InGameTests.TestSuites
             return (HashSet<Pawn>)pendingField.GetValue(orchestrator);
         }
 
-        private static int CountDictionary(object owner, string fieldName)
+        private static int CountDictionary(object owner, string fieldName, Pawn pawn)
         {
             var field = owner.GetType().GetField(
                 fieldName,
                 BindingFlags.Instance | BindingFlags.NonPublic);
             TestAssert.IsNotNull(field, $"Expected state field {fieldName}");
-            return ((IDictionary)field.GetValue(owner)).Count;
+            int count = 0;
+            foreach (DictionaryEntry row in (IDictionary)field.GetValue(owner))
+            {
+                var pawnId = row.Key.GetType().GetField("PawnThingIDNumber");
+                TestAssert.IsNotNull(pawnId, "State key must expose pawn identity");
+                if ((int)pawnId.GetValue(row.Key) == pawn.thingIDNumber)
+                {
+                    count++;
+                }
+            }
+            return count;
         }
 
         private static void InjectProgress(
@@ -298,8 +352,7 @@ namespace Eternal.InGameTests.TestSuites
                 BindingFlags.Instance | BindingFlags.NonPublic);
             TestAssert.IsNotNull(field, "Healing progress storage should exist");
             var dictionary = (IDictionary)field.GetValue(healer);
-            dictionary.Clear();
-            dictionary.Add(new HealingDictionaryKey(pawn, hediff), progress);
+            dictionary[new HealingDictionaryKey(pawn, hediff)] = progress;
         }
 
         private static void InjectLegacyProgress(
@@ -313,7 +366,6 @@ namespace Eternal.InGameTests.TestSuites
                 BindingFlags.Instance | BindingFlags.NonPublic);
             TestAssert.IsNotNull(field, "Legacy healing progress storage should exist");
             var dictionary = (IDictionary)field.GetValue(healer);
-            dictionary.Clear();
 
             Type[] genericArguments = field.FieldType.GetGenericArguments();
             Type keyType = genericArguments[0];
@@ -321,7 +373,7 @@ namespace Eternal.InGameTests.TestSuites
             object key = CreatePrivate(keyType, pawn.thingIDNumber, hediff.def.defName, hediff.Part?.Label);
             var values = (IList)Activator.CreateInstance(listType);
             values.Add(progress);
-            dictionary.Add(key, values);
+            dictionary[key] = values;
         }
 
         private static EternalHediffSeverityTracker GetSeverityTracker()
@@ -345,7 +397,6 @@ namespace Eternal.InGameTests.TestSuites
                 BindingFlags.Instance | BindingFlags.NonPublic);
             TestAssert.IsNotNull(field, "Legacy threshold storage should exist for migration test");
             var dictionary = (IDictionary)field.GetValue(tracker);
-            dictionary.Clear();
 
             Type[] genericArguments = field.FieldType.GetGenericArguments();
             Type keyType = genericArguments[0];
@@ -355,7 +406,7 @@ namespace Eternal.InGameTests.TestSuites
             object entry = CreatePrivate(entryType, threshold);
             var entries = (IList)Activator.CreateInstance(listType);
             entries.Add(entry);
-            dictionary.Add(key, entries);
+            dictionary[key] = entries;
         }
 
         private static void InjectLegacyHistory(
@@ -368,7 +419,6 @@ namespace Eternal.InGameTests.TestSuites
                 BindingFlags.Instance | BindingFlags.NonPublic);
             TestAssert.IsNotNull(field, "Legacy history storage should exist for migration test");
             var dictionary = (IDictionary)field.GetValue(tracker);
-            dictionary.Clear();
 
             Type[] genericArguments = field.FieldType.GetGenericArguments();
             Type keyType = genericArguments[0];
@@ -386,7 +436,7 @@ namespace Eternal.InGameTests.TestSuites
                 .SetValue(attempt, 1);
             var attempts = (IList)Activator.CreateInstance(listType);
             attempts.Add(attempt);
-            dictionary.Add(key, attempts);
+            dictionary[key] = attempts;
         }
 
         private static object CreatePrivate(Type type, params object[] arguments)
@@ -405,43 +455,17 @@ namespace Eternal.InGameTests.TestSuites
                 ?.Where(hediff => hediff?.def == definition)
                 .ToList();
             if (leftovers == null)
+            {
                 return;
+            }
 
             foreach (var hediff in leftovers)
+            {
                 pawn.health.RemoveHediff(hediff);
+            }
         }
 
-        private static void RunTest(
-            string name,
-            Action test,
-            ref int passed,
-            ref int failed,
-            List<string> failures)
-        {
-            Log.Message($"[EternalTests] Running: {name}");
-            try
-            {
-                test();
-                passed++;
-                Log.Message($"[EternalTests] PASSED: {name}");
-            }
-            catch (TestFailedException ex)
-            {
-                failed++;
-                failures.Add($"[ReactiveHealth] {name}: {ex.Message}");
-                Log.Error($"[EternalTests] FAILED: {name} -- {ex.Message}");
-            }
-            catch (Exception ex)
-            {
-                failed++;
-                failures.Add($"[ReactiveHealth] {name}: {ex.Message}");
-                Log.Error($"[EternalTests] ERROR: {name} -- {ex}");
-            }
-            finally
-            {
-                TestPawnFactory.CleanupAll();
-            }
-        }
+
     }
 }
 

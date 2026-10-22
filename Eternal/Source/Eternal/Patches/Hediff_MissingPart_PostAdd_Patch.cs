@@ -23,7 +23,9 @@ namespace Eternal.Patches
             try
             {
                 if (EternalModState.IsDisabled)
+                {
                     return;
+                }
 
                 Eternal_Component.Instance?.EnqueueHealthReconciliation(__instance?.pawn);
             }

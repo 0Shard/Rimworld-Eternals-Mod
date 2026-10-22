@@ -21,7 +21,7 @@
     <Authors>0Shard</Authors>
     <Company>0Shard</Company>
     <Copyright>Copyright (c) 2024-2026 0Shard</Copyright>
-    <Description>Biological immortality mod for RimWorld 1.6</Description>
+    <Description>Biological immortality mod for RimWorld 1.6 and 1.7</Description>
   </PropertyGroup>
 
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
@@ -41,6 +41,7 @@
   <ItemGroup>
     <Reference Include="System" />
     <Reference Include="System.Core" />
+    <Reference Include="System.Numerics" />
     <Reference Include="System.Xml.Linq" />
     <Reference Include="System.Data.DataSetExtensions" />
     <Reference Include="Microsoft.CSharp" />

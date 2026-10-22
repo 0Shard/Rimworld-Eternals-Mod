@@ -8,9 +8,7 @@
 //              Severity setter clamps to it (Verse/Hediff.cs:357), so hediffs like mechanites
 //              (minSeverity 0.001) could never reach the old "Severity <= 0" removal check.
 
-using System;
 using System.Collections.Generic;
-using RimWorld;
 using UnityEngine;
 using Verse;
 using Eternal.Utils;
@@ -69,7 +67,9 @@ namespace Eternal.Healing
         public void Heal(Pawn pawn, HealingItem item, float healingAmount)
         {
             if (pawn == null || item?.Hediff == null)
+            {
                 return;
+            }
 
             if (_healers.TryGetValue(item.Type, out var healer))
             {
@@ -85,6 +85,8 @@ namespace Eternal.Healing
         /// Heals a hediff by type using the appropriate handler.
         /// Static convenience method for backwards compatibility.
         /// </summary>
+        public static float SeverityFactor(HealingType type) => type == HealingType.Scar ? 0.5f : 1f;
+
         public static void HealByType(Pawn pawn, HealingItem item, float healingAmount)
         {
             Instance.Heal(pawn, item, healingAmount);
@@ -100,7 +102,9 @@ namespace Eternal.Healing
         private void HealCritical(Pawn pawn, Hediff hediff, float amount)
         {
             if (pawn == null || hediff == null)
+            {
                 return;
+            }
 
             ApplyStandardHealing(hediff, amount * CRITICAL_MULTIPLIER);
 
@@ -117,7 +121,9 @@ namespace Eternal.Healing
         private void HealDisease(Pawn pawn, Hediff hediff, float amount)
         {
             if (pawn == null || hediff == null)
+            {
                 return;
+            }
 
             ApplyStandardHealing(hediff, amount * DISEASE_MULTIPLIER);
             BoostImmunity(pawn, hediff);
@@ -129,7 +135,9 @@ namespace Eternal.Healing
         private void HealInjury(Pawn pawn, Hediff hediff, float amount)
         {
             if (pawn == null || hediff == null)
+            {
                 return;
+            }
 
             ApplyStandardHealing(hediff, amount);
         }
@@ -140,7 +148,9 @@ namespace Eternal.Healing
         private void HealCondition(Pawn pawn, Hediff hediff, float amount)
         {
             if (pawn == null || hediff == null)
+            {
                 return;
+            }
 
             ApplyStandardHealing(hediff, amount);
         }
@@ -151,7 +161,9 @@ namespace Eternal.Healing
         private void HealScar(Pawn pawn, Hediff hediff, float amount)
         {
             if (pawn == null || hediff == null)
+            {
                 return;
+            }
 
             // Scars heal slower than regular injuries
             ApplyStandardHealing(hediff, amount * 0.5f);
@@ -165,7 +177,9 @@ namespace Eternal.Healing
             // Regrowth is handled by EternalRegrowthState
             // This is a placeholder for direct regrowth healing if needed
             if (pawn == null || hediff == null)
+            {
                 return;
+            }
 
             ApplyStandardHealing(hediff, amount);
         }
@@ -176,7 +190,9 @@ namespace Eternal.Healing
         private void HealMisc(Pawn pawn, Hediff hediff, float amount)
         {
             if (pawn == null || hediff == null)
+            {
                 return;
+            }
 
             ApplyStandardHealing(hediff, amount);
         }
@@ -193,13 +209,15 @@ namespace Eternal.Healing
         public static void ApplyStandardHealing(Hediff hediff, float amount)
         {
             if (hediff == null || amount <= 0f)
+            {
                 return;
+            }
 
             hediff.Severity -= amount;
 
             // Remove if fully healed (def.minSeverity is the lowest reachable value)
             float removalFloor = Mathf.Max(0f, hediff.def.minSeverity);
-            if (hediff.Severity <= removalFloor + 0.0001f && hediff.pawn != null)
+            if (hediff.Severity <= removalFloor && hediff.pawn != null)
             {
                 hediff.pawn.health.RemoveHediff(hediff);
                 EternalLogger.Debug($"Removed {hediff.def.LabelCap} from {hediff.pawn.Name?.ToStringShort ?? "Unknown"}");
@@ -213,10 +231,14 @@ namespace Eternal.Healing
         {
             var immunity = pawn?.health?.immunity;
             if (immunity == null || hediff?.def == null)
+            {
                 return;
+            }
 
             if (!immunity.ImmunityRecordExists(hediff.def))
+            {
                 return;
+            }
 
             var immunityRecord = immunity.GetImmunityRecord(hediff.def);
             if (immunityRecord != null)

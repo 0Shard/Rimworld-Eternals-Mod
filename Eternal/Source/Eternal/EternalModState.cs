@@ -34,7 +34,9 @@ namespace Eternal
         public static void Disable(string reason)
         {
             if (IsDisabled)
+            {
                 return;
+            }
 
             IsDisabled = true;
             Log.Error($"[Eternal] DISABLED: {reason} Check mod load order.");

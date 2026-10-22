@@ -15,13 +15,11 @@
 //              Hediff and Pawn references use Scribe_References — they become null after load on dead pawns,
 //              which is acceptable since the pre-calculated queue only uses scalar data when consumed.
 
+using Eternal.Compatibility;
 using System;
-using System.Collections.Generic;
 using System.Linq;
-using RimWorld;
 using Verse;
 using Eternal.Compat;
-using Eternal.Corpse;
 using Eternal.Exceptions;
 using Eternal.Extensions;
 using Eternal.Utils;
@@ -49,6 +47,7 @@ namespace Eternal
         private Pawn _pawn;
         private float _energyCost;
         private int _hediffLoadId = -1;
+        private string _hediffDefName;
 
         // Properties — preserve the existing public API unchanged so all callers compile cleanly
         public Hediff Hediff
@@ -57,21 +56,26 @@ namespace Eternal
             set
             {
                 _hediff = value;
+                if (_hediff?.def != null)
+                {
+                    _hediffDefName = _hediff.def.defName;
+                }
                 if (_hediff != null && _hediffLoadId < 0)
                 {
                     _hediffLoadId = _hediff.loadID;
                 }
             }
         }
-        public float HealingPriority { get => _healingPriority;     set => _healingPriority = value;     }
+        public float HealingPriority { get => _healingPriority; set => _healingPriority = value; }
         public float EstimatedHealingTime { get => _estimatedHealingTime; set => _estimatedHealingTime = value; }
-        public HealingType Type      { get => _type;                set => _type = value;                }
-        public bool IsCritical       { get => _isCritical;          set => _isCritical = value;          }
-        public bool IsHarmful        { get => _isHarmful;           set => _isHarmful = value;           }
-        public float Severity        { get => _severity;            set => _severity = value;            }
-        public Pawn Pawn             { get => _pawn;                set => _pawn = value;                }
-        public float EnergyCost      { get => _energyCost;          set => _energyCost = value;          }
-        public int HediffLoadId      { get => _hediffLoadId;         set => _hediffLoadId = value;         }
+        public HealingType Type { get => _type; set => _type = value; }
+        public bool IsCritical { get => _isCritical; set => _isCritical = value; }
+        public bool IsHarmful { get => _isHarmful; set => _isHarmful = value; }
+        public float Severity { get => _severity; set => _severity = value; }
+        public Pawn Pawn { get => _pawn; set => _pawn = value; }
+        public float EnergyCost { get => _energyCost; set => _energyCost = value; }
+        public int HediffLoadId { get => _hediffLoadId; set => _hediffLoadId = value; }
+        public string HediffDefName => _hediff?.def?.defName ?? _hediffDefName;
 
         /// <summary>
         /// Parameterless constructor required by Scribe_Collections with LookMode.Deep.
@@ -88,6 +92,7 @@ namespace Eternal
             if (Scribe.mode == LoadSaveMode.Saving && _hediff != null)
             {
                 _hediffLoadId = _hediff.loadID;
+                _hediffDefName = _hediff.def?.defName;
             }
 
             // Scalar fields — always present and fully recoverable after load
@@ -99,6 +104,7 @@ namespace Eternal
             Scribe_Values.Look(ref _severity, "severity", 0f);
             Scribe_Values.Look(ref _energyCost, "energyCost", 0f);
             Scribe_Values.Look(ref _hediffLoadId, "hediffLoadId", -1);
+            Scribe_Values.Look(ref _hediffDefName, "hediffDefName");
 
             // Live references — may be null after load when dead pawn hediffs have been removed.
             // The pre-calculated queue only needs scalar data (Severity, Type, EnergyCost) when
@@ -120,6 +126,10 @@ namespace Eternal
         public bool TryRebindHediff(Pawn ownerPawn)
         {
             Pawn = ownerPawn;
+            if (_hediff?.def != null)
+            {
+                _hediffDefName = _hediff.def.defName;
+            }
             var liveHediffs = ownerPawn?.health?.hediffSet?.hediffs;
             if (liveHediffs == null)
             {
@@ -140,6 +150,10 @@ namespace Eternal
             }
 
             _hediff = reboundHediff;
+            if (_hediff?.def != null)
+            {
+                _hediffDefName = _hediff.def.defName;
+            }
             return _hediff != null;
         }
     }
@@ -179,7 +193,11 @@ namespace Eternal
         /// </summary>
         public static float CalculatePriority(HealingItem healingItem)
         {
-            if (healingItem == null) return float.MaxValue;
+            if (healingItem == null)
+            {
+                return float.MaxValue;
+            }
+
             return healingItem.EstimatedHealingTime;
         }
 
@@ -193,13 +211,19 @@ namespace Eternal
         /// <returns>Estimated healing time in ticks</returns>
         public static float CalculateHealingTime(HealingItem healingItem, float baseHealingRate, int tickInterval)
         {
-            if (healingItem == null) return 0f;
+            if (healingItem == null)
+            {
+                return 0f;
+            }
 
             float bodySize = healingItem.Pawn?.BodySize ?? 1.0f;
             float healPerTick = baseHealingRate * bodySize;
 
             // Prevent division by zero
-            if (healPerTick <= 0f) healPerTick = 0.0001f;
+            if (healPerTick <= 0f)
+            {
+                healPerTick = 0.0001f;
+            }
 
             // Total ticks = (severity / heal_per_tick) * tickInterval
             // Because healing happens every tickInterval ticks, not every tick
@@ -216,7 +240,10 @@ namespace Eternal
         /// <returns>Estimated healing time in ticks</returns>
         public static float CalculateHealingTime(HealingItem healingItem)
         {
-            if (healingItem == null) return 0f;
+            if (healingItem == null)
+            {
+                return 0f;
+            }
 
             // Get settings via guaranteed non-null accessor (SAFE-08)
             var s = Eternal_Mod.GetSettings();
@@ -242,7 +269,9 @@ namespace Eternal
         public static float CalculateRegrowthWork(BodyPartRecord part, Pawn pawn)
         {
             if (part == null)
+            {
                 return SettingsDefaults.RegrowthWorkPerPartHP; // 1 HP fallback
+            }
 
             return SubtreeMaxHealth(part, pawn) * SettingsDefaults.RegrowthWorkPerPartHP;
         }
@@ -270,7 +299,9 @@ namespace Eternal
         public static float CalculateRegrowthTimeTicks(BodyPartRecord part, Pawn pawn)
         {
             if (part == null)
+            {
                 return 0f;
+            }
 
             var s = Eternal_Mod.GetSettings();
             float bodySize = pawn?.BodySize ?? 1.0f;
@@ -295,7 +326,9 @@ namespace Eternal
             }
 
             if (deepestChildTicks <= 0f)
+            {
                 return ownTicks;
+            }
 
             // Children start at the parent's phase-3 mark; the subtree cannot finish
             // before the parent itself (completion gate)
@@ -310,7 +343,10 @@ namespace Eternal
         /// </summary>
         public static float CalculateEnergyCost(HealingItem healingItem)
         {
-            if (healingItem == null) return 0f;
+            if (healingItem == null)
+            {
+                return 0f;
+            }
 
             // Uniform cost: severity directly determines nutrition cost. GetSettings() guarantees
             // a non-null root; apply the single global multiplier here for priority estimates.
@@ -333,22 +369,6 @@ namespace Eternal
         }
 
         /// <summary>
-        /// Checks if a hediff is critical.
-        /// </summary>
-        public static bool IsCriticalHediff(Hediff hediff)
-        {
-            return hediff.IsCritical();
-        }
-
-        /// <summary>
-        /// Checks if a body part is critical.
-        /// </summary>
-        public static bool IsCriticalBodyPart(BodyPartRecord part)
-        {
-            return part.IsCritical();
-        }
-
-        /// <summary>
         /// Checks if a hediff is harmful and should be healed.
         /// </summary>
         public static bool IsHarmfulHediff(Hediff hediff)
@@ -365,7 +385,10 @@ namespace Eternal
         /// </summary>
         public static HealingItem CreateHealingItem(Hediff hediff, Pawn pawn)
         {
-            if (hediff == null || pawn == null) return null;
+            if (hediff == null || pawn == null || RjwHealthPolicy.IsProtected(hediff.def))
+            {
+                return null;
+            }
 
             try
             {
@@ -402,7 +425,10 @@ namespace Eternal
         /// </summary>
         public static HealingItem CreateMissingPartHealingItem(Hediff_MissingPart missingPart, Pawn pawn)
         {
-            if (missingPart == null || pawn == null) return null;
+            if (missingPart == null || pawn == null)
+            {
+                return null;
+            }
 
             try
             {
@@ -438,34 +464,6 @@ namespace Eternal
         #endregion
 
         #region Utility
-
-        /// <summary>
-        /// Formats resurrection time with smart units (minutes, hours, or days).
-        /// Provides human-friendly time estimates based on actual tick counts.
-        /// </summary>
-        /// <param name="totalTicks">Total ticks for the healing operation</param>
-        /// <returns>Formatted time string with appropriate units</returns>
-        public static string FormatResurrectionTime(float totalTicks)
-        {
-            if (totalTicks <= 0f) return "instant";
-
-            float totalDays = totalTicks / GenDate.TicksPerDay;
-
-            if (totalDays < 1f / 24f)  // Less than 1 hour
-            {
-                int minutes = Math.Max(1, (int)(totalDays * 24f * 60f));
-                return $"{minutes} minute{(minutes == 1 ? "" : "s")}";
-            }
-            else if (totalDays < 1f)  // Less than 1 day
-            {
-                float hours = totalDays * 24f;
-                return $"{hours:F1} hours";
-            }
-            else
-            {
-                return $"{totalDays:F1} days";
-            }
-        }
 
         #endregion
     }

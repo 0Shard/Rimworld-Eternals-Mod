@@ -18,24 +18,24 @@ namespace Eternal.Exceptions
         /// The pawn associated with this exception, if applicable.
         /// </summary>
         public Verse.Pawn Pawn { get; set; }
-        
+
         /// <summary>
         /// The map associated with this exception, if applicable.
         /// </summary>
         public Verse.Map Map { get; }
-        
+
         /// <summary>
         /// The operation that was being performed when the exception occurred.
         /// </summary>
         public string Operation { get; }
-        
+
         /// <summary>
         /// Initializes a new instance of EternalException class.
         /// </summary>
         public EternalException() : base()
         {
         }
-        
+
         /// <summary>
         /// Initializes a new instance of EternalException class with a specified error message.
         /// </summary>
@@ -43,7 +43,7 @@ namespace Eternal.Exceptions
         public EternalException(string message) : base(message)
         {
         }
-        
+
         /// <summary>
         /// Initializes a new instance of EternalException class with a specified error message and operation.
         /// </summary>
@@ -53,7 +53,7 @@ namespace Eternal.Exceptions
         {
             Operation = operation;
         }
-        
+
         /// <summary>
         /// Initializes a new instance of EternalException class with a specified error message, operation, and pawn.
         /// </summary>
@@ -65,7 +65,7 @@ namespace Eternal.Exceptions
             Operation = operation;
             Pawn = pawn;
         }
-        
+
         /// <summary>
         /// Initializes a new instance of EternalException class with a specified error message, operation, pawn, and map.
         /// </summary>
@@ -79,7 +79,7 @@ namespace Eternal.Exceptions
             Pawn = pawn;
             Map = map;
         }
-        
+
         /// <summary>
         /// Initializes a new instance of EternalException class with a specified error message and inner exception.
         /// </summary>
@@ -88,7 +88,7 @@ namespace Eternal.Exceptions
         public EternalException(string message, Exception innerException) : base(message, innerException)
         {
         }
-        
+
         /// <summary>
         /// Initializes a new instance of EternalException class with a specified error message, operation, and inner exception.
         /// </summary>
@@ -99,7 +99,7 @@ namespace Eternal.Exceptions
         {
             Operation = operation;
         }
-        
+
         /// <summary>
         /// Gets a formatted message that includes context information.
         /// </summary>
@@ -107,31 +107,37 @@ namespace Eternal.Exceptions
         public virtual string GetFormattedMessage()
         {
             string contextInfo = "";
-            
+
             if (!string.IsNullOrEmpty(Operation))
             {
                 contextInfo += $"Operation: {Operation}";
             }
-            
+
             if (Pawn != null)
             {
                 if (!string.IsNullOrEmpty(contextInfo))
+                {
                     contextInfo += ", ";
+                }
+
                 contextInfo += $"Pawn: {Pawn.Name?.ToStringFull ?? "Unknown"}";
             }
-            
+
             if (Map != null)
             {
                 if (!string.IsNullOrEmpty(contextInfo))
+                {
                     contextInfo += ", ";
+                }
+
                 contextInfo += $"Map: {Map}";
             }
-            
+
             if (!string.IsNullOrEmpty(contextInfo))
             {
                 return $"{Message} (Context: {contextInfo})";
             }
-            
+
             return Message;
         }
     }

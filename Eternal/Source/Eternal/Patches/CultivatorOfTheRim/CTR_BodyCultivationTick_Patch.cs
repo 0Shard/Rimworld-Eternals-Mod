@@ -57,27 +57,9 @@ namespace Eternal.Patches.CultivatorOfTheRim
         /// Guard: only apply this patch when Cultivator of the Rim is active.
         /// Returning false skips the patch entirely (Harmony will not call TargetMethod).
         /// </summary>
-        public static bool Prepare()
-        {
-            bool isActive = CultivatorOfTheRimDetection.CultivatorOfTheRimActive;
-
-            if (!isActive)
-            {
-                // Only log at debug level — absence of the mod is the normal case
-                if (Eternal_Mod.settings?.debugMode == true)
-                {
-                    Log.Message("[Eternal] Skipping Cultivator of the Rim BodyCultivationTick patch — mod not active");
-                }
-                return false;
-            }
-
-            if (Eternal_Mod.settings?.debugMode == true)
-            {
-                Log.Message("[Eternal] Cultivator of the Rim detected - enabling body-cultivation passive gain");
-            }
-
-            return true;
-        }
+        public static bool Prepare() => CompatibilityBinding.Prepare(CultivatorOfTheRimDetection.CultivatorOfTheRimActive,
+            "[Eternal] Skipping Cultivator of the Rim BodyCultivationTick patch — mod not active",
+            "[Eternal] Cultivator of the Rim detected - enabling body-cultivation passive gain");
 
         /// <summary>
         /// Resolve the target method via reflection.
@@ -87,12 +69,8 @@ namespace Eternal.Patches.CultivatorOfTheRim
         {
             var method = CultivatorOfTheRimDetection.CompPostTickIntervalMethod;
 
-            if (method == null)
-            {
-                Log.Warning("[Eternal] Skipping Cultivator of the Rim BodyCultivationTick patch — method not found (mod absent or API changed)");
-            }
-
-            return method;
+            return CompatibilityBinding.WarnMissing(method,
+                "[Eternal] Skipping Cultivator of the Rim BodyCultivationTick patch — method not found (mod absent or API changed)");
         }
 
         /// <summary>
@@ -108,14 +86,20 @@ namespace Eternal.Patches.CultivatorOfTheRim
             {
                 Pawn pawn = __instance?.Pawn;
                 if (pawn == null || !pawn.IsValidEternal())
+                {
                     return;
+                }
 
                 if (!pawn.IsHashIntervalTick(BODY_TRIGGER_INTERVAL, delta))
+                {
                     return;
+                }
 
                 float cultivationSpeed = CultivatorOfTheRimDetection.GetBodyCultivationSpeed(__instance);
                 if (cultivationSpeed <= 0f)
+                {
                     return; // reflection failure or zeroed stat — no gain
+                }
 
                 bool meditating = pawn.psychicEntropy?.IsCurrentlyMeditating == true;
                 float gain = Rand.Range(MEDITATION_SEVERITY_MIN, MEDITATION_SEVERITY_MAX)

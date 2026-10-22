@@ -46,7 +46,9 @@ namespace Eternal.Patches
         private static bool IsPartRegrowing(List<Hediff> pawnHediffs, BodyPartRecord part)
         {
             if (part == null)
+            {
                 return false;
+            }
 
             for (int i = 0; i < pawnHediffs.Count; i++)
             {

@@ -19,6 +19,8 @@ using Eternal.Extensions;
 using Eternal.Healing;
 using Eternal.Models;
 using Eternal.Utils;
+using Eternal.World;
+using Eternal.DI;
 
 namespace Eternal.Caravan
 {
@@ -30,11 +32,244 @@ namespace Eternal.Caravan
     {
         private static EternalCaravanDeathHandler instance;
         public static EternalCaravanDeathHandler Instance => instance;
-        
+
         private List<PendingTeleportation> pendingTeleportations = new List<PendingTeleportation>();
         private const int TELEPORTATION_DELAY = 25000; // ~12 hours in ticks
-        private const int RECOVERY_DURATION = 18000; // ~6 hours in ticks
-        
+        // Synchronous death windows only. Persistence stays with the reserved crash-site owner.
+        private readonly Dictionary<Pawn, SoloDeathRecovery> soloDeaths = new Dictionary<Pawn, SoloDeathRecovery>();
+
+        public sealed class SoloDeathRecovery
+        {
+            internal EternalCaravanDeathHandler Handler;
+            internal Pawn Pawn;
+            internal RimWorld.Planet.Caravan Caravan;
+            internal WorldObject_EternalCrashSite Site;
+            internal PawnAssignmentSnapshot Assignments;
+            internal bool DeferredRemoval;
+            internal Verse.Corpse Corpse;
+            internal bool OwnsReservation;
+            internal List<HealingItem> PreCalculatedQueue;
+        }
+
+        public bool BeginSoloDeath(Pawn pawn, out SoloDeathRecovery state)
+        {
+            state = null;
+            if (pawn == null || pawn.Dead || !pawn.HasTraitIgnoringSuppression(EternalDefOf.Eternal_GeneticMarker))
+            {
+                return true;
+            }
+
+            var caravan = pawn.GetCaravan();
+            if (caravan == null || !caravan.Spawned || caravan.Faction != Faction.OfPlayer
+                || caravan.PawnsListForReading.Any(member => member != pawn && caravan.IsOwner(member)))
+            {
+                return true;
+            }
+
+            if (soloDeaths.ContainsKey(pawn))
+            {
+                return false;
+            }
+
+            SoloDeathRecovery reservation = null;
+            try
+            {
+                var previousSites = new HashSet<WorldObject_EternalCrashSite>(
+                    Find.WorldObjects.AllWorldObjects.OfType<WorldObject_EternalCrashSite>());
+                var site = SpaceCrashRescueService.CreateOrGetCrashSite(caravan.Tile);
+                if (site?.Destroyed == true)
+                {
+                    site = null;
+                }
+                // A home map alone cannot guarantee persistent ownership if its later spawn
+                // fails. Require the existing deep-save site before any native death mutation.
+                if (site == null)
+                {
+                    EternalLogger.HandleException(EternalExceptionCategory.MapProtection,
+                        "BeginSoloDeath", pawn, new InvalidOperationException(
+                            "Deferred last-owner caravan death: no persistent recovery site can be reserved."));
+                    return false;
+                }
+                reservation = new SoloDeathRecovery
+                {
+                    Handler = this,
+                    Pawn = pawn,
+                    Caravan = caravan,
+                    Site = site,
+                    OwnsReservation = !previousSites.Contains(site)
+                };
+                reservation.Assignments = PawnAssignmentSnapshot.CaptureFrom(pawn);
+                reservation.PreCalculatedQueue = new EternalResurrectionCalculator().CalculateHealingQueue(pawn);
+                soloDeaths.Add(pawn, reservation);
+                state = reservation;
+                return true;
+            }
+            catch (Exception ex)
+            {
+                try { RemoveUnusedReservation(reservation); }
+                catch (Exception cleanupException)
+                {
+                    EternalLogger.HandleException(EternalExceptionCategory.MapProtection,
+                        "BeginSoloDeath.ReservationCleanup", pawn, cleanupException);
+                }
+                EternalLogger.HandleException(EternalExceptionCategory.MapProtection, "BeginSoloDeath", pawn, ex);
+                return false;
+            }
+        }
+
+        public bool DeferSoloCaravanRemoval(WorldObject worldObject)
+        {
+            var state = soloDeaths.Values.FirstOrDefault(window => ReferenceEquals(window.Caravan, worldObject));
+            if (state == null)
+            {
+                return false;
+            }
+
+            state.DeferredRemoval = true;
+            return true;
+        }
+
+        public bool StageSoloCorpse(RimWorld.Planet.Caravan caravan, Thing thing)
+        {
+            if (!(thing is Verse.Corpse corpse))
+            {
+                return false;
+            }
+
+            var state = soloDeaths.Values.FirstOrDefault(window => window.Caravan == caravan && window.Pawn == corpse.InnerPawn);
+            if (state == null)
+            {
+                return false;
+            }
+
+            state.Corpse = corpse;
+            // Empty caravans have no native inventory carrier. Never enter GiveThing here:
+            // it destroys the item when no pawn exists, before the primary death hook runs.
+            if (SpaceCrashRescueService.DeliverCorpsesToCrashSite(new[] { corpse }, caravan.Tile) > 0)
+            {
+                return true;
+            }
+
+            if (state.Site?.TryStageCorpseForRecovery(corpse) == true)
+            {
+                return true;
+            }
+            // The destination was reserved before the destructive pipeline. A failure here
+            // must be reported rather than falling through to native inventory destruction.
+            throw new InvalidOperationException("Reserved solo-caravan recovery destination rejected the corpse.");
+        }
+
+        public void EndSoloDeath(SoloDeathRecovery state)
+        {
+            if (state == null)
+            {
+                return;
+            }
+
+            if (!state.Pawn.Dead)
+            {
+                // Another Kill prefix may cancel after our preflight reserved a site.
+                RemoveUnusedReservation(state);
+                soloDeaths.Remove(state.Pawn);
+                return;
+            }
+
+            var corpse = state.Corpse ?? state.Pawn.Corpse;
+            if (corpse == null || corpse.Destroyed || corpse.InnerPawn != state.Pawn)
+            {
+                throw new InvalidOperationException("Solo-caravan death did not retain its native corpse; caravan cleanup deferred.");
+            }
+
+            // Pawn.Kill catches failures during AddPawnOrItem internally and can skip the
+            // later primary death notification. Its finalizer must finish both guarantees
+            // before releasing the window that protects the last native caravan owner.
+            if (!HasPersistentCorpseOwner(corpse))
+            {
+                try { state.Site?.TryStageCorpseForRecovery(corpse); }
+                catch (Exception ex)
+                {
+                    EternalLogger.HandleException(EternalExceptionCategory.MapProtection,
+                        "EndSoloDeath.ReservedStaging", state.Pawn, ex);
+                }
+                if (!HasPersistentCorpseOwner(corpse))
+                {
+                    // A rejected transfer can leave the newly made corpse completely unowned.
+                    // Retain it in the pre-reserved site's same deep list without detaching,
+                    // moving or stealing anything that still belongs to another owner.
+                    state.Site?.TryRetainUnownedCorpse(corpse);
+                }
+                if (!HasPersistentCorpseOwner(corpse))
+                {
+                    throw new InvalidOperationException("Solo-caravan corpse has no unique persistent recovery owner "
+                        + $"(spawned={corpse.Spawned}, holder={corpse.ParentHolder?.GetType().FullName ?? "none"}); "
+                        + "caravan cleanup deferred.");
+                }
+            }
+
+            var manager = EternalServiceContainer.Instance?.CorpseManager;
+            if (manager == null)
+            {
+                throw new InvalidOperationException("Solo-caravan corpse tracking is unavailable; caravan cleanup deferred.");
+            }
+            var entry = manager.GetCorpseData(state.Pawn);
+            if (entry == null || !ReferenceEquals(entry.Corpse, corpse))
+            {
+                manager.RegisterCorpse(corpse, state.Pawn, state.Assignments, state.PreCalculatedQueue);
+                entry = manager.GetCorpseData(state.Pawn);
+            }
+            if (entry == null || !ReferenceEquals(entry.Corpse, corpse) || !HasPersistentCorpseOwner(corpse))
+            {
+                throw new InvalidOperationException("Solo-caravan corpse registration or persistent ownership did not complete; caravan cleanup deferred.");
+            }
+            if ((entry.PreCalculatedHealingQueue == null || entry.PreCalculatedHealingQueue.Count == 0)
+                && state.PreCalculatedQueue?.Count > 0)
+            {
+                // The generic Kill postfix can register an interrupted death without a queue
+                // before this finalizer runs. Complete that entry without replacing real work
+                // already captured by the primary death notification.
+                entry.PreCalculatedHealingQueue = state.PreCalculatedQueue;
+            }
+            if (state.Assignments != null)
+            {
+                entry.AssignmentSnapshot = state.Assignments;
+            }
+
+            RemoveUnusedReservation(state);
+            // Remove before native Destroy so its own prefix cannot retain an empty caravan.
+            soloDeaths.Remove(state.Pawn);
+            if (state.DeferredRemoval && state.Caravan.Spawned)
+            {
+                state.Caravan.Destroy();
+            }
+        }
+
+        private static bool HasPersistentCorpseOwner(Verse.Corpse corpse)
+        {
+            if (corpse == null || corpse.Destroyed)
+            {
+                return false;
+            }
+            int deepOwners = Find.WorldObjects.AllWorldObjects.OfType<WorldObject_EternalCrashSite>()
+                .Count(site => site.Spawned && !site.Destroyed && site.HasPendingCorpse(corpse));
+            if (corpse.Spawned)
+            {
+                // Native map ownership can also supply holdingOwner; physical map ownership
+                // is authoritative here, provided no site still deep-saves the same corpse.
+                return deepOwners == 0 && corpse.Map != null && Find.Maps.Contains(corpse.Map);
+            }
+            return corpse.holdingOwner == null && deepOwners == 1;
+        }
+
+        private static void RemoveUnusedReservation(SoloDeathRecovery state)
+        {
+            var site = state?.Site;
+            if (state?.OwnsReservation == true && site != null && site.Spawned && !site.Destroyed
+                && !site.HasMap && !site.HasRecoveryContents)
+            {
+                site.Destroy();
+            }
+        }
+
         /// <summary>
         /// Represents a pending teleportation for a dead Eternal.
         /// </summary>
@@ -45,19 +280,21 @@ namespace Eternal.Caravan
             public IntVec3 deathLocation;
             public Verse.Map deathMap;
             public bool processed;
-            
+
             /// <summary>
             /// Checks if teleportation should be processed.
             /// </summary>
             public bool ShouldProcess()
             {
                 if (processed)
+                {
                     return false;
-                    
+                }
+
                 int currentTick = Find.TickManager.TicksGame;
                 return currentTick - deathTick >= TELEPORTATION_DELAY;
             }
-            
+
             /// <summary>
             /// Exposes data for save/load functionality.
             /// </summary>
@@ -70,7 +307,7 @@ namespace Eternal.Caravan
                 Scribe_Values.Look(ref processed, "processed", false);
             }
         }
-        
+
         /// <summary>
         /// Initializes a new instance of EternalCaravanDeathHandler class.
         /// </summary>
@@ -83,7 +320,7 @@ namespace Eternal.Caravan
         {
             instance = this;
         }
-        
+
         /// <summary>
         /// Executes every pending teleportation whose delay has elapsed. Driven by
         /// <see cref="TickOrchestrator"/>; this handler is not a registered game component.
@@ -100,7 +337,7 @@ namespace Eternal.Caravan
                 }
             }
         }
-        
+
         /// <summary>
         /// Registers a dead Eternal for teleportation.
         /// </summary>
@@ -110,16 +347,22 @@ namespace Eternal.Caravan
         public void RegisterDeath(Pawn pawn, IntVec3 location, Verse.Map map)
         {
             if (pawn == null || !pawn.Dead)
+            {
                 return;
-                
+            }
+
             // Check if pawn has Eternal trait (including suppressed traits)
             if (!pawn.HasTraitIgnoringSuppression(EternalDefOf.Eternal_GeneticMarker))
+            {
                 return;
-                
+            }
+
             // Check if pawn is in a caravan
             if (!IsPawnInCaravan(pawn))
+            {
                 return;
-                
+            }
+
             // Create pending teleportation
             var teleportation = new PendingTeleportation
             {
@@ -129,9 +372,9 @@ namespace Eternal.Caravan
                 deathMap = map,
                 processed = false
             };
-            
+
             pendingTeleportations.Add(teleportation);
-            
+
             // Log death registration
             if (Eternal_Mod.settings?.debugMode == true)
             {
@@ -148,7 +391,9 @@ namespace Eternal.Caravan
         public void RegisterDeath(Pawn pawn, Verse.Corpse corpse)
         {
             if (pawn == null)
+            {
                 return;
+            }
 
             // Calculate healing queue NOW, before RimWorld removes injuries from dead pawn
             // This is critical because RimWorld may remove/modify hediffs on dead pawns over time
@@ -218,8 +463,10 @@ namespace Eternal.Caravan
         private void ProcessTeleportation(PendingTeleportation teleportation)
         {
             if (teleportation.pawn == null || teleportation.processed)
+            {
                 return;
-                
+            }
+
             // Find player's home map
             Verse.Map homeMap = Find.AnyPlayerHomeMap;
             if (homeMap == null)
@@ -227,7 +474,7 @@ namespace Eternal.Caravan
                 Log.Error("Cannot teleport Eternal - no player home map found");
                 return;
             }
-            
+
             // Find valid spawn location at map edge
             IntVec3 spawnLocation = FindValidSpawnLocation(homeMap);
             if (!spawnLocation.IsValid)
@@ -235,23 +482,23 @@ namespace Eternal.Caravan
                 Log.Error($"Cannot teleport Eternal - no valid spawn location found on map {homeMap}");
                 return;
             }
-            
+
             // Teleport the pawn
             TeleportPawn(teleportation.pawn, spawnLocation, homeMap);
-            
+
             // Mark as processed
             teleportation.processed = true;
-            
+
             // Show notification and story text
             ShowTeleportationEvent(teleportation.pawn, teleportation.deathLocation, spawnLocation);
-            
+
             // Log teleportation
             if (Eternal_Mod.settings?.debugMode == true)
             {
                 Log.Message($"Teleported Eternal {teleportation.pawn.Name?.ToStringFull ?? "Unknown"} to {spawnLocation}");
             }
         }
-        
+
         /// <summary>
         /// Checks if a pawn or their corpse is in a caravan.
         /// Uses direct type checking via Find.WorldObjects.Caravans for performance.
@@ -261,16 +508,22 @@ namespace Eternal.Caravan
         public static bool IsPawnInCaravan(Pawn pawn)
         {
             if (pawn == null)
+            {
                 return false;
+            }
 
             // Check if living pawn is in caravan
             if (!pawn.Dead && pawn.GetCaravan() != null)
+            {
                 return true;
+            }
 
             // Check if corpse is in a caravan
             var corpse = pawn.Corpse;
             if (corpse == null)
+            {
                 return false;
+            }
 
             // Corpse not spawned on a map means it's likely in world (caravan/storage)
             if (!corpse.Spawned && corpse.Tile >= 0)
@@ -286,7 +539,7 @@ namespace Eternal.Caravan
 
             return false;
         }
-        
+
         /// <summary>
         /// Finds a valid spawn location at the edge of a map.
         /// </summary>
@@ -303,10 +556,10 @@ namespace Eternal.Caravan
                     return location;
                 }
             }
-            
+
             return IntVec3.Invalid;
         }
-        
+
         /// <summary>
         /// Teleports a pawn to a new location.
         /// </summary>
@@ -320,18 +573,18 @@ namespace Eternal.Caravan
             {
                 pawn.DeSpawn();
             }
-            
+
             // Spawn at new location
             GenSpawn.Spawn(pawn, location, map);
-            
+
             // Apply teleportation recovery hediff
             var recoveryHediff = HediffMaker.MakeHediff(EternalDefOf.Eternal_TeleportationRecovery, pawn);
             pawn.health.AddHediff(recoveryHediff);
-            
+
             // Start regrowth process
             Eternal_Component.Instance?.StartRegrowth(pawn);
         }
-        
+
         /// <summary>
         /// Shows the teleportation event notification and story text.
         /// </summary>
@@ -347,26 +600,17 @@ namespace Eternal.Caravan
                              "The Eternal's biological regeneration has activated, " +
                              "drawing them back from the brink of oblivion. " +
                              "They will now begin the regrowth process.";
-            
+
             // Show letter
             LetterDef letterDef = LetterDefOf.PositiveEvent;
             Letter letter = LetterMaker.MakeLetter(
                 storyText,
                 storyText,
                 letterDef);
-                 
+
             Find.LetterStack.ReceiveLetter(letter);
         }
-        
-        /// <summary>
-        /// Gets all pending teleportations.
-        /// </summary>
-        /// <returns>List of pending teleportations.</returns>
-        public List<PendingTeleportation> GetPendingTeleportations()
-        {
-            return new List<PendingTeleportation>(pendingTeleportations);
-        }
-        
+
         /// <summary>
         /// Exposes data for save/load functionality.
         /// </summary>

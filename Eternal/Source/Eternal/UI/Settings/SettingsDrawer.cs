@@ -16,7 +16,7 @@
 //              0.1 multiplier displayed disease heal times 10x shorter than the new engine rate.
 //              styled section headers with reset buttons, info boxes, live preview stats,
 //              inline-editable slider values (click to type), and comprehensive tooltips.
-//              Healing rate displayed in ratio format: 250 : 1 (severity : nutrition).
+//              Healing rate displayed in ratio format: 250 : 1 (normal-injury HP : nutrition).
 //              v1.0.1: Added Effects tab with consciousness buff, mood buff, population cap sections.
 
 using System;
@@ -29,6 +29,7 @@ using Eternal.UI.HediffSettings;
 using Eternal.Extensions;
 using Eternal.DI;
 using Eternal.Healing;
+using Eternal.UI.Management;
 
 namespace Eternal.UI.Settings
 {
@@ -37,13 +38,9 @@ namespace Eternal.UI.Settings
     /// </summary>
     public enum SettingsTab
     {
-        Core,        // General + Healing
-        Economy,     // Resources + Food Debt
-        Effects,     // Consciousness buff, mood buff, population cap
-        Performance, // Tick rates and intervals
-        Advanced,    // Hediff Manager + Map Protection
-        Status,      // Calculated statistics & previews
-        Thresholds   // Live per-pawn healing-activation thresholds
+        Main,
+        Effects,
+        Advanced
     }
 
     /// <summary>
@@ -62,27 +59,8 @@ namespace Eternal.UI.Settings
         /// </summary>
         public static string HealingTime(float baseRate, int normalTickRate)
         {
-            // Ticks needed to heal 100% damage (severity ratio of 1.0)
-            float healingCycles = 1.0f / baseRate;
-            float gameTicks = healingCycles * normalTickRate;
-
-            // Convert to in-game time (2500 ticks = 1 hour)
-            float hours = gameTicks / 2500f;
-
-            if (hours < 1f)
-            {
-                float minutes = hours * 60f;
-                return $"Full heal: ~{minutes:F0} minutes";
-            }
-            else if (hours < 24f)
-            {
-                return $"Full heal: ~{hours:F1} hours";
-            }
-            else
-            {
-                float days = hours / 24f;
-                return $"Full heal: ~{days:F1} days";
-            }
+            return "Example: 50 severity, body size 1 — " +
+                MenuValueCalculator.Time(MenuValueCalculator.ConditionTicks(50f, baseRate, 1f, normalTickRate));
         }
     }
 
@@ -100,25 +78,16 @@ namespace Eternal.UI.Settings
         /// </summary>
         public static string InjuryHealTime(float baseRate, int normalTickRate)
         {
-            // Unified formula: cycles = severity / baseRate
-            float cycles = 1.0f / baseRate;
-            float gameTicks = cycles * normalTickRate;
-            float hours = gameTicks / 2500f;
-            return FormatTime(hours);
+            return MenuValueCalculator.Time(MenuValueCalculator.ConditionTicks(1f, baseRate, 1f, normalTickRate));
         }
 
         /// <summary>
-        /// Scar heal time: (1.0 / baseRate) × rareTickRate / 2500 hours
-        /// Source: ScarCostCalculator.cs - unified formula matching injury healing
-        /// Scars heal at the same rate as injuries, just on rareTickRate instead of normalTickRate.
+        /// Scar completion also depends on elapsed per-condition processing and initialization.
+        /// A global rate/interval pair alone is insufficient for a trustworthy completion ETA.
         /// </summary>
         public static string ScarHealTime(float baseRate, int rareTickRate)
         {
-            // Unified formula: same as injury, just different tick interval
-            float cycles = 1.0f / baseRate;
-            float gameTicks = cycles * rareTickRate;
-            float hours = gameTicks / 2500f;
-            return FormatTime(hours);
+            return "Unavailable (elapsed scar processing not known)";
         }
 
         /// <summary>
@@ -128,12 +97,7 @@ namespace Eternal.UI.Settings
         /// </summary>
         public static string DiseaseHealTime(float baseRate, int normalTickRate, int stage)
         {
-            float[] stageMultipliers = { 1.0f, 0.8f, 0.6f, 0.4f, 0.2f };
-            float mult = stageMultipliers[Math.Min(stage, 4)];
-            float cycles = 1.0f / (baseRate * mult * Healing.UnifiedHediffHealingCalculator.DEBUFF_RATE_FACTOR);
-            float gameTicks = cycles * normalTickRate;
-            float hours = gameTicks / 2500f;
-            return FormatTime(hours);
+            return MenuValueCalculator.Time(MenuValueCalculator.ConditionTicks(1f, baseRate, 1f, normalTickRate, stage));
         }
 
         /// <summary>
@@ -149,10 +113,8 @@ namespace Eternal.UI.Settings
         /// </summary>
         public static string RegrowthPhaseTime(float baseRate, int rareTickRate)
         {
-            float rareTicks = 0.25f * ReferenceArmHP * SettingsDefaults.RegrowthWorkPerPartHP / baseRate;
-            float gameTicks = rareTicks * rareTickRate;
-            float hours = gameTicks / 2500f;
-            return FormatTime(hours);
+            return MenuValueCalculator.Time(MenuValueCalculator.ProcessingTicks(
+                0.25f * ReferenceArmHP * SettingsDefaults.RegrowthWorkPerPartHP, baseRate, rareTickRate));
         }
 
         /// <summary>
@@ -161,10 +123,8 @@ namespace Eternal.UI.Settings
         /// </summary>
         public static string FullLimbRegrowth(float baseRate, int rareTickRate)
         {
-            float rareTicks = ReferenceArmHP * SettingsDefaults.RegrowthWorkPerPartHP / baseRate;
-            float gameTicks = rareTicks * rareTickRate;
-            float hours = gameTicks / 2500f;
-            return FormatTime(hours);
+            return MenuValueCalculator.Time(MenuValueCalculator.ProcessingTicks(
+                ReferenceArmHP * SettingsDefaults.RegrowthWorkPerPartHP, baseRate, rareTickRate));
         }
 
         /// <summary>
@@ -190,8 +150,8 @@ namespace Eternal.UI.Settings
         public static string NormalTickCost(float baseRate, float nutritionMult, float severityToNutritionRatio)
         {
             // Severity healed per cycle = baseRate (injuries: severityScaling = 1)
-            float cost = baseRate * severityToNutritionRatio * nutritionMult;
-            return $"{cost:F4} nutrition";
+            return MenuValueCalculator.ExampleNutrition(MenuValueCalculator.NutritionCost(
+                baseRate, severityToNutritionRatio, nutritionMult), 4);
         }
 
         /// <summary>
@@ -201,8 +161,8 @@ namespace Eternal.UI.Settings
         public static string RareTickCost(float baseRate, float nutritionMult, float severityToNutritionRatio)
         {
             // Unified formula: same cost calculation as injuries
-            float cost = baseRate * severityToNutritionRatio * nutritionMult;
-            return $"{cost:F4} nutrition";
+            return MenuValueCalculator.ExampleNutrition(MenuValueCalculator.NutritionCost(
+                baseRate, severityToNutritionRatio, nutritionMult), 4);
         }
 
         /// <summary>
@@ -217,13 +177,12 @@ namespace Eternal.UI.Settings
         }
 
         /// <summary>
-        /// Full scar heal cost (severity 1.0).
-        /// Same as injury (unified system) — the 0.5x scar healing speed changes duration, not total cost.
+        /// Living permanent-scar healing uses ScarHealingApplier without nutrition/debt charges.
+        /// Corpse scars use the separate corpse injury charge path.
         /// </summary>
         public static string FullScarCost(float nutritionMult, float severityToNutritionRatio)
         {
-            float total = 1.0f * severityToNutritionRatio * nutritionMult;
-            return $"~{total:F4} nutrition";
+            return "No nutrition charge";
         }
 
         /// <summary>
@@ -231,8 +190,7 @@ namespace Eternal.UI.Settings
         /// </summary>
         public static string ResurrectionCost(float pawnNutritionCap)
         {
-            float maxCost = 2.0f * pawnNutritionCap;
-            return $"<={maxCost:F2} nutrition";
+            return "Uncapped; based on remaining work";
         }
 
         #endregion
@@ -256,33 +214,25 @@ namespace Eternal.UI.Settings
         {
             float costPerInjury = 1.0f * severityToNutritionRatio * nutritionMult;
             if (costPerInjury <= 0f)
+            {
                 return "unlimited";
+            }
+
             float count = maxDebt / costPerInjury;
             return $"~{count:F0} injuries";
         }
 
         /// <summary>
-        /// Full scars that can be covered by max debt.
+        /// The living permanent-scar route does not consume debt capacity.
         /// </summary>
         public static string ScarsCoveredByDebt(float maxDebt, float nutritionMult, float severityToNutritionRatio)
         {
-            float costPerScar = 1.0f * severityToNutritionRatio * nutritionMult;
-            if (costPerScar <= 0f)
-                return "unlimited";
-            float count = maxDebt / costPerScar;
-            return $"~{count:F0} scars";
+            return "Not debt-limited";
         }
 
         #endregion
 
         #region Helpers
-
-        private static string FormatTime(float hours)
-        {
-            if (hours < 1f) return $"~{hours * 60f:F0} minutes";
-            if (hours < 24f) return $"~{hours:F1} hours";
-            return $"~{hours / 24f:F1} days";
-        }
 
         #endregion
     }
@@ -296,7 +246,18 @@ namespace Eternal.UI.Settings
     {
         private readonly Eternal_Settings settings;
         private Vector2 scrollPosition = Vector2.zero;
-        private SettingsTab currentTab = SettingsTab.Core;
+        private SettingsTab currentTab = SettingsTab.Main;
+        private bool hediffExpanded;
+        private EternalHediffView hediffView;
+        private Rect visiblePage;
+#if DEBUG
+        private float hediffSectionTop;
+#endif
+        internal bool HediffSectionRendered { get; private set; }
+
+        private bool showStatusExamples;
+        private bool showThresholds;
+        private readonly Dictionary<SettingsTab, float> measuredHeights = new Dictionary<SettingsTab, float>();
 
         // Inline edit state for slider values
         private string activeEditControlName = null;  // null = no slider in edit mode
@@ -325,40 +286,89 @@ namespace Eternal.UI.Settings
             Rect contentRect = new Rect(inRect.x, inRect.y + tabHeight + tabGap, inRect.width, inRect.height - tabHeight - tabGap);
 
             float contentHeight = CalculateTabContentHeight(currentTab);
+            scrollPosition.y = EmbeddedHediffLayout.ClampScroll(scrollPosition.y, contentHeight, contentRect.height);
             Rect viewRect = new Rect(0, 0, contentRect.width - 16f, contentHeight);
 
             Widgets.BeginScrollView(contentRect, ref scrollPosition, viewRect);
+            try
+            {
+                visiblePage = new Rect(0f, scrollPosition.y, viewRect.width, contentRect.height);
+                HediffSectionRendered = false;
 
-            Listing_Standard listing = new Listing_Standard();
-            listing.Begin(viewRect);
-
-            DrawCurrentTabContent(listing);
-
-            listing.End();
-            Widgets.EndScrollView();
+                Listing_Standard listing = new Listing_Standard { maxOneColumn = true };
+                listing.Begin(viewRect);
+                try
+                {
+                    DrawCurrentTabContent(listing);
+                    measuredHeights[currentTab] = listing.CurHeight + 30f;
+                }
+                finally
+                {
+                    listing.End();
+                }
+            }
+            finally
+            {
+                Widgets.EndScrollView();
+            }
+            scrollPosition.y = EmbeddedHediffLayout.ClampScroll(scrollPosition.y,
+                measuredHeights[currentTab], contentRect.height);
         }
+
+        internal void SelectTab(SettingsTab tab)
+        {
+            if (currentTab == tab)
+            {
+                return;
+            }
+
+            ReleaseFocus();
+            currentTab = tab;
+            scrollPosition = Vector2.zero;
+        }
+
+        internal void SetHediffExpanded(bool expanded)
+        {
+            if (hediffExpanded && !expanded)
+            {
+                ReleaseFocus();
+            }
+
+            hediffExpanded = expanded;
+        }
+
+        private void ReleaseFocus()
+        {
+            hediffView?.ReleaseEditorFocus();
+            GUI.FocusControl(null);
+            GUIUtility.keyboardControl = 0;
+            activeEditControlName = null;
+            editBuffer = "";
+        }
+
+#if DEBUG
+        internal (SettingsTab Tab, bool Expanded, Vector2 Scroll) CaptureNavigation()
+            => (currentTab, hediffExpanded, scrollPosition);
+
+        internal void RestoreNavigation((SettingsTab Tab, bool Expanded, Vector2 Scroll) state)
+        {
+            SelectTab(state.Tab);
+            SetHediffExpanded(state.Expanded);
+            scrollPosition = state.Scroll;
+        }
+
+        internal void ScrollToHediffSettings() => scrollPosition.y = hediffSectionTop;
+#endif
 
         /// <summary>
         /// Draws the tab buttons at the top of the settings window.
         /// </summary>
         private void DrawSettingsTabs(Rect rect)
         {
-            float tabWidth = rect.width / 7f;
-            float x = rect.x;
-
-            DrawTabButton(new Rect(x, rect.y, tabWidth, rect.height), "Core", SettingsTab.Core);
-            x += tabWidth;
-            DrawTabButton(new Rect(x, rect.y, tabWidth, rect.height), "Economy", SettingsTab.Economy);
-            x += tabWidth;
-            DrawTabButton(new Rect(x, rect.y, tabWidth, rect.height), "Effects", SettingsTab.Effects);
-            x += tabWidth;
-            DrawTabButton(new Rect(x, rect.y, tabWidth, rect.height), "Performance", SettingsTab.Performance);
-            x += tabWidth;
-            DrawTabButton(new Rect(x, rect.y, tabWidth, rect.height), "Advanced", SettingsTab.Advanced);
-            x += tabWidth;
-            DrawTabButton(new Rect(x, rect.y, tabWidth, rect.height), "Status", SettingsTab.Status);
-            x += tabWidth;
-            DrawTabButton(new Rect(x, rect.y, tabWidth, rect.height), "Thresholds", SettingsTab.Thresholds);
+            float tabWidth = rect.width / 3f;
+            DrawTabButton(new Rect(rect.x, rect.y, tabWidth, rect.height), "Main", SettingsTab.Main);
+            DrawTabButton(new Rect(rect.x + tabWidth, rect.y, tabWidth, rect.height), "Effects", SettingsTab.Effects);
+            DrawTabButton(new Rect(rect.x + 2f * tabWidth, rect.y, tabWidth, rect.height), "Advanced", SettingsTab.Advanced);
         }
 
         /// <summary>
@@ -396,12 +406,9 @@ namespace Eternal.UI.Settings
             Text.Anchor = TextAnchor.UpperLeft;
 
             // Click detection
-            if (Widgets.ButtonInvisible(rect))
+            if (GUI.enabled && Widgets.ButtonInvisible(rect))
             {
-                currentTab = tab;
-                scrollPosition = Vector2.zero; // Reset scroll on tab change
-                activeEditControlName = null;  // Exit any inline edit mode
-                editBuffer = "";
+                SelectTab(tab);
             }
         }
 
@@ -412,29 +419,40 @@ namespace Eternal.UI.Settings
         {
             switch (currentTab)
             {
-                case SettingsTab.Core:
-                    DrawGeneralSettings(listing);
+                case SettingsTab.Main:
                     DrawHealingSettings(listing);
-                    break;
-                case SettingsTab.Economy:
                     DrawResourceSettings(listing);
                     DrawFoodDebtSettings(listing);
                     break;
                 case SettingsTab.Effects:
                     DrawEffectsTab(listing);
                     break;
-                case SettingsTab.Performance:
-                    DrawPerformanceSettings(listing);
-                    break;
                 case SettingsTab.Advanced:
+                    DrawGeneralSettings(listing);
+                    DrawPerformanceSettings(listing);
                     DrawAdvancedHediffSettings(listing);
                     DrawMapProtectionSettings(listing);
-                    break;
-                case SettingsTab.Status:
-                    DrawStatusTab(listing);
-                    break;
-                case SettingsTab.Thresholds:
-                    DrawThresholdsTab(listing);
+                    listing.GapLine();
+                    if (listing.ButtonText((showStatusExamples ? "▼ " : "▶ ") + "Live examples"))
+                    {
+                        showStatusExamples = !showStatusExamples;
+                    }
+
+                    if (showStatusExamples)
+                    {
+                        DrawStatusTab(listing);
+                    }
+
+                    if (listing.ButtonText((showThresholds ? "▼ " : "▶ ") + "Pawn healing thresholds"))
+                    {
+                        showThresholds = !showThresholds;
+                    }
+
+                    if (showThresholds)
+                    {
+                        DrawThresholdsTab(listing);
+                    }
+
                     break;
             }
         }
@@ -486,13 +504,13 @@ namespace Eternal.UI.Settings
         /// <summary>
         /// Draws the healing rate slider with ratio format display.
         /// Uses the working SliderWithInlineEdit pattern for proper text field handling.
-        /// Shows cost ratio from SettingsDefaults.GetSeverityToNutritionRatioDisplay().
+        /// Shows cost ratio from MenuValueCalculator.EffectiveConversion(SettingsDefaults.SeverityToNutritionRatio, settings.nutritionCostMultiplier).
         /// </summary>
         private void DrawHealingRateWithRatio(Listing_Standard listing, ref float healingRate)
         {
             // Tooltip for healing rate
-            string tooltip = "Severity reduced per healing tick.\n\n" +
-                $"Cost formula: {SettingsDefaults.GetSeverityToNutritionRatioDisplay()} (severity : nutrition)\n\n" +
+            string tooltip = "Normal-injury HP reduced per scheduled pass; each eligible condition retains its own rate.\n\n" +
+                $"Cost formula: {MenuValueCalculator.EffectiveConversion(SettingsDefaults.SeverityToNutritionRatio, settings.nutritionCostMultiplier)} (normal-injury HP : nutrition)\n\n" +
                 $"• {SettingsDefaults.BaseHealingRateMin:F2} = Very slow\n" +
                 "• 0.5 = Moderate\n" +
                 $"• {SettingsDefaults.BaseHealingRate:F1} = Apex pacing (default)\n" +
@@ -511,7 +529,7 @@ namespace Eternal.UI.Settings
             // Display cost ratio on separate line
             Text.Font = GameFont.Tiny;
             GUI.color = new Color(0.6f, 0.8f, 0.6f); // Light green for emphasis
-            listing.Label($"    Cost ratio: {SettingsDefaults.GetSeverityToNutritionRatioDisplay()} (severity : nutrition)");
+            listing.Label($"    Cost ratio: {MenuValueCalculator.EffectiveConversion(SettingsDefaults.SeverityToNutritionRatio, settings.nutritionCostMultiplier)} (normal-injury HP : nutrition)");
             GUI.color = Color.white;
             Text.Font = GameFont.Small;
         }
@@ -648,7 +666,13 @@ namespace Eternal.UI.Settings
 
         private void DrawAdvancedHediffSettings(Listing_Standard listing)
         {
-            DrawSectionHeaderNoReset(listing, "Hediff Healing");
+#if DEBUG
+            hediffSectionTop = listing.CurHeight;
+#endif
+            if (listing.ButtonText((hediffExpanded ? "▼ " : "▶ ") + "Hediff Healing"))
+            {
+                SetHediffExpanded(!hediffExpanded);
+            }
 
             // Per-hediff settings are always available; there is no separate enable toggle.
             // Show the manager summary
@@ -661,15 +685,18 @@ namespace Eternal.UI.Settings
             GUI.color = Color.white;
             Text.Font = GameFont.Small;
 
-            Rect buttonRect = listing.GetRect(30f);
-            if (Widgets.ButtonText(buttonRect, "Open Hediff Manager"))
+            if (hediffExpanded)
             {
-                Find.WindowStack.Add(new EternalHediffView(settings.hediffManager));
-            }
-            if (Mouse.IsOver(buttonRect))
-            {
-                TooltipHandler.TipRegion(buttonRect,
-                    "Configure individual hediff healing behavior, speed, and conditions.");
+                if (hediffView == null)
+                {
+                    hediffView = new EternalHediffView(settings.hediffManager);
+                }
+
+                var section = new Rect(0f, listing.CurHeight, listing.ColumnWidth,
+                    hediffView.GetContentHeight(listing.ColumnWidth));
+                HediffSectionRendered = hediffView.Draw(section, visiblePage);
+                // Filters and sub-tabs may change height while drawing; reserve the new extent.
+                listing.GetRect(hediffView.GetContentHeight(listing.ColumnWidth));
             }
             listing.Gap(listing.verticalSpacing);
 
@@ -706,20 +733,40 @@ namespace Eternal.UI.Settings
 
         private void DrawStatusTab(Listing_Standard listing)
         {
-            // Assume human baseline (1.0 nutrition cap, 1.0 body size)
+            var selected = (Find.UIRoot as UIRoot_Play)?.mapUI?.selector?.SingleSelectedThing;
+            var selectedPawn = selected as Pawn ?? (selected as Verse.Corpse)?.InnerPawn;
+            if (selectedPawn != null)
+            {
+                var actual = new ManagementTabModel(selectedPawn, selected as Verse.Corpse).Capture();
+                listing.Label("Selected pawn: " + actual.Name);
+                listing.Label(actual.ProcessingRate);
+                listing.Label(actual.Headroom);
+                listing.Label(actual.CapacityDetails);
+                listing.Label(actual.RecoveryRate);
+            }
+            else
+            {
+                listing.Label("Select a pawn or corpse for actual rate, debt and capacity values.");
+            }
+            listing.Label("Global size-1 injury rate per eligible condition: " + MenuValueCalculator.Number(
+                MenuValueCalculator.ProcessingHpPerDay(settings.baseHealingRate, settings.normalTickRate)) + " HP/day (parallel).");
+            listing.Label($"Illness range: {SettingsDefaults.IllnessFullRangeNutrition} nutrition; chronic range: {SettingsDefaults.ChronicFullRangeNutrition}, before stage premiums and multipliers. Unknown ranges use a labeled per-severity fallback.");
+            // Explicit reference examples below are separate from selected-pawn measurements.
             const float humanNutritionCap = 1.0f;
             const float humanBodySize = 1.0f;
             float maxDebt = humanNutritionCap * settings.maxDebtMultiplier;
 
+            listing.Label("Examples: body size 1; injuries/scars 1 severity; arm 30 HP. Debuff times hold the current stage fixed. Regrowth excludes parent waits.");
+            listing.Label("Scar healing scales with elapsed processing time; the global rate alone does not establish a full completion time.");
             // Section 1: Healing Times
             DrawSectionHeaderNoReset(listing, "Healing Times");
             DrawStatusRow(listing, "Injury (per 1 severity)",
                 StatusCalculator.InjuryHealTime(settings.baseHealingRate, settings.normalTickRate));
-            DrawStatusRow(listing, "Scar (per 1 severity)",
+            DrawStatusRow(listing, "Living permanent scar (1 severity)",
                 StatusCalculator.ScarHealTime(settings.baseHealingRate, settings.rareTickRate));
-            DrawStatusRow(listing, "Disease (stage 0)",
+            DrawStatusRow(listing, "Debuff (1 severity, stage 0)",
                 StatusCalculator.DiseaseHealTime(settings.baseHealingRate, settings.normalTickRate, 0));
-            DrawStatusRow(listing, "Disease (stage 3)",
+            DrawStatusRow(listing, "Debuff (1 severity, stage 3)",
                 StatusCalculator.DiseaseHealTime(settings.baseHealingRate, settings.normalTickRate, 3));
             DrawStatusRow(listing, "Regrowth (arm, per phase)",
                 StatusCalculator.RegrowthPhaseTime(settings.baseHealingRate, settings.rareTickRate));
@@ -730,13 +777,13 @@ namespace Eternal.UI.Settings
 
             // Section 2: Nutrition Costs
             DrawSectionHeaderNoReset(listing, "Nutrition Costs");
-            DrawStatusRow(listing, "Per normal tick",
+            DrawStatusRow(listing, "Per normal pass (body 1)",
                 StatusCalculator.NormalTickCost(settings.baseHealingRate, settings.nutritionCostMultiplier, SettingsDefaults.SeverityToNutritionRatio));
-            DrawStatusRow(listing, "Per rare tick",
+            DrawStatusRow(listing, "Regrowth per active part/pass (body 1)",
                 StatusCalculator.RareTickCost(settings.baseHealingRate, settings.nutritionCostMultiplier, SettingsDefaults.SeverityToNutritionRatio));
-            DrawStatusRow(listing, "Full injury heal",
+            DrawStatusRow(listing, "Injury (1 severity)",
                 StatusCalculator.FullInjuryCost(settings.nutritionCostMultiplier, SettingsDefaults.SeverityToNutritionRatio));
-            DrawStatusRow(listing, "Full scar heal",
+            DrawStatusRow(listing, "Living permanent scar (1 severity)",
                 StatusCalculator.FullScarCost(settings.nutritionCostMultiplier, SettingsDefaults.SeverityToNutritionRatio));
             DrawStatusRow(listing, "Full arm regrowth",
                 StatusCalculator.FullLimbRegrowthCost(settings.nutritionCostMultiplier, SettingsDefaults.SeverityToNutritionRatio));
@@ -749,12 +796,12 @@ namespace Eternal.UI.Settings
             DrawSectionHeaderNoReset(listing, $"Food Debt Capacity (Human, {humanBodySize:F1} body size)");
             DrawStatusRow(listing, "Pawn nutrition cap",
                 $"{humanNutritionCap:F1} nutrition");
-            DrawStatusRow(listing, $"Maximum debt (x{settings.maxDebtMultiplier:F0})",
+            DrawStatusRow(listing, $"Living headroom (x{settings.maxDebtMultiplier:F0})",
                 StatusCalculator.MaxDebt(humanNutritionCap, settings.maxDebtMultiplier));
-            DrawStatusRow(listing, "Can heal injuries",
-                StatusCalculator.InjuriesCoveredByDebt(maxDebt, settings.nutritionCostMultiplier, SettingsDefaults.SeverityToNutritionRatio));
-            DrawStatusRow(listing, "Can heal scars",
-                StatusCalculator.ScarsCoveredByDebt(maxDebt, settings.nutritionCostMultiplier, SettingsDefaults.SeverityToNutritionRatio));
+            DrawStatusRow(listing, "Reference injury HP budget",
+                MenuValueCalculator.Number(MenuValueCalculator.InjuryHpBudget(maxDebt, SettingsDefaults.SeverityToNutritionRatio * settings.nutritionCostMultiplier)) + " HP");
+            listing.Label("Resurrection debt adds a baseline to living headroom. Repayment drains extra food above the configured floor, given sufficient food.");
+            listing.Label("Permanent living scars do not consume nutrition or debt capacity. Corpse scars accrue resurrection debt from remaining severity.");
 
         }
 
@@ -775,7 +822,9 @@ namespace Eternal.UI.Settings
         {
             var pawnRows = new List<(Pawn, List<(Hediff, float, bool, bool, string)>)>();
             if (Current.Game == null)
+            {
                 return pawnRows;
+            }
 
             var thresholdTracker = EternalServiceContainer.Instance?.ThresholdTracker;
             var settingsStore = Eternal_Mod.GetSettings()?.hediffManager?.Store;
@@ -784,7 +833,9 @@ namespace Eternal.UI.Settings
             {
                 var hediffSet = pawn?.health?.hediffSet;
                 if (hediffSet == null)
+                {
                     continue;
+                }
 
                 List<(Hediff, float, bool, bool, string)> gatedRows = null;
                 foreach (var hediff in hediffSet.hediffs)
@@ -806,16 +857,23 @@ namespace Eternal.UI.Settings
                     {
                         bypassReason = GetThresholdBypassReason(hediff, setting);
                         if (bypassReason == null)
+                        {
                             continue;
+                        }
                     }
 
                     if (gatedRows == null)
+                    {
                         gatedRows = new List<(Hediff, float, bool, bool, string)>();
+                    }
+
                     gatedRows.Add((hediff, threshold, reached, hasEntry, bypassReason));
                 }
 
                 if (gatedRows != null)
+                {
                     pawnRows.Add((pawn, gatedRows));
+                }
             }
 
             return pawnRows;
@@ -829,20 +887,39 @@ namespace Eternal.UI.Settings
         private static string GetThresholdBypassReason(Hediff hediff, EternalHediffSetting setting)
         {
             if (hediff?.def == null || hediff.def == EternalDefOf.Eternal_Essence)
+            {
                 return null;
+            }
+
             if (!hediff.IsDebuffWithStages())
+            {
                 return null;
+            }
+
             if (!HediffHealingConfig.IsEligibleForHealing(hediff, setting))
+            {
                 return null;
+            }
 
             if (setting?.noThreshold == true)
-                return "Instant (setting)";
+            {
+                return "No threshold";
+            }
+
             if (hediff.def == HediffDefOf.BloodLoss)
+            {
                 return "Always heals";
+            }
+
             if (hediff.HasStationarySeverity())
+            {
                 return "Stationary";
+            }
+
             if (hediff.HasNaturallyDecayingSeverity())
+            {
                 return "Decays naturally";
+            }
 
             return null;
         }
@@ -881,7 +958,9 @@ namespace Eternal.UI.Settings
                 Text.Anchor = TextAnchor.UpperLeft;
 
                 foreach (var (hediff, threshold, reached, hasEntry, bypassReason) in rows)
+                {
                     DrawThresholdRow(listing, hediff, threshold, reached, hasEntry, bypassReason);
+                }
 
                 listing.Gap(THRESHOLD_PAWN_GAP);
             }
@@ -895,7 +974,9 @@ namespace Eternal.UI.Settings
         /// </summary>
         private void DrawThresholdRow(Listing_Standard listing, Hediff hediff, float threshold, bool reached, bool hasEntry, string bypassReason)
         {
-            Rect rowRect = listing.GetRect(THRESHOLD_ROW_HEIGHT);
+            Rect rowRect = listing.GetRect(Math.Max(THRESHOLD_ROW_HEIGHT,
+                Math.Max(Text.CalcHeight(hediff.LabelCap + (hediff.Part == null ? "" : " (" + hediff.Part.Label + ")"), listing.ColumnWidth * 0.5f - 10f),
+                    Text.CalcHeight(bypassReason ?? "Not rolled yet", listing.ColumnWidth * 0.2f - 5f))));
             Text.Anchor = TextAnchor.MiddleLeft;
 
             string label = hediff.Part != null
@@ -926,7 +1007,7 @@ namespace Eternal.UI.Settings
             }
             else if (reached)
             {
-                statusText = "Healing";
+                statusText = "Eligible";
                 statusColor = new Color(0.3f, 0.8f, 0.3f);
             }
             else
@@ -1035,7 +1116,11 @@ namespace Eternal.UI.Settings
         /// </summary>
         private int GetCurrentEternalCount()
         {
-            if (Current.Game == null) return 0;
+            if (Current.Game == null)
+            {
+                return 0;
+            }
+
             int livingCount = PawnExtensions.GetAllLivingEternalPawnsCached()?.Count ?? 0;
             int healingCount = EternalServiceContainer.Instance?.CorpseManager?.GetHealingCorpseCount() ?? 0;
             return livingCount + healingCount;
@@ -1101,7 +1186,9 @@ namespace Eternal.UI.Settings
             editBuffer = Widgets.TextField(rect, editBuffer);
 
             if (GUI.GetNameOfFocusedControl() != textFieldName)
+            {
                 GUI.FocusControl(textFieldName);
+            }
 
             // Enter = confirm, Escape = cancel
             if (Event.current.type == EventType.KeyDown)
@@ -1137,80 +1224,105 @@ namespace Eternal.UI.Settings
         private void SliderWithInlineEdit(Listing_Standard listing, string label, ref float value,
             float min, float max, string tooltip, int decimals = 2)
         {
-            string format = "F" + decimals;
-            string controlName = $"Slider_{label}";
-            bool isEditing = (activeEditControlName == controlName);
-
-            Rect fullRect = listing.GetRect(22f);
-            Rect labelRect = new Rect(fullRect.x, fullRect.y, 150f, fullRect.height);
-            Rect valueRect = new Rect(fullRect.xMax - 80f, fullRect.y, 80f, fullRect.height);
-            Rect sliderRect = new Rect(fullRect.x + 160f, fullRect.y, fullRect.width - 250f, fullRect.height);
-
-            Widgets.Label(labelRect, label);
-
-            float newVal = Widgets.HorizontalSlider(sliderRect, value, min, max, true);
-            if (Math.Abs(newVal - value) > 0.0001f)
+            bool enabled = GUI.enabled;
+            bool confirmed = DrawInlineSlider(listing, label, "Slider_" + label, value, min, max,
+                tooltip, "F" + decimals, false, out float sliderValue);
+            if (!enabled) { return; }
+            value = sliderValue;
+            if (confirmed && float.TryParse(editBuffer, out float parsed) && MenuValueCalculator.IsFinite(parsed))
             {
-                value = newVal;
-                if (isEditing) activeEditControlName = null;
+                value = Mathf.Clamp(parsed, min, max);
             }
-
-            if (isEditing)
-            {
-                if (DrawEditMode(valueRect, controlName))
-                    if (float.TryParse(editBuffer, out float parsed))
-                        value = Mathf.Clamp(parsed, min, max);
-            }
-            else
-            {
-                DrawDisplayMode(valueRect, controlName, value.ToString(format));
-            }
-
-            if (!string.IsNullOrEmpty(tooltip) && Mouse.IsOver(fullRect))
-                TooltipHandler.TipRegion(fullRect, tooltip);
-
-            listing.Gap(listing.verticalSpacing);
         }
 
         /// <summary>
-        /// Draws an int slider with inline-editable value display.
-        /// Click the value to type directly; press Enter or click elsewhere to confirm.
+        /// Draws an integer slider, retaining integer parsing and slider truncation.
         /// </summary>
         private void SliderWithInlineEditInt(Listing_Standard listing, string label, ref int value,
             int min, int max, string tooltip)
         {
-            string controlName = $"SliderInt_{label}";
-            bool isEditing = (activeEditControlName == controlName);
+            bool enabled = GUI.enabled;
+            bool confirmed = DrawInlineSlider(listing, label, "SliderInt_" + label, value, min, max,
+                tooltip, null, true, out float sliderValue);
+            if (!enabled) { return; }
+            value = (int)sliderValue;
+            if (confirmed && int.TryParse(editBuffer, out int parsed))
+            {
+                value = Mathf.Clamp(parsed, min, max);
+            }
+        }
 
+        private bool DrawInlineSlider(Listing_Standard listing, string label, string controlName,
+            float value, float min, float max, string tooltip, string format, bool wholeNumbers,
+            out float sliderValue)
+        {
+            bool enabled = GUI.enabled;
+            bool isEditing = activeEditControlName == controlName;
+            if (!enabled && isEditing)
+            {
+                activeEditControlName = null;
+                editBuffer = "";
+                GUI.FocusControl(null);
+                GUIUtility.keyboardControl = 0;
+                isEditing = false;
+            }
             Rect fullRect = listing.GetRect(22f);
             Rect labelRect = new Rect(fullRect.x, fullRect.y, 150f, fullRect.height);
             Rect valueRect = new Rect(fullRect.xMax - 80f, fullRect.y, 80f, fullRect.height);
             Rect sliderRect = new Rect(fullRect.x + 160f, fullRect.y, fullRect.width - 250f, fullRect.height);
-
             Widgets.Label(labelRect, label);
 
-            int newVal = (int)Widgets.HorizontalSlider(sliderRect, value, min, max, true);
-            if (newVal != value)
+            float newValue = value;
+            if (enabled)
             {
-                value = newVal;
-                if (isEditing) activeEditControlName = null;
-            }
-
-            if (isEditing)
-            {
-                if (DrawEditMode(valueRect, controlName))
-                    if (int.TryParse(editBuffer, out int parsed))
-                        value = Mathf.Clamp(parsed, min, max);
+                newValue = Widgets.HorizontalSlider(sliderRect, value, min, max, true);
             }
             else
             {
-                DrawDisplayMode(valueRect, controlName, value.ToString());
+                DrawDisabledSlider(sliderRect, value, min, max);
+            }
+            if (wholeNumbers)
+            {
+                newValue = (int)newValue;
+            }
+            bool changed = enabled && (wholeNumbers ? newValue != value : Math.Abs(newValue - value) > 0.0001f);
+            sliderValue = changed ? newValue : value;
+            if (changed && isEditing)
+            {
+                activeEditControlName = null;
+            }
+
+            bool confirmed = false;
+            if (enabled && isEditing)
+            {
+                confirmed = DrawEditMode(valueRect, controlName);
+            }
+            else
+            {
+                DrawDisplayMode(valueRect, controlName,
+                    wholeNumbers ? ((int)sliderValue).ToString() : sliderValue.ToString(format));
             }
 
             if (!string.IsNullOrEmpty(tooltip) && Mouse.IsOver(fullRect))
+            {
                 TooltipHandler.TipRegion(fullRect, tooltip);
-
+            }
             listing.Gap(listing.verticalSpacing);
+            return confirmed;
+        }
+
+        internal static void DrawDisabledSlider(Rect rect, float value, float min, float max)
+        {
+            Color original = GUI.color;
+            try
+            {
+                float fraction = max > min ? Mathf.Clamp01((value - min) / (max - min)) : 0f;
+                GUI.color = new Color(0.3f, 0.3f, 0.3f, 0.6f);
+                GUI.DrawTexture(new Rect(rect.x, rect.center.y - 2f, rect.width, 4f), BaseContent.WhiteTex);
+                GUI.color = new Color(0.5f, 0.5f, 0.5f, 0.6f);
+                GUI.DrawTexture(new Rect(rect.x + (rect.width - 6f) * fraction, rect.center.y - 6f, 6f, 12f), BaseContent.WhiteTex);
+            }
+            finally { GUI.color = original; }
         }
 
         #endregion
@@ -1310,7 +1422,8 @@ namespace Eternal.UI.Settings
         /// </summary>
         private void DrawStatusRow(Listing_Standard listing, string label, string value)
         {
-            Rect rowRect = listing.GetRect(Text.LineHeight + 4f);
+            Rect rowRect = listing.GetRect(Math.Max(Text.CalcHeight(label, listing.ColumnWidth * 0.5f),
+                Text.CalcHeight(value, listing.ColumnWidth * 0.5f)) + 4f);
 
             // Label (left, gray)
             GUI.color = Color.gray;
@@ -1334,137 +1447,7 @@ namespace Eternal.UI.Settings
         /// </summary>
         private float CalculateTabContentHeight(SettingsTab tab)
         {
-            return tab switch
-            {
-                SettingsTab.Core => CalculateCoreTabHeight(),
-                SettingsTab.Economy => CalculateEconomyTabHeight(),
-                SettingsTab.Effects => CalculateEffectsTabHeight(),
-                SettingsTab.Performance => CalculatePerformanceTabHeight(),
-                SettingsTab.Advanced => CalculateAdvancedTabHeight(),
-                SettingsTab.Status => CalculateStatusTabHeight(),
-                SettingsTab.Thresholds => CalculateThresholdsTabHeight(),
-                _ => 500f
-            };
-        }
-
-        private float CalculateCoreTabHeight()
-        {
-            float height = 0f;
-
-            // General Settings (header + logging slider + derived debug preview + gap)
-            height += 40f + 50f + 30f + 20f;
-
-            // Healing Settings (header + rate/ratio + two previews + label toggle + gap)
-            height += 40f + 70f + 40f + 30f + 20f;
-
-            // Padding
-            height += 30f;
-
-            return height;
-        }
-
-        private float CalculateEconomyTabHeight()
-        {
-            float height = 0f;
-
-            // Resource Settings (header + global multiplier + gap)
-            height += 40f + 50f + 20f;
-
-            // Food Debt Settings (header + info + threshold/max/repayment sliders and previews)
-            height += 40f + 70f + 50f + 20f + 10f + 50f + 20f + 10f + 25f + 50f + 20f + 20f;
-
-            // Padding
-            height += 30f;
-
-            return height;
-        }
-
-        private float CalculatePerformanceTabHeight()
-        {
-            float height = 0f;
-
-            // Performance Settings (header + 2 sliders with previews + subsection + 4 interval sliders + gap)
-            height += 40f + 50f + 20f + 50f + 20f + 30f + 50f + 50f + 50f + 50f + 20f;
-
-            // Padding
-            height += 30f;
-
-            return height;
-        }
-
-        private float CalculateAdvancedTabHeight()
-        {
-            float height = 0f;
-
-            // Hediff Healing (header + summary + button + gap)
-            height += 40f + 10f + 25f + 35f + 20f;
-
-            // Map Protection Settings (header + info box + checkbox + slider + preview + gap + subsection + checkbox)
-            height += 40f + 50f + 30f + 50f + 20f + 10f + 20f + 30f;
-
-            // Padding
-            height += 30f;
-
-            return height;
-        }
-
-        private float CalculateStatusTabHeight()
-        {
-            float height = 0f;
-
-            // Healing Times (header + 6 rows + gap)
-            height += 40f + (6 * 25f) + 20f;
-
-            // Nutrition Costs (header + 5 rows + gap)
-            height += 40f + (5 * 25f) + 20f;
-
-            // Food Debt Capacity (header + 4 rows)
-            height += 40f + (4 * 25f);
-
-            // Padding
-            height += 30f;
-
-            return height;
-        }
-
-        private float CalculateThresholdsTabHeight()
-        {
-            // Section header (gap + medium label + gap)
-            float height = 50f;
-
-            var pawnRows = CollectThresholdRows();
-            if (pawnRows.Count == 0)
-                return height + 80f; // Info box + padding
-
-            foreach (var (_, rows) in pawnRows)
-                height += THRESHOLD_PAWN_HEADER_HEIGHT + rows.Count * THRESHOLD_ROW_HEIGHT + THRESHOLD_PAWN_GAP;
-
-            // Padding
-            height += 30f;
-
-            return height;
-        }
-
-        private float CalculateEffectsTabHeight()
-        {
-            float height = 0f;
-
-            // Reset All Effects button + gap
-            height += 30f + 8f;
-
-            // Consciousness Buff (header + info box + checkbox + slider + gap)
-            height += 40f + 50f + 30f + 50f + 10f;
-
-            // Mood Buff (header + info box + checkbox + slider + gap)
-            height += 40f + 50f + 30f + 50f + 10f;
-
-            // Population Cap (header + info box + checkbox + slider + live count label + gap)
-            height += 40f + 50f + 30f + 50f + 25f + 10f;
-
-            // Padding
-            height += 30f;
-
-            return height;
+            return measuredHeights.TryGetValue(tab, out float height) ? height : 1600f;
         }
 
         #endregion

@@ -23,7 +23,6 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using Verse;
-using Eternal;
 using Eternal.Extensions;
 using Eternal.Healing;
 using Eternal.Corpse;
@@ -60,6 +59,7 @@ namespace Eternal.Components
         private int lastCorpseCheckTick = 0;
         private int lastMapCheckTick = 0;
         private int lastHealingSweepTick = 0;
+        private int lastProcessedTick = -1;
 
         #endregion
 
@@ -78,7 +78,9 @@ namespace Eternal.Components
         public void EnqueueHealthReconciliation(Pawn pawn, Hediff removedHediff = null)
         {
             if (Eternal_Component.ShouldQueueHealthReconciliation(pawn, removedHediff))
+            {
                 pendingHealthReconciliation.Add(pawn);
+            }
         }
 
         /// <summary>
@@ -88,11 +90,16 @@ namespace Eternal.Components
         public void DrainPendingHealthReconciliation()
         {
             if (pendingHealthReconciliation.Count == 0)
+            {
                 return;
+            }
 
             pendingHealthBuffer.Clear();
             foreach (var pawn in pendingHealthReconciliation)
+            {
                 pendingHealthBuffer.Add(pawn);
+            }
+
             pendingHealthReconciliation.Clear();
 
             foreach (var pawn in pendingHealthBuffer)
@@ -182,10 +189,21 @@ namespace Eternal.Components
         {
             // SAFE-09: early-return when mod is disabled due to missing critical defs.
             if (EternalModState.IsDisabled)
+            {
                 return;
+            }
 
             if (!CanProcessTick())
+            {
                 return;
+            }
+
+            int currentTick = Find.TickManager.TicksGame;
+            if (currentTick == lastProcessedTick)
+            {
+                return;
+            }
+            lastProcessedTick = currentTick;
 
             // PERF-08: Capture snapshot once per batch — ImmutableSettingsSnapshot is a readonly record struct
             // (stack-allocated, zero GC pressure). Settings changes apply immediately on the next call.
@@ -198,9 +216,9 @@ namespace Eternal.Components
             DrainPendingHealthReconciliation();
 
             if (!snapshot.General.ModEnabled)
+            {
                 return;
-
-            int currentTick = Find.TickManager.TicksGame;
+            }
 
             // Normal tick: injury healing
             if (currentTick - lastNormalHealTick >= snapshot.Perf.NormalTickRate)
@@ -250,7 +268,8 @@ namespace Eternal.Components
         /// </summary>
         private bool CanProcessTick()
         {
-            return Find.TickManager != null && !Find.TickManager.Paused;
+            // Actual native ticks, including a paused DEBUG single step, are authoritative.
+            return Find.TickManager != null;
         }
 
         /// <summary>
@@ -272,6 +291,7 @@ namespace Eternal.Components
             UpdateAllRegrowth();
             UpdateCaravanDeaths();
             _healingProcessor?.ProcessRareHealing();
+            _healingProcessor?.ScarHealing.ProcessScarHealing();
             _corpseHealingProcessor?.ProcessCorpseRegrowth();
             _healingProcessor?.UpdateFoodDebtSystems();
 
@@ -331,7 +351,9 @@ namespace Eternal.Components
         private void UpdateAllRegrowth()
         {
             if (_regrowthManager == null)
+            {
                 return;
+            }
 
             // Get base healing rate for regrowth progression
             float baseHealRate = _settings.BaseHealingRate;
@@ -343,7 +365,9 @@ namespace Eternal.Components
             {
                 // Skip dead pawns - corpse processor handles them via ProcessCorpseHealing()
                 if (pawn.Dead)
+                {
                     continue;
+                }
 
                 // Check if pawn is already in regrowth
                 bool isInRegrowth = _regrowthManager.IsPawnInRegrowth(pawn);
@@ -354,13 +378,12 @@ namespace Eternal.Components
                     var missingParts = pawn.health?.hediffSet?.GetMissingPartsCommonAncestors();
                     if (missingParts != null && missingParts.Any())
                     {
-                        // Check resource availability before starting
-                        bool hasDebtCapacity = _foodDebtSystem?.GetRemainingCapacity(pawn) > 0f;
-                        float foodLevel = pawn.needs?.food?.CurLevel ?? 0f;
-                        float maxFood = pawn.needs?.food?.MaxLevel ?? 1f;
-                        bool canDrainFood = foodLevel > (maxFood * 0.15f);  // Above food drain threshold
-
-                        if (hasDebtCapacity || canDrainFood)
+                        var costProcessor = EternalServiceContainer.Instance.FoodCostProcessor;
+                        float budget = costProcessor?.GetAvailableNutrition(pawn) ?? 0f;
+                        var def = EternalDefOf.Eternal_Regrowing;
+                        var setting = Eternal_Mod.GetSettings().hediffManager?.Store.GetExisting(def?.defName);
+                        var profile = HealingCostProfiles.Resolve(def, setting, _settings.NutritionCostMultiplier, pawn.HasFoodNeedDisabled());
+                        if (HealingWorkCostCalculator.AffordableSeverity(profile, 1f, 1f, budget) > 0f)
                         {
                             _regrowthManager.StartRegrowth(pawn);
                             isInRegrowth = true;
@@ -388,46 +411,10 @@ namespace Eternal.Components
         /// <param name="baseHealRate">Base healing rate from settings.</param>
         private void ProgressLivingPawnRegrowth(Pawn pawn, float baseHealRate)
         {
-            // Check resource availability before progressing
-            bool hasDebtCapacity = _foodDebtSystem?.GetRemainingCapacity(pawn) > 0f;
-            float foodLevel = pawn.needs?.food?.CurLevel ?? 0f;
-            float maxFood = pawn.needs?.food?.MaxLevel ?? 1f;
-            bool canDrainFood = foodLevel > (maxFood * 0.15f);
-
-            if (!hasDebtCapacity && !canDrainFood)
-                return;
-
-            // Get regrowing hediffs before progression to calculate food cost
-            var regrowingHediffs = _regrowthManager.GetRegrowingHediffs(pawn).ToList();
-            if (regrowingHediffs.Count == 0)
-                return;
-
-            // Calculate heal amount: baseRate * bodySize
-            float healAmount = baseHealRate * pawn.BodySize;
-
-            // Food cost is effort-based: each regrowing part consumes the full healAmount of
-            // healing effort per pass (regrowth PROGRESS is divided by part HP in
-            // EternalRegrowthManager, but the biological effort — and thus nutrition — is not).
-            // Total cost of a part therefore scales with its HP: ~1.2 nutrition for an arm.
-            float totalHealingEffort = regrowingHediffs.Count * healAmount;
-
-            // Progress regrowth (advances severity on all regrowing hediffs, HP-scaled)
-            _regrowthManager.ProgressRegrowth(pawn, healAmount);
-
-            // Process food cost for regrowth using the shared internal conversion ratio.
-            if (totalHealingEffort > 0f)
-            {
-                float severityToNutritionRatio = SettingsDefaults.SeverityToNutritionRatio;
-                float nutritionCost = totalHealingEffort * severityToNutritionRatio;
-                EternalServiceContainer.Instance.FoodCostProcessor?.ProcessHealingCost(pawn, nutritionCost);
-            }
-
-            if (_settings?.DebugMode == true)
-            {
-                float severityToNutritionRatio = SettingsDefaults.SeverityToNutritionRatio;
-                Log.Message($"[Eternal] Progressed regrowth for {pawn.Name}: " +
-                           $"{regrowingHediffs.Count} parts, heal={healAmount:F4}, cost={totalHealingEffort * severityToNutritionRatio:F4}");
-            }
+            var processor = EternalServiceContainer.Instance.FoodCostProcessor;
+            float budget = processor?.GetAvailableNutrition(pawn) ?? 0f;
+            var result = _regrowthManager.ProgressRegrowth(pawn, baseHealRate * pawn.BodySize, budget);
+            processor?.SettleNutrition(pawn, result.NutritionCharge);
         }
 
         /// <summary>
@@ -449,7 +436,9 @@ namespace Eternal.Components
         {
             var foodDebtSystem = EternalServiceContainer.Instance.FoodDebtSystem;
             if (foodDebtSystem == null)
+            {
                 return;
+            }
 
             // Clear debt for pawns whose food need has been disabled (genes, traits, ideology, race).
             // CheckFoodNeedStateChanges is on the concrete type — cast if available.
@@ -463,7 +452,9 @@ namespace Eternal.Components
             foreach (var pawn in foodDebtSystem.GetTrackedPawns())
             {
                 if (pawn == null || pawn.Dead)
+                {
                     continue;
+                }
 
                 // Sync hediff lifecycle (removes if zero debt, adds/updates severity if > 0)
                 SyncMetabolicRecoveryHediff(pawn, foodDebtSystem);
@@ -479,10 +470,14 @@ namespace Eternal.Components
         private void SyncMetabolicRecoveryHediff(Pawn pawn, IFoodDebtSystem foodDebtSystem)
         {
             if (pawn?.health?.hediffSet == null)
+            {
                 return;
+            }
 
             if (EternalDefOf.Eternal_MetabolicRecovery == null)
+            {
                 return;
+            }
 
             float debt = foodDebtSystem.GetDebt(pawn);
             var hediff = pawn.health.hediffSet.GetFirstHediffOfDef(EternalDefOf.Eternal_MetabolicRecovery);
@@ -520,7 +515,9 @@ namespace Eternal.Components
         {
             var healer = _healingProcessor?.HediffHealer;
             if (healer == null)
+            {
                 return;
+            }
 
             // Build set of all currently spawned pawn IDs across all maps
             var liveIds = new HashSet<int>();
@@ -529,7 +526,10 @@ namespace Eternal.Components
                 foreach (var map in Find.Maps)
                 {
                     if (map?.mapPawns == null)
+                    {
                         continue;
+                    }
+
                     foreach (var pawn in map.mapPawns.AllPawnsSpawned)
                     {
                         liveIds.Add(pawn.thingIDNumber);
@@ -582,12 +582,14 @@ namespace Eternal.Components
             int mapCheckTick,
             int healingSweepTick)
         {
-            lastNormalHealTick = normalHealTick;
-            lastRareHealTick = rareHealTick;
-            lastTraitCheckTick = traitCheckTick;
-            lastCorpseCheckTick = corpseCheckTick;
-            lastMapCheckTick = mapCheckTick;
-            lastHealingSweepTick = healingSweepTick;
+            int now = Find.TickManager?.TicksGame ?? 0;
+            lastNormalHealTick = Math.Max(0, Math.Min(now, normalHealTick));
+            lastRareHealTick = Math.Max(0, Math.Min(now, rareHealTick));
+            lastTraitCheckTick = Math.Max(0, Math.Min(now, traitCheckTick));
+            lastCorpseCheckTick = Math.Max(0, Math.Min(now, corpseCheckTick));
+            lastMapCheckTick = Math.Max(0, Math.Min(now, mapCheckTick));
+            lastHealingSweepTick = Math.Max(0, Math.Min(now, healingSweepTick));
+            lastProcessedTick = -1;
         }
 
         /// <summary>

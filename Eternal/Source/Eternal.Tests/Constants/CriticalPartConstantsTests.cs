@@ -7,7 +7,6 @@
 //              GetNextInSequence traversal, no-deadlock property, and collection contents.
 //              CompareRegrowthPriority tests requiring BodyPartRecord are deferred to RimTest.
 
-using System;
 using System.Linq;
 using Xunit;
 using Eternal.Constants;

@@ -13,8 +13,6 @@
 //              Immortals' slowHealSpeed (0.0002 severity/tick at default settings).
 
 using Verse;
-using Eternal.Compat;
-using Eternal.DI;
 using Eternal.Extensions;
 using Eternal.Interfaces;
 
@@ -22,10 +20,7 @@ namespace Eternal.Healing
 {
     /// <summary>
     /// Unified hediff healing calculator.
-    /// Consolidates complex healing logic that was previously scattered across:
-    /// - EternalHediffHealer.HealHediff() (lines 163-168)
-    /// - EternalHediffHealer.GetEffectiveMaxSeverity() (lines 219-236)
-    /// - NutritionExtensions.GetStageBasedHealingSpeed() (lines 59-78)
+    /// Keeps game inputs and guards at the boundary of the shared scalar healing policy.
     /// </summary>
     public class UnifiedHediffHealingCalculator : IHediffHealingCalculator
     {
@@ -36,7 +31,7 @@ namespace Eternal.Healing
         /// Eternal fires every normalTickRate (60) ticks at baseHealingRate 1.2, so
         /// 1.2 x 0.01 = 0.012 severity per cycle = 0.0002 severity/tick.
         /// </summary>
-        public const float DEBUFF_RATE_FACTOR = 0.01f;
+        public const float DEBUFF_RATE_FACTOR = HediffHealingPolicy.DebuffRateFactor;
 
         private readonly ISettingsProvider _settings;
 
@@ -53,15 +48,15 @@ namespace Eternal.Healing
         public float CalculateHediffHealing(Pawn pawn, Hediff hediff, EternalHediffSetting setting)
         {
             if (pawn == null || hediff == null)
+            {
                 return 0f;
+            }
 
             // Formula: effectiveRate × stageMultiplier × bodySize × debuffRateFactor
             float effectiveRate = GetEffectiveRate(setting);
             float stageMultiplier = GetStageMultiplier(hediff);
             float bodySize = GetBodySizeScaling(pawn);
-            float debuffRateFactor = hediff.IsDebuffWithStages() ? DEBUFF_RATE_FACTOR : 1f;
-
-            return effectiveRate * stageMultiplier * bodySize * debuffRateFactor;
+            return HediffHealingPolicy.Calculate(effectiveRate, stageMultiplier, bodySize, hediff.IsDebuffWithStages());
         }
 
         /// <inheritdoc/>
@@ -81,23 +76,20 @@ namespace Eternal.Healing
         public float GetStageMultiplier(Hediff hediff)
         {
             if (hediff == null)
+            {
                 return 1.0f;
+            }
 
             // Only debuff hediffs with stages get the penalty
             // Uses extension method from HediffExtensions for consistency
             if (!hediff.IsDebuffWithStages())
+            {
                 return 1.0f; // Injuries, scars, regrowth = constant speed
+            }
 
             // Stage-based speed: higher stage = slower healing
             int stageIndex = hediff.CurStageIndex;
-            return stageIndex switch
-            {
-                0 => 1.0f,   // Minor
-                1 => 0.8f,   // Moderate
-                2 => 0.6f,   // Serious
-                3 => 0.4f,   // Severe
-                _ => 0.2f    // Extreme (stage 4+)
-            };
+            return HediffHealingPolicy.StageMultiplier(stageIndex);
         }
 
         /// <inheritdoc/>
@@ -109,45 +101,14 @@ namespace Eternal.Healing
         /// </remarks>
         public float GetSeverityScaling(Hediff hediff, Pawn pawn)
         {
-            return 1.0f;
+            return HediffHealingPolicy.SeverityScaling;
         }
 
         /// <inheritdoc/>
         public float GetBodySizeScaling(Pawn pawn)
         {
-            return pawn?.BodySize ?? 1.0f;
+            return HediffHealingPolicy.BodySize(pawn?.BodySize);
         }
 
-        // -----------------------------------------------------------------
-        // IPawnData overloads — testable without RimWorld runtime
-        // -----------------------------------------------------------------
-
-        /// <summary>
-        /// Testable overload accepting <see cref="IPawnData"/> instead of <c>Pawn</c>.
-        /// Production callers use the <c>Pawn</c> overload; unit tests use this one
-        /// with NSubstitute mocks via <c>PawnDataBuilder</c>.
-        /// </summary>
-        public float GetBodySizeScaling(IPawnData pawnData)
-        {
-            return pawnData?.BodySize ?? 1.0f;
-        }
-
-        /// <summary>
-        /// Testable overload for <see cref="CalculateHediffHealing"/> accepting <see cref="IPawnData"/>.
-        /// Hediff and EternalHediffSetting remain RimWorld types — only the pawn dependency
-        /// is replaced for testability of the body-size scaling path.
-        /// </summary>
-        public float CalculateHediffHealing(IPawnData pawnData, Hediff hediff, EternalHediffSetting setting)
-        {
-            if (pawnData == null || hediff == null)
-                return 0f;
-
-            float effectiveRate = GetEffectiveRate(setting);
-            float stageMultiplier = GetStageMultiplier(hediff);
-            float bodySize = GetBodySizeScaling(pawnData);
-            float debuffRateFactor = hediff.IsDebuffWithStages() ? DEBUFF_RATE_FACTOR : 1f;
-
-            return effectiveRate * stageMultiplier * bodySize * debuffRateFactor;
-        }
     }
 }

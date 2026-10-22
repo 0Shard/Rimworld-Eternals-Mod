@@ -13,6 +13,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Verse;
 using Eternal.Infrastructure;
 using Eternal.Exceptions;
@@ -29,8 +30,8 @@ namespace Eternal.Healing
     {
         private readonly Dictionary<HealingDictionaryKey, ThresholdEntry> _thresholds
             = new Dictionary<HealingDictionaryKey, ThresholdEntry>();
-        private readonly Dictionary<LegacyThresholdKey, List<ThresholdEntry>> _legacyThresholds
-            = new Dictionary<LegacyThresholdKey, List<ThresholdEntry>>();
+        private readonly Dictionary<HealingDictionaryKey, List<ThresholdEntry>> _legacyThresholds
+            = new Dictionary<HealingDictionaryKey, List<ThresholdEntry>>();
 
         /// <summary>
         /// Entry storing both the threshold value and whether it has been reached.
@@ -49,62 +50,20 @@ namespace Eternal.Healing
         }
 
         /// <summary>
-        /// Identity used only while migrating pre-Gate-2 state. It intentionally has no
-        /// instance ID, so it must never be used to select one of several live hediffs.
-        /// </summary>
-        private readonly struct LegacyThresholdKey : IEquatable<LegacyThresholdKey>
-        {
-            public readonly int PawnThingIDNumber;
-            public readonly string HediffDefName;
-            public readonly string BodyPartLabel;
-
-            public LegacyThresholdKey(int pawnId, string defName, string partLabel)
-            {
-                PawnThingIDNumber = pawnId;
-                HediffDefName = defName ?? string.Empty;
-                BodyPartLabel = partLabel ?? string.Empty;
-            }
-
-            public LegacyThresholdKey(Pawn pawn, Hediff hediff)
-                : this(pawn.thingIDNumber, hediff.def.defName, hediff.Part?.Label)
-            {
-            }
-
-            public bool Equals(LegacyThresholdKey other)
-            {
-                return PawnThingIDNumber == other.PawnThingIDNumber
-                    && HediffDefName == other.HediffDefName
-                    && BodyPartLabel == other.BodyPartLabel;
-            }
-
-            public override bool Equals(object obj)
-            {
-                return obj is LegacyThresholdKey other && Equals(other);
-            }
-
-            public override int GetHashCode()
-            {
-                unchecked
-                {
-                    int hash = PawnThingIDNumber * 397;
-                    hash ^= HediffDefName != null ? HediffDefName.GetHashCode() : 0;
-                    hash = (hash * 397) ^ (BodyPartLabel != null ? BodyPartLabel.GetHashCode() : 0);
-                    return hash;
-                }
-            }
-        }
-
-        /// <summary>
         /// Registers a threshold for a specific hediff instance. Existing state is preserved.
         /// </summary>
         public void RegisterThreshold(Pawn pawn, Hediff hediff, float threshold)
         {
             if (pawn == null || hediff?.def == null)
+            {
                 return;
+            }
 
             var key = new HealingDictionaryKey(pawn, hediff);
             if (_thresholds.ContainsKey(key))
+            {
                 return;
+            }
 
             _thresholds[key] = new ThresholdEntry(threshold);
         }
@@ -115,11 +74,20 @@ namespace Eternal.Healing
         public void RegisterThresholdIfMissing(Pawn pawn, Hediff hediff)
         {
             if (pawn == null || hediff?.def == null)
+            {
                 return;
+            }
 
             var key = new HealingDictionaryKey(pawn, hediff);
+            RegisterThresholdIfMissingCore(hediff, key);
+        }
+
+        private void RegisterThresholdIfMissingCore(Hediff hediff, HealingDictionaryKey key)
+        {
             if (_thresholds.ContainsKey(key))
+            {
                 return;
+            }
 
             float maxSeverity = hediff.def.maxSeverity;
             if (float.IsInfinity(maxSeverity) || float.IsNaN(maxSeverity)
@@ -128,7 +96,7 @@ namespace Eternal.Healing
                 maxSeverity = 1f;
             }
 
-            RegisterThreshold(pawn, hediff, Rand.Range(0.01f, 0.99f) * maxSeverity);
+            _thresholds[key] = new ThresholdEntry(Rand.Range(0.01f, 0.99f) * maxSeverity);
         }
 
         /// <summary>
@@ -138,21 +106,29 @@ namespace Eternal.Healing
         public bool HasReachedThreshold(Pawn pawn, Hediff hediff)
         {
             if (pawn == null || hediff?.def == null)
+            {
                 return true;
+            }
 
             var key = new HealingDictionaryKey(pawn, hediff);
             if (!_thresholds.TryGetValue(key, out var entry))
             {
                 RegisterThresholdIfMissing(pawn, hediff);
                 if (!_thresholds.TryGetValue(key, out entry))
+                {
                     return true;
+                }
 
                 if (hediff.Severity >= entry.threshold)
+                {
                     entry.hasBeenReached = true;
+                }
             }
 
             if (entry.hasBeenReached)
+            {
                 return true;
+            }
 
             if (hediff.Severity >= entry.threshold)
             {
@@ -172,11 +148,15 @@ namespace Eternal.Healing
             reached = false;
 
             if (pawn == null || hediff?.def == null)
+            {
                 return false;
+            }
 
             var key = new HealingDictionaryKey(pawn, hediff);
             if (!_thresholds.TryGetValue(key, out var entry))
+            {
                 return false;
+            }
 
             threshold = entry.threshold;
             reached = entry.hasBeenReached;
@@ -189,7 +169,9 @@ namespace Eternal.Healing
         public void RemoveThreshold(Pawn pawn, Hediff hediff)
         {
             if (pawn == null || hediff == null)
+            {
                 return;
+            }
 
             _thresholds.Remove(new HealingDictionaryKey(pawn, hediff));
         }
@@ -205,7 +187,9 @@ namespace Eternal.Healing
             ISet<HealingDictionaryKey> eligibleKeys)
         {
             if (pawn == null)
+            {
                 return;
+            }
 
             var liveHediffs = new List<Hediff>();
             var currentKeys = new HashSet<HealingDictionaryKey>();
@@ -217,7 +201,9 @@ namespace Eternal.Healing
                     try
                     {
                         if (hediff?.def == null)
+                        {
                             continue;
+                        }
 
                         liveHediffs.Add(hediff);
                         currentKeys.Add(new HealingDictionaryKey(pawn, hediff));
@@ -233,7 +219,23 @@ namespace Eternal.Healing
                 }
             }
 
-            MigrateLegacyEntries(pawn, liveHediffs, eligibleKeys);
+            ReconcileLiveHealthCore(pawn, liveHediffs, currentKeys, eligibleKeys, null);
+        }
+
+        internal void ReconcileValidatedHealth(Pawn pawn, LiveHealthReconciliationSnapshot snapshot)
+        {
+            ReconcileLiveHealthCore(
+                pawn, snapshot.Hediffs, snapshot.CurrentKeys, snapshot.EligibleThresholdKeys, snapshot);
+        }
+
+        private void ReconcileLiveHealthCore(
+            Pawn pawn,
+            IList<Hediff> liveHediffs,
+            ISet<HealingDictionaryKey> currentKeys,
+            ISet<HealingDictionaryKey> eligibleKeys,
+            LiveHealthReconciliationSnapshot snapshot)
+        {
+            MigrateLegacyEntries(pawn, liveHediffs, eligibleKeys, snapshot);
 
             var staleKeys = new List<HealingDictionaryKey>();
             foreach (var key in _thresholds.Keys)
@@ -248,15 +250,27 @@ namespace Eternal.Healing
             }
 
             foreach (var staleKey in staleKeys)
+            {
                 _thresholds.Remove(staleKey);
+            }
 
-            foreach (var hediff in liveHediffs)
+            for (int i = 0; i < liveHediffs.Count; i++)
             {
                 try
                 {
-                    var key = new HealingDictionaryKey(pawn, hediff);
+                    var hediff = liveHediffs[i];
+                    var key = snapshot == null ? new HealingDictionaryKey(pawn, hediff) : snapshot.KeyAt(i);
                     if (eligibleKeys != null && eligibleKeys.Contains(key))
-                        RegisterThresholdIfMissing(pawn, hediff);
+                    {
+                        if (snapshot == null)
+                        {
+                            RegisterThresholdIfMissing(pawn, hediff);
+                        }
+                        else
+                        {
+                            RegisterThresholdIfMissingCore(hediff, key);
+                        }
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -275,28 +289,38 @@ namespace Eternal.Healing
         public void ClearPawnThresholds(Pawn pawn)
         {
             if (pawn == null)
+            {
                 return;
+            }
 
             int pawnId = pawn.thingIDNumber;
             var keysToRemove = new List<HealingDictionaryKey>();
             foreach (var key in _thresholds.Keys)
             {
                 if (key.PawnThingIDNumber == pawnId)
+                {
                     keysToRemove.Add(key);
+                }
             }
 
             foreach (var key in keysToRemove)
+            {
                 _thresholds.Remove(key);
+            }
 
-            var legacyKeysToRemove = new List<LegacyThresholdKey>();
+            var legacyKeysToRemove = new List<HealingDictionaryKey>();
             foreach (var key in _legacyThresholds.Keys)
             {
                 if (key.PawnThingIDNumber == pawnId)
+                {
                     legacyKeysToRemove.Add(key);
+                }
             }
 
             foreach (var key in legacyKeysToRemove)
+            {
                 _legacyThresholds.Remove(key);
+            }
         }
 
         /// <summary>
@@ -309,7 +333,10 @@ namespace Eternal.Healing
             {
                 int legacyCount = 0;
                 foreach (var entries in _legacyThresholds.Values)
+                {
                     legacyCount += entries.Count;
+                }
+
                 return _thresholds.Count + legacyCount;
             }
         }
@@ -317,39 +344,38 @@ namespace Eternal.Healing
         private void MigrateLegacyEntries(
             Pawn pawn,
             IList<Hediff> liveHediffs,
-            ISet<HealingDictionaryKey> eligibleKeys)
+            ISet<HealingDictionaryKey> eligibleKeys,
+            LiveHealthReconciliationSnapshot snapshot)
         {
-            var candidatesByLegacyKey = new Dictionary<LegacyThresholdKey, List<Hediff>>();
-            foreach (var hediff in liveHediffs)
+            if (_legacyThresholds.Count == 0)
             {
-                var legacyKey = new LegacyThresholdKey(pawn, hediff);
-                if (!candidatesByLegacyKey.TryGetValue(legacyKey, out var candidates))
-                {
-                    candidates = new List<Hediff>();
-                    candidatesByLegacyKey[legacyKey] = candidates;
-                }
-                candidates.Add(hediff);
+                return;
             }
 
-            var keysToRemove = new List<LegacyThresholdKey>();
+            var candidatesByLegacyKey = snapshot?.LegacyCandidates ?? LegacyHealingCandidateLookup.BuildUniqueLookup(
+                liveHediffs.Select(hediff => new HealingDictionaryKey(pawn, hediff)),
+                key => new HealingDictionaryKey(key.PawnThingIDNumber, key.HediffDefName, key.BodyPartLabel));
+
+            var keysToRemove = new List<HealingDictionaryKey>();
             foreach (var legacyPair in _legacyThresholds)
             {
                 if (legacyPair.Key.PawnThingIDNumber != pawn.thingIDNumber)
+                {
                     continue;
+                }
 
                 keysToRemove.Add(legacyPair.Key);
 
                 // Exactly one serialized row and exactly one live candidate is the only safe
                 // migration. Every other shape is intentionally reset rather than guessed.
                 if (legacyPair.Value.Count != 1
-                    || !candidatesByLegacyKey.TryGetValue(legacyPair.Key, out var candidates)
-                    || candidates.Count != 1)
+                    || !candidatesByLegacyKey.TryGetValue(legacyPair.Key, out var candidate)
+                    || !candidate.HasValue)
                 {
                     continue;
                 }
 
-                var liveHediff = candidates[0];
-                var liveKey = new HealingDictionaryKey(pawn, liveHediff);
+                var liveKey = candidate.Value;
                 if (eligibleKeys != null && eligibleKeys.Contains(liveKey)
                     && !_thresholds.ContainsKey(liveKey))
                 {
@@ -358,7 +384,9 @@ namespace Eternal.Healing
             }
 
             foreach (var key in keysToRemove)
+            {
                 _legacyThresholds.Remove(key);
+            }
         }
 
         #region Serialization
@@ -406,7 +434,9 @@ namespace Eternal.Healing
             }
 
             if (Scribe.mode != LoadSaveMode.LoadingVars)
+            {
                 return;
+            }
 
             List<int> loadedPawnIds = null;
             List<string> loadedDefNames = null;
@@ -458,7 +488,7 @@ namespace Eternal.Healing
                 else
                 {
                     AddLegacyEntry(
-                        new LegacyThresholdKey(
+                        new HealingDictionaryKey(
                             loadedPawnIds[i], loadedDefNames[i], loadedPartLabels[i]),
                         new ThresholdEntry(loadedThresholdValues[i])
                         {
@@ -486,7 +516,7 @@ namespace Eternal.Healing
                 && pawnIds.Count == reachedFlags.Count;
         }
 
-        private void AddLegacyEntry(LegacyThresholdKey key, ThresholdEntry entry)
+        private void AddLegacyEntry(HealingDictionaryKey key, ThresholdEntry entry)
         {
             if (!_legacyThresholds.TryGetValue(key, out var entries))
             {

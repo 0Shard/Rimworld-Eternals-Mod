@@ -13,13 +13,48 @@
 //              the removed 0.1x low-maxSeverity multiplier.
 
 using Xunit;
-using Eternal;
 using Eternal.UI.Settings;
 
 namespace Eternal.Tests.UI
 {
     public class StatusCalculatorTests
     {
+        [Fact]
+        public void DisplayedPermanentScarExample_MatchesItsUnchargedProductionRoute()
+        {
+            var display = MenuAssemblyContract.Calls("Eternal.UI.Settings.SettingsDrawer", "DrawStatusTab");
+            Assert.Contains("Eternal.UI.Settings.StatusCalculator.FullScarCost", display);
+            Assert.DoesNotContain("Eternal.UI.Settings.StatusCalculator.ScarsCoveredByDebt", display);
+            Assert.Contains(MenuAssemblyContract.Instructions("Eternal.UI.Settings.SettingsDrawer", "DrawStatusTab"),
+                i => Equals(i.Operand, "Living permanent scar (1 severity)"));
+            Assert.Contains("Eternal.EternalScarHealing.ProcessScarHealingByPriority",
+                MenuAssemblyContract.Calls("Eternal.EternalScarHealing", "ProcessPawnScarHealing"));
+            Assert.Contains("Eternal.Healing.Scars.ScarHealingApplier.HealScar",
+                MenuAssemblyContract.Calls("Eternal.EternalScarHealing", "ProcessScarHealingByPriority"));
+            Assert.Contains("Eternal.Healing.Scars.ScarHealingApplier.ApplyScarHealing",
+                MenuAssemblyContract.Calls("Eternal.Healing.Scars.ScarHealingApplier", "HealScar"));
+            foreach (var calls in new[] { MenuAssemblyContract.Calls("Eternal.Healing.Scars.ScarHealingApplier", "HealScar"),
+                MenuAssemblyContract.Calls("Eternal.Healing.Scars.ScarHealingApplier", "ApplyScarHealing") })
+            {
+                Assert.DoesNotContain(calls, c => c != null && (c.Contains("ProcessHealingCost") ||
+                    c.Contains("AddDebt") || c.Contains("AddResurrectionDebt") || c.Contains("CalculateNutritionCost")));
+            }
+        }
+
+        [Fact]
+        public void CorpseScar_RemainsChargedWhileLivingPermanentScarIsUncharged()
+        {
+            var corpse = new Eternal.UI.ResurrectionPreviewSnapshot();
+            corpse.Work.Add(new Eternal.UI.CorpsePreviewWork { Label = "Permanent scar", Severity = 1f });
+            Eternal.UI.ResurrectionPreviewValues.Estimate(corpse, 1f, 1f, 60, 0.004f, 2f);
+            Assert.Equal(0.008f, corpse.KnownNutrition, 6);
+            Assert.Equal("No nutrition charge", StatusCalculator.FullScarCost(2f, 0.004f));
+        }
+        [Fact]
+        public void NormalPassCost_PositiveTinyAmount_RemainsVisible()
+        {
+            Assert.Equal("4E-6 nutrition", StatusCalculator.NormalTickCost(0.01f, 0.1f, 0.004f));
+        }
         // Defaults are sourced from the production catalog so UI formula tests cannot drift.
         private const float DefaultRate = SettingsDefaults.BaseHealingRate;
         private const float DefaultMult = SettingsDefaults.NutritionCostMultiplier;
@@ -33,44 +68,41 @@ namespace Eternal.Tests.UI
         public void NormalTickCost_AppliesRatio()
         {
             // 1.2 severity/cycle × 0.004 × 1.0 = 0.0048 (NOT 1.2 — the pre-fix 250x bug)
-            Assert.Equal("0.0048 nutrition", StatusCalculator.NormalTickCost(DefaultRate, DefaultMult, DefaultRatio));
+            Assert.Equal("0.0010 nutrition", StatusCalculator.NormalTickCost(DefaultRate, DefaultMult, DefaultRatio));
         }
 
         [Fact]
         public void RareTickCost_AppliesRatio()
         {
-            Assert.Equal("0.0048 nutrition", StatusCalculator.RareTickCost(DefaultRate, DefaultMult, DefaultRatio));
+            Assert.Equal("0.0010 nutrition", StatusCalculator.RareTickCost(DefaultRate, DefaultMult, DefaultRatio));
         }
 
         [Fact]
-        public void FullInjuryCost_At250ToOneRatio_SeverityOneCostsFourThousandths()
+        public void FullInjuryCost_At1200ToOneRatio_SeverityOneCostsOneTwelveHundredth()
         {
             // Severity 1.0 total: 1.0 × 0.004 × 1.0 = 0.004 nutrition
-            Assert.Equal("~0.0040 nutrition", StatusCalculator.FullInjuryCost(DefaultMult, DefaultRatio));
+            Assert.Equal("~0.0008 nutrition", StatusCalculator.FullInjuryCost(DefaultMult, DefaultRatio));
         }
 
         [Fact]
-        public void FullInjuryCost_250Severity_CostsOneNutrition()
+        public void FullInjuryCost_1200Hp_CostsOneNutrition()
         {
             // The defining property of the 250:1 ratio, expressed through the multiplier slot:
             // 250 severity × 0.004 = 1.0 nutrition
-            Assert.Equal("~1.0000 nutrition", StatusCalculator.FullInjuryCost(250f * DefaultMult, DefaultRatio));
+            Assert.Equal("~1.0000 nutrition", StatusCalculator.FullInjuryCost(1200f * DefaultMult, DefaultRatio));
         }
 
         [Fact]
-        public void FullScarCost_MatchesFullInjuryCost()
+        public void LivingPermanentScarCost_IsUncharged()
         {
-            // Unified system: the 0.5x scar speed changes duration, not total cost
-            Assert.Equal(
-                StatusCalculator.FullInjuryCost(DefaultMult, DefaultRatio),
-                StatusCalculator.FullScarCost(DefaultMult, DefaultRatio));
+            Assert.Equal("No nutrition charge", StatusCalculator.FullScarCost(DefaultMult, DefaultRatio));
         }
 
         [Fact]
         public void InjuriesCoveredByDebt_AppliesRatio()
         {
             // maxDebt 5.0 / (1.0 × 0.004 × 1.0) = 1250 injuries (NOT ~5 — the pre-fix bug)
-            Assert.Equal("~1250 injuries", StatusCalculator.InjuriesCoveredByDebt(SettingsDefaults.MaxDebtMultiplier, DefaultMult, DefaultRatio));
+            Assert.Equal("~6000 injuries", StatusCalculator.InjuriesCoveredByDebt(SettingsDefaults.MaxDebtMultiplier, DefaultMult, DefaultRatio));
         }
 
         [Fact]
@@ -80,9 +112,9 @@ namespace Eternal.Tests.UI
         }
 
         [Fact]
-        public void ScarsCoveredByDebt_AppliesRatio()
+        public void LivingPermanentScars_AreNotLimitedByDebtCapacity()
         {
-            Assert.Equal("~1250 scars", StatusCalculator.ScarsCoveredByDebt(SettingsDefaults.MaxDebtMultiplier, DefaultMult, DefaultRatio));
+            Assert.Equal("Not debt-limited", StatusCalculator.ScarsCoveredByDebt(SettingsDefaults.MaxDebtMultiplier, DefaultMult, DefaultRatio));
         }
 
         // -----------------------------------------------------------------
@@ -129,15 +161,20 @@ namespace Eternal.Tests.UI
         public void FullLimbRegrowthCost_ReferenceArm_ChargesEffortBasedNutrition()
         {
             // 30 HP × 10 work/HP × 0.004 × 1.0 = 1.2 nutrition — a limb costs meals, not crumbs
-            Assert.Equal("~1.20 nutrition", StatusCalculator.FullLimbRegrowthCost(DefaultMult, DefaultRatio));
+            Assert.Equal("~0.25 nutrition", StatusCalculator.FullLimbRegrowthCost(DefaultMult, DefaultRatio));
         }
 
         [Fact]
-        public void ScarHealTime_UsesRareTickRate()
+        public void ScarCompletionTime_RequiresElapsedProcessingState()
         {
-            // (1 / 1.2) × 250 ticks = 208 ticks ≈ 5 minutes — matches EternalScarHealing,
-            // whose ScarCostCalculator normalizes healing by rareTickRate
-            Assert.Equal("~5 minutes", StatusCalculator.ScarHealTime(DefaultRate, SettingsDefaults.RareTickRate));
+            Assert.Equal("Unavailable (elapsed scar processing not known)",
+                StatusCalculator.ScarHealTime(DefaultRate, SettingsDefaults.RareTickRate));
+        }
+
+        [Fact]
+        public void InjuryHealTime_PositiveWork_RequiresOneProcessingPass()
+        {
+            Assert.Equal("~6 minutes", StatusCalculator.InjuryHealTime(3f, 250));
         }
     }
 }

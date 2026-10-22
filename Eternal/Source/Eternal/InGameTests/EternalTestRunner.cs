@@ -40,11 +40,16 @@ namespace Eternal.InGameTests
         [DebugAction("Eternal", "Tests: Run All", allowedGameStates = AllowedGameStates.PlayingOnMap)]
         public static void RunAllTests()
         {
+            RunAllTestsWithResults();
+        }
+
+        public static IReadOnlyList<(string Name, TestSuiteResult Result)> RunAllTestsWithResults()
+        {
             var map = Find.CurrentMap;
             if (map == null)
             {
                 Log.Error("[EternalTests] No current map found. Load a save first.");
-                return;
+                return Array.Empty<(string Name, TestSuiteResult Result)>();
             }
 
             Log.Message("[EternalTests] ========================================");
@@ -54,27 +59,35 @@ namespace Eternal.InGameTests
             var suiteResults = new List<(string Name, TestSuiteResult Result)>();
 
             RunSuite("ResurrectionCycle", () => ResurrectionCycleTests.RunAll(map), suiteResults);
-            RunSuite("HediffSwap",        () => HediffSwapTests.RunAll(map),        suiteResults);
-            RunSuite("CaravanDeath",       () => CaravanDeathTests.RunAll(map),      suiteResults);
-            RunSuite("MapProtection",      () => MapProtectionTests.RunAll(map),     suiteResults);
-            RunSuite("Regrowth",           () => RegrowthTests.RunAll(map),          suiteResults);
-            RunSuite("WorkPriority",       () => WorkPriorityTests.RunAll(map),      suiteResults);
-            RunSuite("ConsciousnessBuff",  () => ConsciousnessBuffTests.RunAll(map), suiteResults);
-            RunSuite("MoodBuff",           () => MoodBuffTests.RunAll(map),          suiteResults);
-            RunSuite("ElixirPopCap",          () => ElixirPopulationCapTests.RunAll(map),    suiteResults);
-            RunSuite("ResurrectionSurvival", () => ResurrectionSurvivalTests.RunAll(map),   suiteResults);
-            RunSuite("HealingGate",          () => HealingGateTests.RunAll(map),            suiteResults);
-            RunSuite("ReactiveHealth",        () => ReactiveHealthTests.RunAll(map),          suiteResults);
+            RunSuite("HediffSwap", () => HediffSwapTests.RunAll(map), suiteResults);
+            RunSuite("CaravanDeath", () => CaravanDeathTests.RunAll(map), suiteResults);
+            RunSuite("MapProtection", () => MapProtectionTests.RunAll(map), suiteResults);
+            RunSuite("MapRemovalFailure", () => FailureScenarios.MapRemovalFailureTests.RunAll(map), suiteResults);
+            RunSuite("RecoverySiteFailure", () => FailureScenarios.RecoverySiteFailureTests.RunAll(map), suiteResults);
+            RunSuite("SoloDeathFailure", () => FailureScenarios.SoloDeathFailureTests.RunAll(map), suiteResults);
+            RunSuite("DebtPersistenceFailure", () => FailureScenarios.DebtPersistenceFailureTests.RunAll(map), suiteResults);
+            RunSuite("Regrowth", () => RegrowthTests.RunAll(map), suiteResults);
+            RunSuite("ModernRegrowth", () => ModernRegrowthTests.RunAll(map), suiteResults);
+            RunSuite("WorkPriority", () => WorkPriorityTests.RunAll(map), suiteResults);
+            RunSuite("ConsciousnessBuff", () => ConsciousnessBuffTests.RunAll(map), suiteResults);
+            RunSuite("MoodBuff", () => MoodBuffTests.RunAll(map), suiteResults);
+            RunSuite("ElixirPopCap", () => ElixirPopulationCapTests.RunAll(map), suiteResults);
+            RunSuite("ResurrectionSurvival", () => ResurrectionSurvivalTests.RunAll(map), suiteResults);
+            RunSuite("HealingGate", () => HealingGateTests.RunAll(map), suiteResults);
+            RunSuite("ReactiveHealth", () => ReactiveHealthTests.RunAll(map), suiteResults);
+            RunSuite("MaintainabilityBoundary", () => MaintainabilityBoundaryTests.RunAll(map), suiteResults);
 
             int totalPassed = suiteResults.Sum(r => r.Result.Passed);
             int totalFailed = suiteResults.Sum(r => r.Result.Failed);
-            long totalMs    = suiteResults.Sum(r => r.Result.ElapsedMs);
+            int totalUnavailable = suiteResults.Sum(r => r.Result.Unavailable);
+            long totalMs = suiteResults.Sum(r => r.Result.ElapsedMs);
 
             Log.Message("[EternalTests] ========================================");
-            Log.Message($"[EternalTests] RESULTS: {totalPassed} passed, {totalFailed} failed ({totalMs}ms total)");
+            Log.Message($"[EternalTests] RESULTS: {totalPassed} passed, {totalFailed} failed, {totalUnavailable} unavailable ({totalMs}ms total)");
             Log.Message("[EternalTests] ========================================");
 
             PostSummaryLetter(suiteResults, totalMs);
+            return suiteResults;
         }
 
         // ─── Per-Suite Buttons ────────────────────────────────────────────────
@@ -117,6 +130,14 @@ namespace Eternal.InGameTests
             var map = Find.CurrentMap;
             if (map == null) { Log.Error("[EternalTests] No current map."); return; }
             RunSingleSuite("Regrowth", () => RegrowthTests.RunAll(map));
+        }
+
+        [DebugAction("Eternal", "Tests: ModernRegrowth", allowedGameStates = AllowedGameStates.PlayingOnMap)]
+        public static void RunModernRegrowthSuite()
+        {
+            var map = Find.CurrentMap;
+            if (map == null) { Log.Error("[EternalTests] No current map."); return; }
+            RunSingleSuite("ModernRegrowth", () => ModernRegrowthTests.RunAll(map));
         }
 
         [DebugAction("Eternal", "Tests: WorkPriority", allowedGameStates = AllowedGameStates.PlayingOnMap)]
@@ -167,7 +188,23 @@ namespace Eternal.InGameTests
             RunSingleSuite("ReactiveHealth", () => ReactiveHealthTests.RunAll(map));
         }
 
+        // Opt-in: the normal resurrection check advances the active game's ticks.
+        [DebugAction("Eternal Tests", "Run: RJW Compatibility (opt-in)", allowedGameStates = AllowedGameStates.PlayingOnMap)]
+        public static void RunRjwCompatibilityOnly()
+        {
+            var map = Find.CurrentMap;
+            if (map == null) { Log.Error("[EternalTests] No current map."); return; }
+            RunSingleSuite("RjwCompatibility", () => RjwCompatibilityTests.RunAll(map));
+        }
+
         // ─── Internal Helpers ────────────────────────────────────────────────
+
+        [DebugAction("Eternal", "Tests: MaintainabilityBoundary", allowedGameStates = AllowedGameStates.PlayingOnMap)]
+        public static void RunMaintainabilityBoundarySuite()
+        {
+            var map = Find.CurrentMap;
+            RunSingleSuite("MaintainabilityBoundary", () => MaintainabilityBoundaryTests.RunAll(map));
+        }
 
         /// <summary>
         /// Runs a single suite, wraps timing, posts its own summary letter.
@@ -199,7 +236,7 @@ namespace Eternal.InGameTests
                 sw.Stop();
                 result.ElapsedMs = sw.ElapsedMilliseconds;
                 results.Add((suiteName, result));
-                Log.Message($"[EternalTests] Suite {suiteName}: {result.Passed} passed, {result.Failed} failed ({result.ElapsedMs}ms)");
+                Log.Message($"[EternalTests] Suite {suiteName}: {result.Passed} passed, {result.Failed} failed, {result.Unavailable} unavailable ({result.ElapsedMs}ms)");
             }
             catch (Exception ex)
             {
@@ -220,10 +257,12 @@ namespace Eternal.InGameTests
         {
             int totalPassed = suiteResults.Sum(r => r.Result.Passed);
             int totalFailed = suiteResults.Sum(r => r.Result.Failed);
+            int totalUnavailable = suiteResults.Sum(r => r.Result.Unavailable);
 
             var letterDef = totalFailed > 0 ? LetterDefOf.ThreatBig : LetterDefOf.NeutralEvent;
             string title = totalFailed > 0
                 ? $"Eternal Tests: {totalFailed} FAILED"
+                : totalUnavailable > 0 ? $"Eternal Tests: {totalUnavailable} UNAVAILABLE"
                 : $"Eternal Tests: All {totalPassed} Passed";
 
             var body = new System.Text.StringBuilder();
@@ -233,12 +272,20 @@ namespace Eternal.InGameTests
             // Per-suite summary
             foreach (var (name, result) in suiteResults)
             {
-                string statusIcon = result.Failed > 0 ? "[FAIL]" : "[OK]  ";
-                body.AppendLine($"{statusIcon} {name}: {result.Passed} passed, {result.Failed} failed ({result.ElapsedMs}ms)");
+                string statusIcon = result.Failed > 0 ? "[FAIL]" : result.Unavailable > 0 ? "[UNAVAILABLE]" : "[OK]  ";
+                body.AppendLine($"{statusIcon} {name}: {result.Passed} passed, {result.Failed} failed, {result.Unavailable} unavailable ({result.ElapsedMs}ms)");
             }
 
             body.AppendLine();
-            body.AppendLine($"Total: {totalPassed} passed, {totalFailed} failed ({totalMs}ms)");
+            body.AppendLine($"Total: {totalPassed} passed, {totalFailed} failed, {totalUnavailable} unavailable ({totalMs}ms)");
+
+            foreach (var suite in suiteResults)
+            {
+                foreach (var reason in suite.Result.UnavailableReasons)
+                {
+                    body.AppendLine($"  - UNAVAILABLE: {reason}");
+                }
+            }
 
             // Grouped failures
             bool hasFailures = suiteResults.Any(r => r.Result.Failures?.Count > 0);
@@ -249,7 +296,9 @@ namespace Eternal.InGameTests
                 foreach (var (name, result) in suiteResults)
                 {
                     if (result.Failures == null || result.Failures.Count == 0)
+                    {
                         continue;
+                    }
 
                     body.AppendLine($"[{name}]");
                     foreach (var failure in result.Failures)
@@ -277,16 +326,60 @@ namespace Eternal.InGameTests
     {
         public int Passed;
         public int Failed;
+        public int Unavailable;
         public List<string> Failures;
+        public List<string> UnavailableReasons;
         /// <summary>Wall-clock milliseconds for the suite. Set by the runner after execution.</summary>
         public long ElapsedMs;
 
         public TestSuiteResult(int passed, int failed, List<string> failures)
         {
-            Passed    = passed;
-            Failed    = failed;
-            Failures  = failures ?? new List<string>();
+            Passed = passed;
+            Failed = failed;
+            Unavailable = 0;
+            Failures = failures ?? new List<string>();
+            UnavailableReasons = new List<string>();
             ElapsedMs = 0;
+        }
+
+        public void RunTest(string suite, string name, Action test)
+        {
+            Log.Message($"[EternalTests] Running: {name}");
+            Exception failure = null;
+            try
+            {
+                test();
+            }
+            catch (Exception ex)
+            {
+                failure = ex;
+            }
+            finally
+            {
+                try { TestPawnFactory.CleanupAll(); }
+                catch (Exception cleanup)
+                {
+                    failure = failure == null ? cleanup : new AggregateException(failure, cleanup);
+                }
+            }
+
+            if (failure is TestUnavailableException)
+            {
+                Unavailable++;
+                UnavailableReasons.Add($"[{suite}] {name}: {failure.Message}");
+                Log.Warning($"[EternalTests] UNAVAILABLE: {name} -- {failure.Message}");
+            }
+            else if (failure != null)
+            {
+                Failed++;
+                Failures.Add($"[{suite}] {name}: {failure.Message}");
+                Log.Error($"[EternalTests] FAILED: {name} -- {failure}");
+            }
+            else
+            {
+                Passed++;
+                Log.Message($"[EternalTests] PASSED: {name}");
+            }
         }
     }
 
@@ -298,53 +391,118 @@ namespace Eternal.InGameTests
         public static void IsTrue(bool condition, string message)
         {
             if (!condition)
+            {
                 throw new TestFailedException($"AssertTrue failed: {message}");
+            }
         }
 
         public static void IsFalse(bool condition, string message)
         {
             if (condition)
+            {
                 throw new TestFailedException($"AssertFalse failed: {message}");
+            }
         }
 
         public static void AreEqual<T>(T expected, T actual, string message)
         {
+            if (expected is float expectedFloat)
+            {
+                Finite(expectedFloat, message);
+            }
+
+            if (actual is float actualFloat)
+            {
+                Finite(actualFloat, message);
+            }
+
+            if (expected is double expectedDouble && (double.IsNaN(expectedDouble) || double.IsInfinity(expectedDouble)))
+            {
+                throw new TestFailedException($"Nonfinite expected value. {message}");
+            }
+
+            if (actual is double actualDouble && (double.IsNaN(actualDouble) || double.IsInfinity(actualDouble)))
+            {
+                throw new TestFailedException($"Nonfinite actual value. {message}");
+            }
+
             if (!EqualityComparer<T>.Default.Equals(expected, actual))
+            {
                 throw new TestFailedException($"AssertEqual failed: expected [{expected}] but got [{actual}]. {message}");
+            }
         }
 
         public static void IsNotNull(object obj, string message)
         {
             if (obj == null)
+            {
                 throw new TestFailedException($"AssertNotNull failed: {message}");
+            }
         }
 
         public static void IsNull(object obj, string message)
         {
             if (obj != null)
+            {
                 throw new TestFailedException($"AssertNull failed: expected null but got [{obj}]. {message}");
+            }
         }
 
         /// <summary>Throws if actual &lt;= threshold.</summary>
         public static void GreaterThan(float actual, float threshold, string message)
         {
+            Finite(actual, message);
+            Finite(threshold, message);
             if (actual <= threshold)
+            {
                 throw new TestFailedException($"AssertGreaterThan failed: {actual} is not > {threshold}. {message}");
+            }
         }
 
         /// <summary>Throws if actual &gt; threshold.</summary>
         public static void LessThanOrEqual(float actual, float threshold, string message)
         {
+            Finite(actual, message);
+            Finite(threshold, message);
             if (actual > threshold)
+            {
                 throw new TestFailedException($"AssertLessThanOrEqual failed: {actual} is not <= {threshold}. {message}");
+            }
         }
 
         /// <summary>Throws if actual is outside [min, max].</summary>
         public static void InRange(float actual, float min, float max, string message)
         {
+            Finite(actual, message);
+            Finite(min, message);
+            Finite(max, message);
+            IsTrue(min <= max, $"Invalid assertion range. {message}");
             if (actual < min || actual > max)
+            {
                 throw new TestFailedException($"AssertInRange failed: {actual} is not in [{min}, {max}]. {message}");
+            }
         }
+
+        public static void Finite(float value, string message)
+        {
+            if (float.IsNaN(value) || float.IsInfinity(value))
+            {
+                throw new TestFailedException($"Nonfinite value [{value}]. {message}");
+            }
+        }
+
+        public static void Available(object prerequisite, string name)
+        {
+            if (prerequisite == null)
+            {
+                throw new TestUnavailableException($"Required host prerequisite: {name}");
+            }
+        }
+    }
+
+    public class TestUnavailableException : Exception
+    {
+        public TestUnavailableException(string message) : base(message) { }
     }
 
     /// <summary>

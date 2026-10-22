@@ -10,6 +10,7 @@
 //              GetAutoSeverityMultiplier removed — healing speed now uses a single debuff rate
 //              factor in UnifiedHediffHealingCalculator (Immortals parity).
 
+using Eternal.Compatibility;
 using RimWorld;
 using Verse;
 
@@ -28,24 +29,41 @@ namespace Eternal.Extensions
         public static bool IsHarmful(this Hediff hediff)
         {
             if (hediff == null)
+            {
                 return false;
+            }
+
+            if (RjwHealthPolicy.IsProtected(hediff.def))
+            {
+                return false;
+            }
 
             // Never heal Eternal essence
             if (hediff.def == EternalDefOf.Eternal_Essence)
+            {
                 return false;
+            }
 
             // PRIMARY: Use RimWorld's built-in classification
             if (hediff.def.isBad)
+            {
                 return true;
+            }
 
             if (hediff is Hediff_Injury)
+            {
                 return true;
+            }
 
             if (hediff.def.lethalSeverity > 0)
+            {
                 return true;
+            }
 
             if (hediff.def.makesSickThought)
+            {
                 return true;
+            }
 
             // FALLBACK: String matching for edge cases not covered by API
             string defName = hediff.def.defName.ToLowerInvariant();
@@ -61,16 +79,22 @@ namespace Eternal.Extensions
         public static bool IsDisease(this Hediff hediff)
         {
             if (hediff == null)
+            {
                 return false;
+            }
 
             // PRIMARY: Check for discoverable comp (diseases have this)
             if (hediff is HediffWithComps hwc &&
                 hwc.TryGetComp<HediffComp_Discoverable>() != null)
+            {
                 return true;
+            }
 
             // PRIMARY: Lethal severity indicates disease
             if (hediff.def.lethalSeverity > 0)
+            {
                 return true;
+            }
 
             // FALLBACK: String matching for modded diseases
             string defName = hediff.def.defName.ToLowerInvariant();
@@ -84,25 +108,11 @@ namespace Eternal.Extensions
         /// <summary>
         /// Checks if this hediff is a permanent injury or scar.
         /// </summary>
+        public static bool IsPermanentInjuryScar(this Hediff hediff)
+            => hediff is Hediff_Injury && hediff.def != null && HediffUtility.IsPermanent(hediff);
+
         public static bool IsPermanentOrScar(this Hediff hediff)
-        {
-            if (hediff == null)
-                return false;
-
-            // PRIMARY: Use RimWorld's built-in check
-            if (HediffUtility.IsPermanent(hediff))
-                return true;
-
-            if (hediff.def.chronic)
-                return true;
-
-            // FALLBACK: String matching
-            string defName = hediff.def.defName.ToLowerInvariant();
-            return defName.Contains("scar") ||
-                   defName.Contains("permanent") ||
-                   defName.Contains("old wound") ||
-                   defName.Contains("chronic");
-        }
+            => hediff?.def != null && (hediff.IsPermanentInjuryScar() || hediff.def.chronic);
 
         /// <summary>
         /// Checks if a hediff is critical and needs priority healing.
@@ -110,19 +120,27 @@ namespace Eternal.Extensions
         public static bool IsCritical(this Hediff hediff)
         {
             if (hediff == null)
+            {
                 return false;
+            }
 
             // Blood loss is always critical
             if (hediff.def.defName.Contains("BloodLoss"))
+            {
                 return true;
+            }
 
             // Life-threatening conditions
             if (hediff.def.lethalSeverity > 0 && hediff.Severity > hediff.def.lethalSeverity * 0.5f)
+            {
                 return true;
+            }
 
             // Injuries to vital body parts
             if (hediff is Hediff_Injury injury && injury.Part != null)
+            {
                 return injury.Part.IsCritical();
+            }
 
             return false;
         }
@@ -133,20 +151,30 @@ namespace Eternal.Extensions
         public static HealingType GetHealingType(this Hediff hediff)
         {
             if (hediff is Hediff_Injury)
+            {
                 return HealingType.Injury;
+            }
 
             if (hediff.IsDisease())
+            {
                 return HealingType.Disease;
+            }
 
             if (hediff is Hediff_MissingPart)
+            {
                 return HealingType.Regrowth;
+            }
 
             if (hediff.IsPermanentOrScar())
+            {
                 return HealingType.Scar;
+            }
 
             // Check for life-threatening conditions
             if (hediff.def.defName.Contains("BloodLoss") || hediff.IsCritical())
+            {
                 return HealingType.Critical;
+            }
 
             return hediff.def.isBad ? HealingType.Condition : HealingType.Misc;
         }
@@ -159,27 +187,39 @@ namespace Eternal.Extensions
         public static bool IsDebuffWithStages(this Hediff hediff)
         {
             if (hediff?.def == null)
+            {
                 return false;
+            }
 
             // Must be a harmful hediff
             if (!hediff.def.isBad)
+            {
                 return false;
+            }
 
             // Must have stages
             if (hediff.def.stages == null || hediff.def.stages.Count == 0)
+            {
                 return false;
+            }
 
             // Injuries heal at constant speed (no threshold)
             if (hediff is Hediff_Injury)
+            {
                 return false;
+            }
 
             // Missing parts use regrowth system (no threshold)
             if (hediff is Hediff_MissingPart)
+            {
                 return false;
+            }
 
             // Scars/permanent conditions heal at constant speed (no threshold)
             if (hediff.IsPermanentOrScar())
+            {
                 return false;
+            }
 
             // Everything else (diseases, infections, debuffs) uses stage-based healing
             return true;
@@ -193,23 +233,33 @@ namespace Eternal.Extensions
         public static bool ShouldBypassThreshold(this Hediff hediff)
         {
             if (hediff?.def == null)
+            {
                 return true; // Default to no threshold if invalid
+            }
 
             // Bloodloss - ALWAYS heal immediately (critical for survival)
             if (hediff.def == HediffDefOf.BloodLoss)
+            {
                 return true;
+            }
 
             // Injuries - heal at constant rate, no threshold
             if (hediff is Hediff_Injury)
+            {
                 return true;
+            }
 
             // Missing parts - use regrowth system, no threshold
             if (hediff is Hediff_MissingPart)
+            {
                 return true;
+            }
 
             // Scars and permanent conditions - heal at constant rate, no threshold
             if (hediff.IsPermanentOrScar())
+            {
                 return true;
+            }
 
             // Stationary severity hediffs - bypass threshold (can never reach it naturally)
             if (hediff.HasStationarySeverity())
@@ -226,7 +276,9 @@ namespace Eternal.Extensions
             // falls, so it can never RISE to an activation threshold; gating on one would
             // block healing forever (field bug: enabled toxic buildup never healed).
             if (hediff.HasNaturallyDecayingSeverity())
+            {
                 return true;
+            }
 
             return false;
         }
@@ -244,7 +296,9 @@ namespace Eternal.Extensions
         public static bool HasStationarySeverity(this Hediff hediff)
         {
             if (hediff?.def == null)
+            {
                 return false;
+            }
 
             // Check if hediff has any components that change severity
             if (hediff is HediffWithComps hwc && hwc.comps != null)
@@ -256,27 +310,37 @@ namespace Eternal.Extensions
                     // Examples: bloodfeeder mark, hangovers, drug effects
                     // Source: RimWorld-Decompiled/Verse/HediffComp_Disappears.cs
                     if (comp is HediffComp_Disappears)
+                    {
                         return true; // Explicitly stationary - bypass threshold
+                    }
 
                     // SeverityPerDay with non-zero value = severity changes over time
                     if (comp is HediffComp_SeverityPerDay)
                     {
                         var props = comp.props as HediffCompProperties_SeverityPerDay;
                         if (props?.severityPerDay != 0f)
+                        {
                             return false; // Has active severity change
+                        }
                     }
 
                     // Immunizable = severity changes based on immunity
                     if (comp is HediffComp_Immunizable)
+                    {
                         return false;
+                    }
 
                     // GrowthMode = severity changes over time
                     if (comp is HediffComp_GrowthMode)
+                    {
                         return false;
+                    }
 
                     // TendDuration = severity changes with tending
                     if (comp is HediffComp_TendDuration)
+                    {
                         return false;
+                    }
                 }
             }
 
@@ -291,54 +355,76 @@ namespace Eternal.Extensions
         public static bool IsDefaultHarmful(this Hediff hediff)
         {
             if (hediff == null)
+            {
                 return false;
+            }
 
             // Never heal Eternal essence
             if (hediff.def == EternalDefOf.Eternal_Essence)
+            {
                 return false;
+            }
 
             // PRIMARY: Use RimWorld API
             if (hediff.def.isBad)
+            {
                 return true;
+            }
 
             if (hediff is Hediff_Injury)
+            {
                 return true;
+            }
 
             if (hediff.def.lethalSeverity > 0)
+            {
                 return true;
+            }
 
             // FALLBACK: String matching for known harmful types
             string defName = hediff.def.defName.ToLowerInvariant();
 
             // Critical conditions
             if (defName.Contains("bloodloss") || defName.Contains("anesthetic"))
+            {
                 return true;
+            }
 
             // Infections and diseases
             if (defName.Contains("infection") || defName.Contains("plague") ||
                 defName.Contains("disease") || defName.Contains("flu") ||
                 defName.Contains("malaria") || defName.Contains("gut worms") ||
                 defName.Contains("muscle parasites") || defName.Contains("gut parasites"))
+            {
                 return true;
+            }
 
             // Poisoning and toxins
             if (defName.Contains("poison") || defName.Contains("venom") ||
                 defName.Contains("toxin") || defName.Contains("snake bite"))
+            {
                 return true;
+            }
 
             // Pain and consciousness affecting conditions
             if (defName.Contains("pain") || defName.Contains("coma") ||
                 defName.Contains("unconscious"))
+            {
                 return true;
+            }
 
             // Fire and environmental damage
             if (defName.Contains("burn") || defName.Contains("frostbite") ||
                 defName.Contains("heatstroke") || defName.Contains("hypothermia"))
+            {
                 return true;
+            }
 
             // Malnutrition and starvation
             if (defName.Contains("malnutrition") || defName.Contains("starvation"))
+            {
                 return true;
+            }
 
             return false;
         }
@@ -354,7 +440,9 @@ namespace Eternal.Extensions
         public static bool HasNaturallyDecayingSeverity(this Hediff hediff)
         {
             if (!(hediff is HediffWithComps hwc) || hwc.comps == null || hediff.pawn == null)
+            {
                 return false;
+            }
 
             bool hasModifier = false;
             float trendPerDay = 0f;

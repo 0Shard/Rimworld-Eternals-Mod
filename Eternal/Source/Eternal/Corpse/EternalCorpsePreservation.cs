@@ -17,7 +17,6 @@ using System.Linq;
 using Verse;
 using RimWorld;
 // No corpse type alias needed - use Thing directly
-using MapType = Verse.Map; // Alias to avoid namespace conflict
 using Eternal.Exceptions;
 using Eternal.Extensions;
 using Eternal.Utils;
@@ -91,7 +90,9 @@ namespace Eternal.Corpse
             try
             {
                 if (corpse == null)
+                {
                     return;
+                }
 
                 preservedCorpses.Remove(corpse);
 
@@ -119,7 +120,10 @@ namespace Eternal.Corpse
         /// </summary>
         private void CacheComponents(Verse.Corpse corpse)
         {
-            if (corpse == null) return;
+            if (corpse == null)
+            {
+                return;
+            }
 
             var rottable = corpse.GetComp<CompRottable>();
             if (rottable != null)
@@ -399,38 +403,6 @@ namespace Eternal.Corpse
         }
 
         /// <summary>
-        /// Checks if a corpse is preserved.
-        /// </summary>
-        /// <param name="corpse">The corpse to check</param>
-        /// <returns>True if the corpse is preserved</returns>
-        public bool IsPreserved(Verse.Corpse corpse)
-        {
-            return preservedCorpses.Contains(corpse);
-        }
-
-        /// <summary>
-        /// Gets all preserved corpses.
-        /// </summary>
-        /// <returns>Collection of preserved corpses</returns>
-        public IEnumerable<Verse.Corpse> GetPreservedCorpses()
-        {
-            return preservedCorpses;
-        }
-
-        /// <summary>
-        /// Gets preserved corpses on a specific map.
-        /// </summary>
-        /// <param name="map">The map to check</param>
-        /// <returns>Collection of preserved corpses on the map</returns>
-        public IEnumerable<Verse.Corpse> GetPreservedCorpsesOnMap(MapType map)
-        {
-            if (map == null)
-                return Enumerable.Empty<Verse.Corpse>();
-
-            return preservedCorpses.Where(corpse => corpse.Map == map);
-        }
-
-        /// <summary>
         /// Forces preservation refresh on all corpses.
         /// </summary>
         public void RefreshAllPreservation()
@@ -531,7 +503,9 @@ namespace Eternal.Corpse
             try
             {
                 if (corpse == null)
+                {
                     return;
+                }
 
                 // Use damage system to extinguish any existing fire
                 // This is the most reliable method in RimWorld 1.6

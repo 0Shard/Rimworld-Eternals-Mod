@@ -19,88 +19,70 @@ using Eternal.Utils;
 
 namespace Eternal.Patches.ItsSorcery
 {
-	/// <summary>
-	/// Patches ItsSorceryFramework.ProgressTracker_Level.AddExperience to immediately
-	/// force-level Eternal pawns' sorcery schemas to their class cap.
-	///
-	/// Mechanism: whenever an Eternal pawn gains experience in a schema (via AddExperience),
-	/// the postfix checks if the pawn is a valid Eternal and if the schema is not already maxed.
-	/// If so, it calls MaxOutSchema to force-level to the cap. No recursion risk since ForceLevelUp
-	/// does not invoke AddExperience.
-	/// </summary>
-	[HarmonyPatch]
-	public static class ISF_AddExperience_Patch
-	{
-		/// <summary>
-		/// Guard: only apply this patch when It's Sorcery is active.
-		/// Returning false skips the patch entirely (Harmony will not call TargetMethod).
-		/// </summary>
-		public static bool Prepare()
-		{
-			bool isActive = ItsSorceryDetection.ItsSorceryActive;
+    /// <summary>
+    /// Patches ItsSorceryFramework.ProgressTracker_Level.AddExperience to immediately
+    /// force-level Eternal pawns' sorcery schemas to their class cap.
+    ///
+    /// Mechanism: whenever an Eternal pawn gains experience in a schema (via AddExperience),
+    /// the postfix checks if the pawn is a valid Eternal and if the schema is not already maxed.
+    /// If so, it calls MaxOutSchema to force-level to the cap. No recursion risk since ForceLevelUp
+    /// does not invoke AddExperience.
+    /// </summary>
+    [HarmonyPatch]
+    public static class ISF_AddExperience_Patch
+    {
+        /// <summary>
+        /// Guard: only apply this patch when It's Sorcery is active.
+        /// Returning false skips the patch entirely (Harmony will not call TargetMethod).
+        /// </summary>
+        public static bool Prepare() => CompatibilityBinding.Prepare(ItsSorceryDetection.ItsSorceryActive,
+            "[Eternal] Skipping It's Sorcery AddExperience patch — mod not active",
+            "[Eternal] It's Sorcery detected - enabling schema insta-max for Eternals");
 
-			if (!isActive)
-			{
-				// Only log at debug level — absence of the mod is the normal case
-				if (Eternal_Mod.settings?.debugMode == true)
-				{
-					Log.Message("[Eternal] Skipping It's Sorcery AddExperience patch — mod not active");
-				}
-				return false;
-			}
+        /// <summary>
+        /// Resolve the target method via reflection. This is the ProgressTracker_Level OVERRIDE —
+        /// patching the base virtual would never fire. Returns null to skip patching if the method
+        /// cannot be found (API change).
+        /// </summary>
+        public static MethodBase TargetMethod()
+        {
+            var method = ItsSorceryDetection.AddExperienceMethod;
 
-			if (Eternal_Mod.settings?.debugMode == true)
-			{
-				Log.Message("[Eternal] It's Sorcery detected - enabling schema insta-max for Eternals");
-			}
+            return CompatibilityBinding.WarnMissing(method,
+                "[Eternal] Skipping It's Sorcery AddExperience patch — method not found (mod absent or API changed)");
+        }
 
-			return true;
-		}
+        /// <summary>
+        /// Postfix: for Eternal pawns, force-level the schema to its cap after experience is applied.
+        /// </summary>
+        [HarmonyPostfix]
+        public static void Postfix(object __instance)
+        {
+            try
+            {
+                Pawn pawn = ItsSorceryDetection.PawnField?.GetValue(__instance) as Pawn;
+                if (pawn == null || !pawn.IsValidEternal())
+                {
+                    return;
+                }
 
-		/// <summary>
-		/// Resolve the target method via reflection. This is the ProgressTracker_Level OVERRIDE —
-		/// patching the base virtual would never fire. Returns null to skip patching if the method
-		/// cannot be found (API change).
-		/// </summary>
-		public static MethodBase TargetMethod()
-		{
-			var method = ItsSorceryDetection.AddExperienceMethod;
+                if (ItsSorceryDetection.IsMaxed(__instance))
+                {
+                    return;
+                }
 
-			if (method == null)
-			{
-				Log.Warning("[Eternal] Skipping It's Sorcery AddExperience patch — method not found (mod absent or API changed)");
-			}
+                ItsSorceryDetection.MaxOutSchema(__instance);
 
-			return method;
-		}
-
-		/// <summary>
-		/// Postfix: for Eternal pawns, force-level the schema to its cap after experience is applied.
-		/// </summary>
-		[HarmonyPostfix]
-		public static void Postfix(object __instance)
-		{
-			try
-			{
-				Pawn pawn = ItsSorceryDetection.PawnField?.GetValue(__instance) as Pawn;
-				if (pawn == null || !pawn.IsValidEternal())
-					return;
-
-				if (ItsSorceryDetection.IsMaxed(__instance))
-					return;
-
-				ItsSorceryDetection.MaxOutSchema(__instance);
-
-				if (Eternal_Mod.settings?.debugMode == true)
-				{
-					Log.Message($"[Eternal] ISF: maxed schema for {pawn.Name?.ToStringShort ?? "Pawn"} on exp gain");
-				}
-			}
-			catch (Exception ex)
-			{
-				EternalLogger.HandleException(EternalExceptionCategory.CompatibilityFailure,
-					"ISF_AddExperience_Patch.Postfix", null, ex);
-			}
-		}
-	}
+                if (Eternal_Mod.settings?.debugMode == true)
+                {
+                    Log.Message($"[Eternal] ISF: maxed schema for {pawn.Name?.ToStringShort ?? "Pawn"} on exp gain");
+                }
+            }
+            catch (Exception ex)
+            {
+                EternalLogger.HandleException(EternalExceptionCategory.CompatibilityFailure,
+                    "ISF_AddExperience_Patch.Postfix", null, ex);
+            }
+        }
+    }
 }

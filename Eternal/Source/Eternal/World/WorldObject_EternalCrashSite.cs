@@ -43,21 +43,46 @@ namespace Eternal.World
         /// </summary>
         private List<Pawn> crashedEternals;
 
+        internal bool HasRecoveryContents => crashedThings.Count != 0;
+        internal bool HasPendingPawn(Pawn pawn) => crashedThings.Contains(pawn);
+
+        internal bool TryRetainUnownedPawn(Pawn pawn)
+        {
+            if (!Spawned || Destroyed || pawn == null || pawn.Dead || pawn.Destroyed
+                || pawn.Spawned || pawn.holdingOwner != null) { return false; }
+            if (Find.WorldObjects.AllWorldObjects.OfType<WorldObject_EternalCrashSite>()
+                .Any(site => site != this && site.HasPendingPawn(pawn))) { return false; }
+            if (pawn.IsWorldPawn()) { Find.WorldPawns.RemovePawn(pawn); }
+            if (!crashedThings.Contains(pawn)) { crashedThings.Add(pawn); }
+            return true;
+        }
+
+        internal bool HasPendingCorpse(CorpseType corpse) => corpse != null && crashedThings.Contains(corpse);
+
+        internal bool ContainsRecoveryCorpse(CorpseType corpse) => HasPendingCorpse(corpse)
+            || (corpse != null && !corpse.Destroyed && corpse.Spawned && HasMap && corpse.Map == Map);
+
+        internal IEnumerable<CorpseType> PendingCorpsesForRecovery()
+            => crashedThings.OfType<CorpseType>().Where(corpse => !corpse.Destroyed).ToList();
+
+        internal void ForgetPendingCorpse(CorpseType corpse)
+            => crashedThings.RemoveAll(thing => ReferenceEquals(thing, corpse));
+
         /// <summary>
         /// Adds a living pawn to the crash site (before map generation).
         /// </summary>
         public void AddPawn(Pawn pawn)
         {
-            if (pawn == null)
+            if (pawn == null || pawn.Dead || pawn.Destroyed)
             {
                 Log.Warning("[Eternal] Attempted to add null pawn to crash site");
                 return;
             }
 
-            if (!crashedThings.Contains(pawn))
+            if (TryRetainUnownedPawn(pawn))
             {
-                crashedThings.Add(pawn);
                 Log.Message($"[Eternal] Added {pawn.Name} to crash site");
+                DeliverPendingContents();
             }
         }
 
@@ -67,17 +92,61 @@ namespace Eternal.World
         /// </summary>
         public void AddCorpse(CorpseType corpse)
         {
-            if (corpse?.InnerPawn == null)
+            if (!TryRetainUnownedCorpse(corpse))
             {
-                Log.Warning("[Eternal] Attempted to add null corpse to crash site");
-                return;
+                Log.Warning("[Eternal] Could not stage a corpse at the recovery site");
             }
+        }
 
+        /// <summary>
+        /// Stages a newly created solo-caravan corpse even if an external AddCorpse hook
+        /// fails. Uses the existing deep-save list and never nests a corpse in its own pawn.
+        /// </summary>
+        internal bool TryStageCorpseForRecovery(CorpseType corpse)
+        {
+            if (Destroyed || corpse?.InnerPawn == null || corpse.Destroyed)
+            {
+                return false;
+            }
+            if (corpse.Spawned)
+            {
+                corpse.DeSpawn(DestroyMode.WillReplace);
+            }
+            corpse.holdingOwner?.Remove(corpse);
+            if (corpse.Spawned || corpse.holdingOwner != null)
+            {
+                return false;
+            }
+            return AppendRecoveryCorpse(corpse);
+        }
+
+        /// <summary>
+        /// Last-owner death fallback after transfer hooks reject staging. Only adopts a fully
+        /// detached corpse; it cannot remove another physical or persistent owner.
+        /// </summary>
+        internal bool TryRetainUnownedCorpse(CorpseType corpse)
+        {
+            if (!Spawned || Destroyed || corpse?.InnerPawn == null || corpse.Destroyed
+                || corpse.Spawned || corpse.holdingOwner != null)
+            {
+                return false;
+            }
+            if (Find.WorldObjects.AllWorldObjects.OfType<WorldObject_EternalCrashSite>()
+                .Any(site => !ReferenceEquals(site, this) && site.HasPendingCorpse(corpse)))
+            {
+                return false;
+            }
+            return AppendRecoveryCorpse(corpse);
+        }
+
+        private bool AppendRecoveryCorpse(CorpseType corpse)
+        {
             if (!crashedThings.Contains(corpse))
             {
                 crashedThings.Add(corpse);
                 Log.Message($"[Eternal] Added corpse of {corpse.InnerPawn.Name} to crash site");
             }
+            return true;
         }
 
         /// <summary>
@@ -129,6 +198,11 @@ namespace Eternal.World
             // MapPawns_AnyPawnBlockingMapRemoval postfix) remain on map
             bool hasPlayerPawns = Map.mapPawns.AnyPawnBlockingMapRemoval;
 
+            if (HasRecoveryContents)
+            {
+                return false;
+            }
+
             if (!hasPlayerPawns)
             {
                 alsoRemoveWorldObject = true;
@@ -148,12 +222,7 @@ namespace Eternal.World
 
             try
             {
-                foreach (var thing in crashedThings.ToList())
-                {
-                    SpawnCrashedThingOnMap(thing, Map);
-                }
-
-                crashedThings.Clear();
+                DeliverPendingContents();
 
                 Log.Message($"[Eternal] Crash site map generated at tile {Tile}");
             }
@@ -164,14 +233,71 @@ namespace Eternal.World
             }
         }
 
+        internal void DeliverPendingContents()
+        {
+            if (!HasMap) { return; }
+            foreach (var thing in crashedThings.ToList())
+            {
+                if (SpawnCrashedThingOnMap(thing, Map)) { crashedThings.Remove(thing); }
+            }
+        }
+
+        internal bool CanRecover(CaravanType caravan, PlanetTile destination)
+            => Spawned && !Destroyed && caravan != null && caravan.Spawned
+                && caravan.Faction == Faction.OfPlayer && Tile == destination
+                && (HasMap || HasRecoveryContents) && !this.EnterCooldownBlocksEntering();
+
+        internal void EnterRecoveryMap(CaravanType caravan = null)
+        {
+            if (caravan != null && (!CanRecover(caravan, caravan.Tile) || caravan.Tile != Tile)) { return; }
+            if (!Spawned || Destroyed || Faction != Faction.OfPlayer) { return; }
+            LongEventHandler.QueueLongEvent(() =>
+            {
+                if (!Spawned || Destroyed || (caravan != null
+                    && (!CanRecover(caravan, caravan.Tile) || caravan.Tile != Tile))) { return; }
+                var map = GenerateRecoveryMap();
+                if (map == null || Map != map) { return; }
+                if (caravan != null)
+                {
+                    CaravanEnterMapUtility.Enter(caravan, map, CaravanEnterMode.Edge,
+                        CaravanDropInventoryMode.DoNotDrop, false);
+                }
+                Current.Game.CurrentMap = map;
+                CameraJumper.TryJump(map.Center, map);
+            }, "GeneratingMapForNewEncounter", false, null);
+        }
+
+        internal MapType GenerateRecoveryMap()
+        {
+            if (!Spawned || Destroyed || Faction != Faction.OfPlayer) { return null; }
+            var map = HasMap ? Map : MapGenerator.GenerateMap(Find.World.info.initialMapSize, this,
+                MapGeneratorDef, ExtraGenStepDefs);
+            if (map != null && Map == map) { DeliverPendingContents(); }
+            return map;
+        }
+
+        public override IEnumerable<Gizmo> GetGizmos()
+        {
+            foreach (var gizmo in base.GetGizmos()) { yield return gizmo; }
+            if (Faction == Faction.OfPlayer && (HasMap || GetCrashedPawns().Any(p => p.Faction == Faction.OfPlayer)))
+            {
+                yield return new Command_Action
+                {
+                    defaultLabel = HasMap ? "View recovery site" : "Enter recovery site",
+                    defaultDesc = "Generate or view the recovery map and take control of the stranded Eternals.",
+                    action = () => EnterRecoveryMap()
+                };
+            }
+        }
+
         /// <summary>
         /// Spawns a crashed Eternal (pawn or corpse) on the crash site map.
         /// </summary>
-        private void SpawnCrashedThingOnMap(Thing thing, MapType map)
+        private bool SpawnCrashedThingOnMap(Thing thing, MapType map)
         {
             if (thing == null || map == null)
             {
-                return;
+                return false;
             }
 
             try
@@ -189,11 +315,18 @@ namespace Eternal.World
                     && corpseManager.IsTracked(corpse.InnerPawn))
                 {
                     if (!corpseManager.TryRelocateCorpse(corpse.InnerPawn, map, spawnPos))
-                        return;
+                    {
+                        return false;
+                    }
                 }
                 else
                 {
                     GenSpawn.Spawn(thing, spawnPos, map, WipeMode.Vanish);
+                }
+
+                if (!thing.Spawned || thing.Map != map)
+                {
+                    return false;
                 }
 
                 if (thing is Pawn eternal && eternal.Faction == Faction.OfPlayer)
@@ -206,11 +339,13 @@ namespace Eternal.World
                     eternal.jobs?.EndCurrentJob(Verse.AI.JobCondition.InterruptForced, true);
                 }
                 Log.Message($"[Eternal] Spawned {thing.LabelCap} at crash site position {spawnPos}");
+                return true;
             }
             catch (Exception ex)
             {
                 EternalLogger.HandleException(EternalExceptionCategory.MapProtection,
                     "SpawnCrashedThingOnMap", thing as Pawn, ex);
+                return thing.Spawned && thing.Map == map;
             }
         }
 
@@ -224,12 +359,16 @@ namespace Eternal.World
                 yield return option;
             }
 
-            // Option to rescue without entering (just pick them up)
+            foreach (var option in CaravanArrivalActionUtility.GetFloatMenuOptions(
+                () => CanRecover(caravan, Tile), () => new CaravanArrivalAction_EternalCrashSite(this, false),
+                "EnterMap".Translate(Label), caravan, Tile, this))
+            { yield return option; }
             if (crashedThings.Count > 0 && !HasMap)
             {
-                yield return new FloatMenuOption(
-                    "RescueEternalsWithCaravan".Translate(),
-                    () => RescueEternalsToCaravan(caravan));
+                foreach (var option in CaravanArrivalActionUtility.GetFloatMenuOptions(
+                    () => CanRecover(caravan, Tile), () => new CaravanArrivalAction_EternalCrashSite(this, true),
+                    "RescueEternalsWithCaravan".Translate(), caravan, Tile, this))
+                { yield return option; }
             }
         }
 
@@ -237,53 +376,76 @@ namespace Eternal.World
         /// Rescues all crashed Eternals directly to a caravan without generating a map.
         /// Living pawns join the caravan; corpses go into caravan inventory.
         /// </summary>
-        private void RescueEternalsToCaravan(CaravanType caravan)
+        internal void RescueEternalsToCaravan(CaravanType caravan)
         {
-            if (caravan == null)
+            if (!CanRecover(caravan, caravan?.Tile ?? PlanetTile.Invalid) || caravan.Tile != Tile || HasMap)
             {
                 return;
             }
 
             try
             {
+                int rescued = 0;
                 foreach (var thing in crashedThings.ToList())
                 {
-                    if (thing is Pawn eternal)
+                    // The deep list owns only detached contents. A stale entry cannot take
+                    // something that native transport or another container now physically owns.
+                    if (thing == null || thing.Destroyed || thing.Spawned || thing.holdingOwner != null) { continue; }
+                    var originalOwner = thing?.holdingOwner;
+                    bool accepted = false;
+                    try
                     {
-                        caravan.AddPawn(eternal, true);
-                        Log.Message($"[Eternal] Rescued {eternal.Name} to caravan");
-                    }
-                    else if (thing is CorpseType corpse)
-                    {
-                        var corpseManager = EternalServiceContainer.Instance?.CorpseManager;
-                        if (corpseManager != null && corpseManager.IsTracked(corpse.InnerPawn))
+                        if (thing is Pawn eternal && !eternal.Dead && !eternal.Destroyed)
                         {
-                            if (!corpseManager.TryReleaseCorpseToUnspawnedOwner(
-                                    corpse.InnerPawn,
-                                    () =>
-                                    {
-                                        CaravanInventoryUtility.GiveThing(caravan, corpse);
-                                        return corpse.holdingOwner != null;
-                                    }))
+                            caravan.AddPawn(eternal, true);
+                            if (caravan.ContainsPawn(eternal) && !eternal.IsWorldPawn())
+                            { Find.WorldPawns.PassToWorld(eternal); }
+                            accepted = caravan.ContainsPawn(eternal) && eternal.IsWorldPawn();
+                        }
+                        else if (thing is CorpseType corpse)
+                        {
+                            bool Transfer()
                             {
-                                continue;
+                                CaravanInventoryUtility.GiveThing(caravan, corpse);
+                                return !corpse.Destroyed && caravan.AllThings.Contains(corpse);
                             }
+                            var corpseManager = EternalServiceContainer.Instance?.CorpseManager;
+                            accepted = corpseManager != null && corpseManager.IsTracked(corpse.InnerPawn)
+                                ? corpseManager.TryReleaseCorpseToUnspawnedOwner(corpse.InnerPawn, Transfer)
+                                : Transfer();
                         }
-                        else
+                        if (accepted)
                         {
-                            CaravanInventoryUtility.GiveThing(caravan, corpse);
+                            crashedThings.Remove(thing);
+                            rescued++;
                         }
-
-                        Log.Message($"[Eternal] Rescued corpse of {corpse.InnerPawn?.Name} to caravan inventory");
+                    }
+                    catch (Exception ex)
+                    {
+                        EternalLogger.HandleException(EternalExceptionCategory.MapProtection,
+                            "RescueEternalsToCaravan.Transfer", thing as Pawn, ex);
+                    }
+                    finally
+                    {
+                        // The source is this deep-save list, not a ThingOwner. A late native
+                        // inventory acceptance exception must not leave both owners populated.
+                        if (!accepted && thing != null && thing.holdingOwner != originalOwner
+                            && caravan.AllThings.Contains(thing))
+                        {
+                            thing.holdingOwner?.Remove(thing);
+                        }
+                        if (!accepted && thing is Pawn untransferred && untransferred.IsWorldPawn())
+                        { Find.WorldPawns.RemovePawn(untransferred); }
                     }
                 }
 
-                crashedThings.Clear();
+                if (!HasRecoveryContents)
+                {
+                    Find.WorldObjects.Remove(this);
+                }
 
-                // Remove the world object since we're done
-                Find.WorldObjects.Remove(this);
-
-                Messages.Message("EternalsRescued".Translate(), caravan, MessageTypeDefOf.PositiveEvent, true);
+                if (rescued > 0)
+                { Messages.Message("EternalsRescued".Translate(), caravan, MessageTypeDefOf.PositiveEvent, true); }
             }
             catch (Exception ex)
             {

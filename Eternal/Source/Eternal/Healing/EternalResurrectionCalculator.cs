@@ -8,12 +8,11 @@
 //              Time estimates use actual healing rates: severity / (baseHealingRate * bodySize) * tickInterval.
 //              Total ETA is the MAX over items (parallel healing model), not the sum.
 
+using Eternal.Compatibility;
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using RimWorld;
 using Verse;
-using Eternal.Corpse;
 using Eternal.Exceptions;
 using Eternal.Extensions;
 using Eternal.Utils;
@@ -89,7 +88,9 @@ namespace Eternal.Healing
         public float CalculateTotalCost(List<HealingItem> healingItems)
         {
             if (healingItems == null)
+            {
                 return 0f;
+            }
 
             // Use EnergyCost set by EternalHealingPriority factory methods
             return healingItems.Sum(item => item?.EnergyCost ?? 0f);
@@ -105,22 +106,13 @@ namespace Eternal.Healing
         public float CalculateEstimatedTimeTicks(List<HealingItem> healingItems)
         {
             if (healingItems == null || healingItems.Count == 0)
+            {
                 return 0f;
+            }
 
             // HealingItems already have EstimatedHealingTime calculated using actual healing rates
             // via EternalHealingPriority (injuries: severity/rate; regrowth: overlap-aware subtree time)
             return healingItems.Max(item => item?.EstimatedHealingTime ?? 0f);
-        }
-
-        /// <summary>
-        /// Calculates estimated time to complete healing.
-        /// </summary>
-        /// <param name="healingItems">The healing items to calculate time for</param>
-        /// <returns>Estimated time in days</returns>
-        public float CalculateEstimatedTime(List<HealingItem> healingItems)
-        {
-            float totalTicks = CalculateEstimatedTimeTicks(healingItems);
-            return totalTicks / GenDate.TicksPerDay;
         }
 
         /// <summary>
@@ -131,19 +123,34 @@ namespace Eternal.Healing
         private bool ShouldHealHediff(Hediff hediff)
         {
             if (hediff == null)
+            {
                 return false;
+            }
 
             // Don't heal Eternal Essence hediff itself
             if (hediff.def == EternalDefOf.Eternal_Essence)
+            {
                 return false;
+            }
 
             // Don't include Metabolic Recovery — severity is debt-driven, not healed by the system
             // Excluded by type (09-02) AND by def (09-03 after DefOf binding is live).
             if (hediff is Eternal.Hediffs.MetabolicRecovery_Hediff)
+            {
                 return false;
+            }
+
             if (EternalDefOf.Eternal_MetabolicRecovery != null
                 && hediff.def == EternalDefOf.Eternal_MetabolicRecovery)
+            {
                 return false;
+            }
+
+            var rjwDecision = RjwHealthPolicy.GetCorpseHealingDecision(hediff.def);
+            if (rjwDecision.HasValue)
+            {
+                return rjwDecision.Value && hediff.Severity > 0.01f;
+            }
 
             // Heal any hediff that has severity > 0 and is harmful
             return hediff.Severity > 0.01f && IsHarmfulHediff(hediff);

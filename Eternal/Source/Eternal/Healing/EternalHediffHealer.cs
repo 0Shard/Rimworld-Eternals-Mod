@@ -24,6 +24,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using Verse;
+using Eternal.Compatibility;
 using Eternal.DI;
 using Eternal.Extensions;
 using Eternal.Exceptions;
@@ -31,7 +32,6 @@ using Eternal.Healing;
 using Eternal.Infrastructure;
 using Eternal.Interfaces;
 using Eternal.Utils;
-using Eternal.Utilities;
 
 namespace Eternal
 {
@@ -46,50 +46,9 @@ namespace Eternal
 
         // Gate 2: state keys contain only persistent scalar identity, never Hediff references.
         private readonly Dictionary<HealingDictionaryKey, float> healingProgress;
-        private readonly Dictionary<LegacyProgressKey, List<float>> legacyHealingProgress
-            = new Dictionary<LegacyProgressKey, List<float>>();
+        private readonly Dictionary<HealingDictionaryKey, List<float>> legacyHealingProgress
+            = new Dictionary<HealingDictionaryKey, List<float>>();
         private readonly EternalHediffSeverityTracker severityTracker;
-
-        private readonly struct LegacyProgressKey : IEquatable<LegacyProgressKey>
-        {
-            public readonly int PawnThingIDNumber;
-            public readonly string HediffDefName;
-            public readonly string BodyPartLabel;
-
-            public LegacyProgressKey(int pawnId, string defName, string partLabel)
-            {
-                PawnThingIDNumber = pawnId;
-                HediffDefName = defName ?? string.Empty;
-                BodyPartLabel = partLabel ?? string.Empty;
-            }
-
-            public LegacyProgressKey(Pawn pawn, Hediff hediff)
-                : this(pawn.thingIDNumber, hediff.def.defName, hediff.Part?.Label)
-            {
-            }
-
-            public bool Equals(LegacyProgressKey other)
-            {
-                return PawnThingIDNumber == other.PawnThingIDNumber
-                    && HediffDefName == other.HediffDefName
-                    && BodyPartLabel == other.BodyPartLabel;
-            }
-
-            public override bool Equals(object obj)
-            {
-                return obj is LegacyProgressKey other && Equals(other);
-            }
-
-            public override int GetHashCode()
-            {
-                unchecked
-                {
-                    int hash = PawnThingIDNumber * 397;
-                    hash ^= HediffDefName != null ? HediffDefName.GetHashCode() : 0;
-                    return (hash * 397) ^ (BodyPartLabel != null ? BodyPartLabel.GetHashCode() : 0);
-                }
-            }
-        }
 
         /// <summary>
         /// Gets the hediff manager dynamically from current settings.
@@ -103,12 +62,6 @@ namespace Eternal
         /// Provides per-hediff rates, stage-based multipliers, and the debuff rate factor.
         /// </summary>
         private IHediffHealingCalculator HediffCalculator => EternalServiceContainer.Instance.HediffHealingCalculator;
-
-        /// <summary>
-        /// Gets the debt accumulator from the service container.
-        /// Uses unified debt accumulator for consistent debt handling.
-        /// </summary>
-        private IDebtAccumulator DebtAccumulator => EternalServiceContainer.Instance.DebtAccumulator;
 
         /// <summary>
         /// Gets the food cost processor from the service container.
@@ -140,11 +93,15 @@ namespace Eternal
         public void ProcessHediffHealing(Pawn pawn)
         {
             if (pawn == null || pawn.health?.hediffSet == null)
+            {
                 return;
+            }
 
             var healingItems = GetHealingItems(pawn);
             if (healingItems.Count == 0)
+            {
                 return;
+            }
 
             ProcessHealingParallel(pawn, healingItems);
         }
@@ -162,33 +119,48 @@ namespace Eternal
                 try
                 {
                     if (hediff?.def == null)
+                    {
                         continue;
+                    }
 
                     // Never process the Eternal essence itself
                     if (hediff.def == EternalDefOf.Eternal_Essence)
+                    {
                         continue;
+                    }
 
                     // Never process the Metabolic Recovery hediff — its severity is driven
                     // by the debt tracker, not the healing system (single source of truth).
                     // Checked by type (09-02) AND by def (09-03 after DefOf binding is live).
                     if (hediff is Eternal.Hediffs.MetabolicRecovery_Hediff)
+                    {
                         continue;
+                    }
+
                     if (EternalDefOf.Eternal_MetabolicRecovery != null
                         && hediff.def == EternalDefOf.Eternal_MetabolicRecovery)
+                    {
                         continue;
+                    }
 
                     var setting = GetOrCreateSetting(hediff);
 
                     if (!HediffHealingConfig.ShouldHealByDefault(hediff, setting, pawn.Dead))
+                    {
                         continue;
+                    }
 
                     // Simplified: only check canHeal (enabled is now always true for visibility)
-                    if (setting == null || !setting.canHeal)
+                    if (!RjwHealthPolicy.EffectiveCanHeal(hediff.def, setting))
+                    {
                         continue;
+                    }
 
                     var healingItem = EternalHealingPriority.CreateHealingItem(hediff, pawn);
                     if (healingItem != null)
+                    {
                         healingItems.Add(healingItem);
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -212,11 +184,15 @@ namespace Eternal
             // BUGFIX: Use dynamic property instead of cached field
             var manager = HediffManager;
             if (manager == null)
+            {
                 return HediffHealingConfig.CreateDefaultSetting(hediff);
+            }
 
             var existingSetting = manager.GetHediffSetting(hediff.def.defName);
             if (existingSetting != null)
+            {
                 return existingSetting;
+            }
 
             // Use centralized config for defaults
             return HediffHealingConfig.CreateDefaultSetting(hediff);
@@ -235,7 +211,9 @@ namespace Eternal
             foreach (var item in items)
             {
                 if (item?.Hediff == null)
+                {
                     continue;
+                }
 
                 try
                 {
@@ -265,62 +243,55 @@ namespace Eternal
         private void HealHediff(Pawn pawn, HealingItem item)
         {
             if (pawn == null || item?.Hediff == null)
+            {
                 return;
+            }
 
             var hediff = item.Hediff;
+            if (!HediffHealingConfig.AllowsGenericHealing(hediff))
+            {
+                return;
+            }
             var setting = GetOrCreateSetting(hediff);
 
             // Simplified: only check canHeal (enabled is now always true for visibility)
-            if (setting == null || !setting.canHeal)
+            if (!RjwHealthPolicy.EffectiveCanHeal(hediff.def, setting))
+            {
                 return;
+            }
 
             // Calculate healing amount using unified calculator
             // Formula: effectiveRate × stageMultiplier × bodySize × debuffRateFactor
             float healingAmount = HediffCalculator?.CalculateHediffHealing(pawn, hediff, setting) ?? 0f;
 
             if (healingAmount <= 0f)
+            {
                 return;
-
-            // Check if we have capacity for debt before healing (prevents free healing at max debt)
-            var foodDebtSystem = EternalServiceContainer.Instance.FoodDebtSystem;
-            if (foodDebtSystem != null)
-            {
-                bool canDrainFood = FoodCostProcessor?.CanDrainFood(pawn) ?? false;
-                bool hasDebtCapacity = foodDebtSystem.GetRemainingCapacity(pawn) > 0f;
-
-                if (!canDrainFood && !hasDebtCapacity)
-                {
-                    // Max debt reached and no food to drain - skip healing
-                    if (Eternal_Mod.settings?.debugMode == true)
-                    {
-                        EternalLogger.Debug($"Skipping heal for {pawn.Name?.ToStringShort}: max debt reached");
-                    }
-                    return;
-                }
             }
 
-            // BUGFIX: Capture severity BEFORE healing to calculate actual severity reduced
+            bool waived = pawn.HasFoodNeedDisabled();
+            var processor = FoodCostProcessor;
+            var profile = HealingCostProfiles.Resolve(hediff.def, setting, Eternal_Mod.GetSettings().nutritionCostMultiplier, waived);
             float severityBefore = hediff.Severity;
-
-            // Apply type-specific healing via centralized logic
-            ApplyHealingWithTracking(pawn, item, healingAmount);
-
-            // Food cost uses actual severity reduced, not healingAmount — type-specific
-            // handlers (e.g. scars ×0.5) and severity clamps make them differ.
-            float severityHealed = Math.Max(0f, severityBefore - hediff.Severity);
-
-            // Process food cost based on ACTUAL severity healed and the shared internal ratio.
-            if (severityHealed > 0f)
+            // Tending or a loaded condition may already have reached its positive floor.
+            // Completion has no remaining work to price and must precede the paid-work gate.
+            if (HealingWorkCostCalculator.IsAtHealingFloor(profile, severityBefore))
             {
-                float severityToNutritionRatio = SettingsDefaults.SeverityToNutritionRatio;
-                float nutritionCost = severityHealed * severityToNutritionRatio;
-                FoodCostProcessor?.ProcessHealingCost(pawn, nutritionCost);
-
-                if (Eternal_Mod.settings?.debugMode == true)
-                {
-                    EternalLogger.Debug($"Food cost: severityHealed={severityHealed:F4}, nutritionCost={nutritionCost:F6}");
-                }
+                pawn.health.RemoveHediff(hediff);
+                healingProgress.Remove(new HealingDictionaryKey(pawn, hediff));
+                severityTracker.ClearHediffTracking(pawn, hediff);
+                return;
             }
+            float budget = processor?.GetAvailableNutrition(pawn) ?? (waived ? float.PositiveInfinity : 0f);
+            float factor = TypeSpecificHealing.SeverityFactor(item.Type);
+            float affordable = HealingWorkCostCalculator.AffordableSeverity(profile, severityBefore, healingAmount * factor, budget);
+            if (affordable <= 0f)
+            {
+                return;
+            }
+            ApplyHealingWithTracking(pawn, item, affordable / factor);
+            float nutritionCost = HealingWorkCostCalculator.Cost(profile, severityBefore, hediff.Severity);
+            processor?.SettleNutrition(pawn, nutritionCost);
 
             // PERF-04: Track progress using HealingDictionaryKey struct (no string allocation)
             var key = new HealingDictionaryKey(pawn, hediff);
@@ -346,6 +317,10 @@ namespace Eternal
         private void ApplyHealingWithTracking(Pawn pawn, HealingItem item, float healingAmount)
         {
             var hediff = item.Hediff;
+            if (!HediffHealingConfig.AllowsGenericHealing(hediff))
+            {
+                return;
+            }
             float severityBefore = hediff.Severity;
 
             // Apply type-specific healing
@@ -380,7 +355,9 @@ namespace Eternal
             ISet<HealingDictionaryKey> currentKeys)
         {
             if (pawn == null)
+            {
                 return;
+            }
 
             var liveHediffs = new List<Hediff>();
             if (currentHediffs != null)
@@ -390,7 +367,9 @@ namespace Eternal
                     try
                     {
                         if (hediff?.def != null)
+                        {
                             liveHediffs.Add(hediff);
+                        }
                     }
                     catch (Exception ex)
                     {
@@ -403,7 +382,21 @@ namespace Eternal
                 }
             }
 
-            MigrateLegacyProgress(pawn, liveHediffs);
+            ReconcileLiveHealthCore(pawn, liveHediffs, currentKeys, null);
+        }
+
+        internal void ReconcileValidatedHealth(Pawn pawn, LiveHealthReconciliationSnapshot snapshot)
+        {
+            ReconcileLiveHealthCore(pawn, snapshot.Hediffs, snapshot.CurrentKeys, snapshot);
+        }
+
+        private void ReconcileLiveHealthCore(
+            Pawn pawn,
+            IList<Hediff> liveHediffs,
+            ISet<HealingDictionaryKey> currentKeys,
+            LiveHealthReconciliationSnapshot snapshot)
+        {
+            MigrateLegacyProgress(pawn, liveHediffs, snapshot);
 
             var staleKeys = new List<HealingDictionaryKey>();
             foreach (var key in healingProgress.Keys)
@@ -416,46 +409,61 @@ namespace Eternal
             }
 
             foreach (var staleKey in staleKeys)
-                healingProgress.Remove(staleKey);
-
-            severityTracker.ReconcileLiveHealth(pawn, liveHediffs, currentKeys);
-        }
-
-        private void MigrateLegacyProgress(Pawn pawn, IList<Hediff> liveHediffs)
-        {
-            var candidatesByLegacyKey = new Dictionary<LegacyProgressKey, List<Hediff>>();
-            foreach (var hediff in liveHediffs)
             {
-                var legacyKey = new LegacyProgressKey(pawn, hediff);
-                if (!candidatesByLegacyKey.TryGetValue(legacyKey, out var candidates))
-                {
-                    candidates = new List<Hediff>();
-                    candidatesByLegacyKey[legacyKey] = candidates;
-                }
-                candidates.Add(hediff);
+                healingProgress.Remove(staleKey);
             }
 
-            var legacyKeysToRemove = new List<LegacyProgressKey>();
+            if (snapshot == null)
+            {
+                severityTracker.ReconcileLiveHealth(pawn, liveHediffs, currentKeys);
+            }
+            else
+            {
+                severityTracker.ReconcileValidatedHealth(pawn, snapshot);
+            }
+        }
+
+        private void MigrateLegacyProgress(
+            Pawn pawn,
+            IList<Hediff> liveHediffs,
+            LiveHealthReconciliationSnapshot snapshot)
+        {
+            if (legacyHealingProgress.Count == 0)
+            {
+                return;
+            }
+
+            var candidatesByLegacyKey = snapshot?.LegacyCandidates ?? LegacyHealingCandidateLookup.BuildUniqueLookup(
+                liveHediffs.Select(hediff => new HealingDictionaryKey(pawn, hediff)),
+                key => new HealingDictionaryKey(key.PawnThingIDNumber, key.HediffDefName, key.BodyPartLabel));
+
+            var legacyKeysToRemove = new List<HealingDictionaryKey>();
             foreach (var pair in legacyHealingProgress)
             {
                 if (pair.Key.PawnThingIDNumber != pawn.thingIDNumber)
-                    continue;
-
-                legacyKeysToRemove.Add(pair.Key);
-                if (pair.Value.Count != 1
-                    || !candidatesByLegacyKey.TryGetValue(pair.Key, out var candidates)
-                    || candidates.Count != 1)
                 {
                     continue;
                 }
 
-                var liveKey = new HealingDictionaryKey(pawn, candidates[0]);
+                legacyKeysToRemove.Add(pair.Key);
+                if (pair.Value.Count != 1
+                    || !candidatesByLegacyKey.TryGetValue(pair.Key, out var candidate)
+                    || !candidate.HasValue)
+                {
+                    continue;
+                }
+
+                var liveKey = candidate.Value;
                 if (!healingProgress.ContainsKey(liveKey))
+                {
                     healingProgress[liveKey] = pair.Value[0];
+                }
             }
 
             foreach (var key in legacyKeysToRemove)
+            {
                 legacyHealingProgress.Remove(key);
+            }
         }
 
         #endregion
@@ -556,7 +564,9 @@ namespace Eternal
             }
 
             if (Scribe.mode != LoadSaveMode.LoadingVars)
+            {
                 return;
+            }
 
             List<int> loadedPawnIds = null;
             List<string> loadedDefNames = null;
@@ -598,7 +608,7 @@ namespace Eternal
                     }
                     else
                     {
-                        var legacyKey = new LegacyProgressKey(
+                        var legacyKey = new HealingDictionaryKey(
                             loadedPawnIds[i], loadedDefNames[i], loadedPartLabels[i]);
                         if (!legacyHealingProgress.TryGetValue(legacyKey, out var values))
                         {
@@ -635,7 +645,9 @@ namespace Eternal
         public void ClearPawnHealingProgress(Pawn pawn)
         {
             if (pawn == null)
+            {
                 return;
+            }
 
             int pawnId = pawn.thingIDNumber;
             var keysToRemove = new List<HealingDictionaryKey>();
@@ -653,15 +665,19 @@ namespace Eternal
                 healingProgress.Remove(key);
             }
 
-            var legacyKeysToRemove = new List<LegacyProgressKey>();
+            var legacyKeysToRemove = new List<HealingDictionaryKey>();
             foreach (var key in legacyHealingProgress.Keys)
             {
                 if (key.PawnThingIDNumber == pawnId)
+                {
                     legacyKeysToRemove.Add(key);
+                }
             }
 
             foreach (var key in legacyKeysToRemove)
+            {
                 legacyHealingProgress.Remove(key);
+            }
 
             severityTracker.ClearPawnTracking(pawn);
         }
@@ -685,7 +701,9 @@ namespace Eternal
         public void SweepStaleEntries(HashSet<int> livePawnIds, HashSet<int> activeCorpseIds)
         {
             if (healingProgress.Count == 0)
+            {
                 return;
+            }
 
             var staleIds = new HashSet<int>();
 
@@ -700,7 +718,9 @@ namespace Eternal
             }
 
             if (staleIds.Count == 0)
+            {
                 return;
+            }
 
             // Remove all stale keys from healingProgress
             var keysToRemove = new List<HealingDictionaryKey>();
@@ -729,30 +749,6 @@ namespace Eternal
         #endregion
 
         #region Emergency Healing
-
-        /// <summary>
-        /// Forces immediate healing of all harmful hediffs for a pawn.
-        /// </summary>
-        public void EmergencyHealAllHarmfulHediffs(Pawn pawn)
-        {
-            if (pawn?.health?.hediffSet == null)
-                return;
-
-            var harmfulHediffs = pawn.health.hediffSet.hediffs
-                .Where(h => h.def.isBad
-                         && h.def != EternalDefOf.Eternal_Essence
-                         && !(h is Eternal.Hediffs.MetabolicRecovery_Hediff)
-                         && (EternalDefOf.Eternal_MetabolicRecovery == null
-                             || h.def != EternalDefOf.Eternal_MetabolicRecovery))
-                .ToList();
-
-            foreach (var hediff in harmfulHediffs)
-            {
-                pawn.health.RemoveHediff(hediff);
-            }
-
-            EternalLogger.Info($"Emergency healed {harmfulHediffs.Count} harmful hediffs for {pawn.Name?.ToStringShort ?? "Unknown"}");
-        }
 
         #endregion
     }

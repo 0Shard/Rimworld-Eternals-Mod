@@ -1,17 +1,15 @@
 // Relative Path: Eternal/Source/Eternal/InGameTests/TestSuites/WorkPriorityTests.cs
 // Creation Date: 24-02-2026
-// Last Edit: 24-02-2026
+// Last Edit: 14-10-2026
 // Author: 0Shard
 // Description: Work priority preservation test. Sets specific work priorities before death,
 //              then verifies they are restored after resurrection via PawnAssignmentSnapshot.
 
 #if DEBUG
 
-using System;
 using System.Collections.Generic;
 using System.Linq;
 using Verse;
-using RimWorld;
 using Eternal.DI;
 using Eternal.InGameTests.Helpers;
 
@@ -25,50 +23,59 @@ namespace Eternal.InGameTests.TestSuites
     {
         public static TestSuiteResult RunAll(Verse.Map map)
         {
-            int passed = 0;
-            int failed = 0;
-            var failures = new List<string>();
+            var result = new TestSuiteResult(0, 0, new List<string>());
 
-            RunTest("WorkPrioritiesRestoredAfterResurrection",
-                () => WorkPrioritiesRestoredAfterResurrection(map),
-                ref passed, ref failed, failures);
+            result.RunTest("WorkPriority", "WorkPrioritiesRestoredAfterResurrection",
+                () => WorkPrioritiesRestoredAfterResurrection(map));
 
-            return new TestSuiteResult(passed, failed, failures);
+            return result;
         }
 
         private static void WorkPrioritiesRestoredAfterResurrection(Verse.Map map)
+        {
+            var playSettings = Find.PlaySettings;
+            TestAssert.Available(playSettings, "Native work-mode settings");
+            bool previousManualMode = playSettings.useWorkPriorities;
+            try
+            {
+                playSettings.useWorkPriorities = true;
+                CheckWorkPrioritiesRestoredAfterResurrection(map);
+            }
+            finally { playSettings.useWorkPriorities = previousManualMode; }
+        }
+
+        private static void CheckWorkPrioritiesRestoredAfterResurrection(Verse.Map map)
         {
             // 1. Spawn Eternal pawn
             var pawn = TestPawnFactory.SpawnEternalPawn(map);
             TestAssert.IsNotNull(pawn, "Pawn should be spawned");
 
             // 2. Enable manual priorities and set specific values
-            if (pawn.workSettings == null)
-            {
-                Log.Warning("[EternalTests] Pawn has no workSettings — skipping work priority test");
-                return;
-            }
+            TestAssert.IsNotNull(pawn.workSettings, "Work settings required before and after resurrection");
 
             pawn.workSettings.EnableAndInitialize();
 
-            // Find work types to set priorities for
-            var construction = DefDatabase<WorkTypeDef>.GetNamedSilentFail("Construction");
-            var mining = DefDatabase<WorkTypeDef>.GetNamedSilentFail("Mining");
-
-            if (construction == null || mining == null)
-            {
-                Log.Warning("[EternalTests] Could not find Construction or Mining WorkTypeDefs");
-                return;
-            }
+            // Generated backstories can disable named jobs. Exercise actual supported work
+            // instead of asking native SetPriority to accept an incapable pawn's assignment.
+            var workTypes = DefDatabase<WorkTypeDef>.AllDefsListForReading
+                .Where(work => !pawn.WorkTypeIsDisabled(work))
+                .OrderBy(work => work.defName, System.StringComparer.Ordinal)
+                .Take(2).ToArray();
+            TestAssert.AreEqual(2, workTypes.Length, "Fixture requires two enabled native work types");
+            var firstWork = workTypes[0];
+            var secondWork = workTypes[1];
 
             // Set recognizable priorities
-            pawn.workSettings.SetPriority(construction, 1);
-            pawn.workSettings.SetPriority(mining, 2);
+            pawn.workSettings.SetPriority(firstWork, 1);
+            pawn.workSettings.SetPriority(secondWork, 2);
 
-            int constructionPriorityBefore = pawn.workSettings.GetPriority(construction);
-            int miningPriorityBefore = pawn.workSettings.GetPriority(mining);
+            int firstPriorityBefore = pawn.workSettings.GetPriority(firstWork);
+            int secondPriorityBefore = pawn.workSettings.GetPriority(secondWork);
 
-            Log.Message($"[EternalTests] Set priorities — Construction: {constructionPriorityBefore}, Mining: {miningPriorityBefore}");
+            Log.Message($"[EternalTests] Set priorities — {firstWork.defName}: {firstPriorityBefore}, {secondWork.defName}: {secondPriorityBefore}");
+
+            TestAssert.AreEqual(1, firstPriorityBefore, firstWork.defName + " setup priority");
+            TestAssert.AreEqual(2, secondPriorityBefore, secondWork.defName + " setup priority");
 
             // 3. Kill -> heal -> resurrect
             TestPawnFactory.KillPawn(pawn);
@@ -78,7 +85,8 @@ namespace Eternal.InGameTests.TestSuites
             var corpseData = container.CorpseManager?.GetCorpseData(pawn);
             TestAssert.IsNotNull(corpseData, "Corpse should be tracked");
 
-            container.CorpseHealingProcessor?.StartCorpseHealing(corpseData);
+            TestAssert.IsTrue(container.CorpseHealingProcessor?.StartCorpseHealing(corpseData) ?? false,
+                "WorkPriority StartCorpseHealing must succeed");
 
             TickAdvancer.AdvanceUntil(
                 () => !pawn.Dead,
@@ -88,45 +96,20 @@ namespace Eternal.InGameTests.TestSuites
             // 4. Verify work priorities restored
             TestAssert.IsFalse(pawn.Dead, "Pawn should be alive");
 
-            if (pawn.workSettings == null)
-            {
-                Log.Warning("[EternalTests] Pawn workSettings null after resurrection — snapshot may not have restored");
-                return;
-            }
+            TestAssert.IsNotNull(pawn.workSettings, "Work settings required before and after resurrection");
 
-            int constructionPriorityAfter = pawn.workSettings.GetPriority(construction);
-            int miningPriorityAfter = pawn.workSettings.GetPriority(mining);
+            int firstPriorityAfter = pawn.workSettings.GetPriority(firstWork);
+            int secondPriorityAfter = pawn.workSettings.GetPriority(secondWork);
 
-            Log.Message($"[EternalTests] Post-resurrection priorities — Construction: {constructionPriorityAfter}, Mining: {miningPriorityAfter}");
+            Log.Message($"[EternalTests] Post-resurrection priorities — {firstWork.defName}: {firstPriorityAfter}, {secondWork.defName}: {secondPriorityAfter}");
 
-            TestAssert.AreEqual(constructionPriorityBefore, constructionPriorityAfter,
-                $"Construction priority should be restored (expected {constructionPriorityBefore}, got {constructionPriorityAfter})");
-            TestAssert.AreEqual(miningPriorityBefore, miningPriorityAfter,
-                $"Mining priority should be restored (expected {miningPriorityBefore}, got {miningPriorityAfter})");
+            TestAssert.AreEqual(1, firstPriorityAfter,
+                $"{firstWork.defName} priority should be restored (expected {firstPriorityBefore}, got {firstPriorityAfter})");
+            TestAssert.AreEqual(2, secondPriorityAfter,
+                $"{secondWork.defName} priority should be restored (expected {secondPriorityBefore}, got {secondPriorityAfter})");
         }
 
-        private static void RunTest(string name, Action test, ref int passed, ref int failed, List<string> failures)
-        {
-            Log.Message($"[EternalTests] Running: {name}");
-            try
-            {
-                test();
-                passed++;
-                Log.Message($"[EternalTests] PASSED: {name}");
-            }
-            catch (TestFailedException ex)
-            {
-                failed++;
-                failures.Add($"[WorkPriority] {name}: {ex.Message}");
-                Log.Error($"[EternalTests] FAILED: {name} -- {ex.Message}");
-            }
-            catch (Exception ex)
-            {
-                failed++;
-                failures.Add($"[WorkPriority] {name}: {ex.Message}");
-                Log.Error($"[EternalTests] ERROR: {name} -- {ex}");
-            }
-        }
+
     }
 }
 

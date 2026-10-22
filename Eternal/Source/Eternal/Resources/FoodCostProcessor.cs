@@ -43,17 +43,52 @@ namespace Eternal.Resources
         /// <inheritdoc/>
         public float FoodDrainThreshold => _settings.FoodDrainThreshold;
 
+        public float GetAvailableNutrition(Pawn pawn)
+        {
+            if (pawn == null)
+            {
+                return 0f;
+            }
+            if (pawn.HasFoodNeedDisabled())
+            {
+                return float.PositiveInfinity;
+            }
+            return GetDrainableAmount(pawn) + Math.Max(0f, _debtSystem.GetRemainingCapacity(pawn));
+        }
+
+        public float SettleNutrition(Pawn pawn, float nutrition)
+        {
+            if (pawn == null || pawn.HasFoodNeedDisabled() || float.IsNaN(nutrition) ||
+                float.IsInfinity(nutrition) || nutrition <= 0f)
+            {
+                return 0f;
+            }
+            float drained = pawn.Dead ? 0f : DrainFromFoodBar(pawn, nutrition);
+            float remainder = Math.Max(0f, nutrition - drained);
+            float accepted = remainder > 0f ? _debtSystem.AddDebtAndGetAccepted(pawn, remainder) : 0f;
+            float paid = drained + accepted;
+            if (nutrition - paid > Math.Max(0.000001f, nutrition * 0.00001f))
+            {
+                throw new InvalidOperationException($"[Eternal] Healing settlement shortfall for {pawn.thingIDNumber}: quoted {nutrition}, paid {paid}");
+            }
+            return paid;
+        }
+
         /// <inheritdoc/>
         public bool CanDrainFood(Pawn pawn)
         {
             if (pawn?.needs?.food == null)
+            {
                 return false;
+            }
 
             float currentLevel = pawn.needs.food.CurLevel;
             float maxLevel = pawn.needs.food.MaxLevel;
 
             if (maxLevel <= 0f)
+            {
                 return false;
+            }
 
             return (currentLevel / maxLevel) > FoodDrainThreshold;
         }
@@ -62,7 +97,9 @@ namespace Eternal.Resources
         public float GetDrainableAmount(Pawn pawn)
         {
             if (pawn?.needs?.food == null)
+            {
                 return 0f;
+            }
 
             var food = pawn.needs.food;
             float threshold = food.MaxLevel * FoodDrainThreshold;
@@ -72,40 +109,8 @@ namespace Eternal.Resources
         /// <inheritdoc/>
         public float ProcessHealingCost(Pawn pawn, float healingAmount)
         {
-            if (pawn == null || healingAmount <= 0f)
-                return 0f;
-
-            // Skip all cost processing for pawns with food need disabled
-            if (pawn.HasFoodNeedDisabled())
-                return 0f;
-
-            float foodCost = healingAmount * _settings.NutritionCostMultiplier;
-
-            // Dead pawns or pawns without food needs: all cost goes to debt
-            if (pawn.Dead || pawn.needs?.food == null)
-            {
-                return ProcessAsDebt(pawn, foodCost);
-            }
-
-            // Living pawns: try to drain food first
-            float drainedFromFood = DrainFromFoodBar(pawn, foodCost);
-            float remainingCost = foodCost - drainedFromFood;
-
-            // If we couldn't drain enough, add rest to debt
-            if (remainingCost > 0f)
-            {
-                ProcessAsDebt(pawn, remainingCost);
-            }
-
-            // Log if debug mode
-            if (_settings.DebugMode && foodCost > 0f)
-            {
-                Log.Message($"[Eternal] {pawn.Name?.ToStringShort ?? "Pawn"} healing cost: " +
-                    $"{drainedFromFood:F3} from food, {remainingCost:F3} to debt. " +
-                    $"Food: {pawn.needs.food.CurLevel:F2}/{pawn.needs.food.MaxLevel:F2}");
-            }
-
-            return foodCost;
+            // Legacy callers supplied pre-global-multiplier nutrition.
+            return SettleNutrition(pawn, healingAmount * _settings.NutritionCostMultiplier);
         }
 
         /// <summary>
@@ -118,7 +123,9 @@ namespace Eternal.Resources
         {
             var food = pawn.needs?.food;
             if (food == null)
+            {
                 return 0f;
+            }
 
             float threshold = food.MaxLevel * FoodDrainThreshold;
             float drainable = Math.Max(0f, food.CurLevel - threshold);
@@ -126,25 +133,13 @@ namespace Eternal.Resources
 
             if (toDrain > 0f)
             {
-                food.CurLevel -= toDrain;
+                float before = food.CurLevel;
+                food.CurLevel = FoodDebtPolicy.FoodAfterPayment(before, toDrain, cost, threshold);
+                return Math.Max(0f, before - food.CurLevel);
             }
 
             return toDrain;
         }
 
-        /// <summary>
-        /// Adds cost to the pawn's food debt.
-        /// </summary>
-        /// <param name="pawn">The pawn to add debt to</param>
-        /// <param name="cost">The amount to add</param>
-        /// <returns>Actual amount added</returns>
-        private float ProcessAsDebt(Pawn pawn, float cost)
-        {
-            if (_debtSystem.AddDebt(pawn, cost))
-            {
-                return cost;
-            }
-            return 0f; // Debt at capacity
-        }
     }
 }

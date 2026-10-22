@@ -9,9 +9,6 @@ using System.Linq;
 using System.Reflection;
 using HarmonyLib;
 using Verse;
-using Eternal.Patches;
-using Eternal.Compatibility;
-using Eternal.Compat;
 using Eternal.Exceptions;
 using Eternal.Utils;
 
@@ -85,7 +82,7 @@ namespace Eternal
                     "Eternal_Harmony static ctor", null, ex);
             }
         }
-        
+
         /// <summary>
         /// Verifies that Harmony patching took effect at all. The previous implementation
         /// queried GetPatchInfo on the PATCH methods (always empty - it expects the patched

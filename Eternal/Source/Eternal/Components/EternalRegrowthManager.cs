@@ -19,6 +19,8 @@ using System.Collections.Generic;
 using System.Linq;
 using Verse;
 using Eternal.Compat;
+using Eternal.Healing;
+using Eternal.Extensions;
 using Eternal.Constants;
 using Eternal.Exceptions;
 using Eternal.Utils;
@@ -49,7 +51,9 @@ namespace Eternal
         public void StartRegrowth(Pawn pawn)
         {
             if (pawn?.health?.hediffSet == null)
+            {
                 return;
+            }
 
             // Iterate ALL missing-part hediffs, not just common ancestors: RimWorld adds an
             // explicit Hediff_MissingPart to every descendant of a lost part
@@ -64,15 +68,21 @@ namespace Eternal
             {
                 var part = missingHediff.Part;
                 if (part == null)
+                {
                     continue;
+                }
 
                 // Skip if already has a regrowing hediff on this part
                 if (HasRegrowthHediff(pawn, part))
+                {
                     continue;
+                }
 
                 // Enforce critical part order
                 if (!CanStartRegrowthForPart(pawn, part))
+                {
                     continue;
+                }
 
                 // Tripwire for the reported phase-1 child start: record the parent's
                 // severity at the moment a child is released, so a gate bypass is
@@ -104,31 +114,59 @@ namespace Eternal
         /// </summary>
         /// <param name="pawn">The pawn to progress regrowth for.</param>
         /// <param name="healAmount">The healing effort to apply this pass (baseRate × bodySize).</param>
-        public void ProgressRegrowth(Pawn pawn, float healAmount)
+        public RegrowthBatchResult ProgressRegrowth(Pawn pawn, float healAmount, float nutritionBudget = float.PositiveInfinity)
         {
             if (pawn?.health?.hediffSet == null || healAmount <= 0f)
-                return;
+            {
+                return default;
+            }
 
             // Get all regrowing hediffs (create copy to allow modification during iteration)
             var regrowingHediffs = pawn.health.hediffSet.hediffs
                 .OfType<EternalRegrowing_Hediff>()
                 .ToList();
 
+            float effort = 0f;
+            float charge = 0f;
+            bool waived = pawn.HasFoodNeedDisabled();
             foreach (var hediff in regrowingHediffs)
             {
                 // Migrate pre-fix saves: hediffs created before Part was set post-add
                 if (hediff.Part == null && hediff.forPart != null)
+                {
                     hediff.Part = hediff.forPart;
+                }
 
                 float partMaxHP = hediff.forPart != null
                     ? EBFCompat.GetMaxHealth(hediff.forPart, pawn)
                     : 1f;
                 if (partMaxHP <= 0f)
+                {
                     partMaxHP = 1f;
+                }
 
-                float severityIncrease = healAmount / (partMaxHP * SettingsDefaults.RegrowthWorkPerPartHP);
+                var setting = Eternal_Mod.GetSettings().hediffManager?.Store.GetExisting(hediff.def.defName);
+                var profile = HealingCostProfiles.Resolve(hediff.def, setting, Eternal_Mod.GetSettings().nutritionCostMultiplier, waived);
                 float beforeSeverity = hediff.Severity;
-                hediff.Severity = Math.Min(hediff.Severity + severityIncrease, 1.0f);
+                float remainingEffort = RegrowthWorkAccounting.RemainingEffort(beforeSeverity, partMaxHP);
+                float requested = Math.Min(healAmount, remainingEffort);
+                float affordable = HealingWorkCostCalculator.AffordableSeverity(profile, remainingEffort, requested, nutritionBudget);
+                float severityIncrease = affordable / (partMaxHP * SettingsDefaults.RegrowthWorkPerPartHP);
+                float proposed = Math.Min(beforeSeverity + severityIncrease, 1f);
+                // A float progress step may round upward; never spend more than this part budget.
+                float actualEffort = RegrowthWorkAccounting.ConsumedEffort(beforeSeverity, proposed, partMaxHP);
+                float partCharge = HealingWorkCostCalculator.Cost(profile, actualEffort, 0f);
+                if (partCharge > nutritionBudget && proposed > beforeSeverity)
+                {
+                    int bits = BitConverter.ToInt32(BitConverter.GetBytes(proposed), 0);
+                    proposed = BitConverter.ToSingle(BitConverter.GetBytes(bits - 1), 0);
+                }
+                hediff.Severity = Math.Max(beforeSeverity, proposed);
+                actualEffort = RegrowthWorkAccounting.ConsumedEffort(beforeSeverity, hediff.Severity, partMaxHP);
+                partCharge = HealingWorkCostCalculator.Cost(profile, actualEffort, 0f);
+                effort += actualEffort;
+                charge += partCharge;
+                nutritionBudget = Math.Max(0f, nutritionBudget - partCharge);
 
                 if (Eternal_Mod.settings?.debugMode == true)
                 {
@@ -153,6 +191,7 @@ namespace Eternal
             // (parents past the phase-3 threshold release their children, completed
             // prerequisites release the next critical part)
             StartRegrowth(pawn);
+            return new RegrowthBatchResult(effort, charge);
         }
 
         /// <summary>
@@ -169,7 +208,9 @@ namespace Eternal
 
             // As a safety measure, check for any hediffs at 100% and remove them
             if (pawn?.health?.hediffSet == null)
+            {
                 return;
+            }
 
             var completedHediffs = pawn.health.hediffSet.hediffs
                 .OfType<EternalRegrowing_Hediff>()
@@ -207,7 +248,9 @@ namespace Eternal
         public IEnumerable<EternalRegrowing_Hediff> GetRegrowingHediffs(Pawn pawn)
         {
             if (pawn?.health?.hediffSet == null)
+            {
                 return Enumerable.Empty<EternalRegrowing_Hediff>();
+            }
 
             return pawn.health.hediffSet.hediffs.OfType<EternalRegrowing_Hediff>();
         }
@@ -242,7 +285,9 @@ namespace Eternal
         {
             var hediffs = GetRegrowingHediffs(pawn).ToList();
             if (hediffs.Count == 0)
+            {
                 return null;
+            }
 
             // Create a compatibility wrapper that presents hediff data as EternalRegrowthState
             return new EternalRegrowthState(pawn, hediffs);
@@ -271,7 +316,10 @@ namespace Eternal
             if (partIndex < 0)
             {
                 if (part.parent != null && !PartAvailableForChildRegrowth(pawn, part.parent))
+                {
                     return false;
+                }
+
                 return true;
             }
 
@@ -291,13 +339,19 @@ namespace Eternal
                     bool prereqComplete = !pawn.health.hediffSet.PartIsMissing(prereqPart)
                                           && !HasRegrowthHediff(pawn, prereqPart);
                     if (prereqComplete)
+                    {
                         continue;
+                    }
 
                     if (requireFullyRegrown)
+                    {
                         return false;
+                    }
 
                     if (GetRegrowthSeverity(pawn, prereqPart) < SettingsDefaults.RegrowthChildStartThreshold)
+                    {
                         return false;
+                    }
                 }
             }
 
@@ -313,7 +367,9 @@ namespace Eternal
             bool parentComplete = !pawn.health.hediffSet.PartIsMissing(parent)
                                   && !HasRegrowthHediff(pawn, parent);
             if (parentComplete)
+            {
                 return true;
+            }
 
             return GetRegrowthSeverity(pawn, parent) >= SettingsDefaults.RegrowthChildStartThreshold;
         }
@@ -334,7 +390,7 @@ namespace Eternal
         /// Completing a child under a still-missing parent would let RimWorld re-add the
         /// child's Hediff_MissingPart when the parent completes, erasing the regrowth.
         /// </summary>
-        private bool CanCompleteRegrowth(Pawn pawn, BodyPartRecord part)
+        internal bool CanCompleteRegrowth(Pawn pawn, BodyPartRecord part)
         {
             return part?.parent == null || !pawn.health.hediffSet.PartIsMissing(part.parent);
         }
@@ -364,7 +420,7 @@ namespace Eternal
 
                 // Store the actual part in forPart field (used for display and completion)
                 hediff.Initialize(part, pawn);
-                hediff.Severity = 0.01f;
+                hediff.Severity = SettingsDefaults.RegrowthInitialProgress;
 
                 pawn.health.AddHediff(hediff);
 
@@ -420,6 +476,8 @@ namespace Eternal
 
                 // STEP 2: Remove the regrowth hediff - part is now functional
                 pawn.health.RemoveHediff(hediff);
+
+                Eternal.DI.EternalServiceContainer.Instance.RjwAnatomy?.RestorePart(pawn, part);
 
                 // Completion can involve direct list/cache changes in RimWorld. Reconcile after
                 // the mutation on a safe tick rather than attempting any health work inline.

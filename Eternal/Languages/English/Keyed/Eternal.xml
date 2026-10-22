@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LanguageData>
+    <Eternal_TabManagement>Eternal</Eternal_TabManagement>
     <!-- Settings Menu -->
     <Eternal_Settings> Eternal Settings</Eternal_Settings>
     
@@ -111,4 +112,6 @@
     <Eternal_Elixir_RejectModDisabled>Eternal mod is disabled</Eternal_Elixir_RejectModDisabled>
     <!-- Shown via Messages.Message on a rejected click in CompTargetable_EternalElixir.ValidateTarget -->
     <Eternal_Elixir_RejectMessage>Cannot use {0} on {1}: {2}</Eternal_Elixir_RejectMessage>
+    <Eternal_RjwProtectedAnatomy>RJW anatomy is protected. Eternal does not reduce or remove its severity, even when an older saved setting enables healing. Injuries affecting this body part can still heal.</Eternal_RjwProtectedAnatomy>
+    <Eternal_RjwProtectedPregnancy>Pregnancy is protected while RJW is active. Eternal does not heal, remove, or rewind it. RJW and the game retain their normal birth and death behavior.</Eternal_RjwProtectedPregnancy>
 </LanguageData>

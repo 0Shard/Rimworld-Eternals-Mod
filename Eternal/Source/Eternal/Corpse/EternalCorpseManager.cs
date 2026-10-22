@@ -10,12 +10,12 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
 using Verse;
 using RimWorld;
 using MapType = Verse.Map;
 using Eternal.Exceptions;
 using Eternal.Extensions;
-using Eternal.Healing;
 using Eternal.Utils;
 using Eternal.Models;
 
@@ -37,6 +37,8 @@ namespace Eternal.Corpse
         private List<CorpseTrackingEntry> serializedCorpseEntries;
         private bool corpseIndexesRebuiltAfterLoad;
         private bool mapIndexHydrated = true;
+        private static readonly FieldInfo CorpseCompsField = typeof(ThingWithComps)
+            .GetField("comps", BindingFlags.Instance | BindingFlags.NonPublic);
 
         /// <summary>
         /// Corpses whose upcoming destruction is an expected part of a mod-controlled operation
@@ -94,7 +96,9 @@ namespace Eternal.Corpse
         public void RebuildIndexesAfterLoad()
         {
             if (corpseIndexesRebuiltAfterLoad)
+            {
                 return;
+            }
 
             trackedCorpses = new Dictionary<Pawn, CorpseTrackingEntry>();
             corpsesByMap = new Dictionary<MapType, HashSet<Pawn>>();
@@ -106,6 +110,7 @@ namespace Eternal.Corpse
             {
                 foreach (var entry in serializedCorpseEntries)
                 {
+                    entry?.RestoreCorpseReferencesAfterLoad();
                     if (entry?.OriginalPawn != null && entry.IsValid())
                     {
                         trackedCorpses[entry.OriginalPawn] = entry;
@@ -138,6 +143,31 @@ namespace Eternal.Corpse
             // Reset rot progress for all tracked corpses to handle saves from before the rot fix.
             ResetAllRotProgress();
             serializedCorpseEntries = null;
+        }
+
+        /// <summary>
+        /// FinalizeInit runs after native map SpawnSetup, later than Scribe PostLoadInit.
+        /// Restore runtime-only components after native definition comps have been initialized,
+        /// then reconcile legacy map locations once physical spawning establishes them.
+        /// </summary>
+        public void ReconcileLoadedCorpseLocations()
+        {
+            foreach (var entry in trackedCorpses.Values)
+            {
+                if (entry == null || !entry.IsValid())
+                {
+                    continue;
+                }
+                // Native loading rebuilds definition comps after Scribe callbacks. Repair the
+                // runtime attachment for stored corpses too, without replacing a valid comp.
+                AddCorpseComponent(entry.Corpse, entry);
+                entry.CacheComponents();
+                if (entry.Corpse.Spawned && entry.Corpse.Map != null)
+                {
+                    CommitCorpseLocation(entry, entry.Corpse.Map, entry.Corpse.Position);
+                }
+            }
+            mapIndexHydrated = AreMapIndexesEquivalentToScan();
         }
 
         /// <summary>
@@ -309,7 +339,9 @@ namespace Eternal.Corpse
             foreach (var corpseData in trackedCorpses.Values)
             {
                 if (corpseData?.OriginalPawn == null || corpseData.Corpse == null || corpseData.Corpse.Destroyed)
+                {
                     continue;
+                }
 
                 if (corpseData.CurrentMap == map || corpseData.Corpse.Map == map)
                 {
@@ -354,7 +386,9 @@ namespace Eternal.Corpse
             foreach (var entry in trackedCorpses.Values)
             {
                 if (entry.IsHealingActive)
+                {
                     healingCount++;
+                }
             }
             return healingCount;
         }
@@ -525,7 +559,9 @@ namespace Eternal.Corpse
         private void CommitCorpseLocation(CorpseTrackingEntry corpseData, MapType newMap, IntVec3 newPosition)
         {
             if (corpseData == null || corpseData.OriginalPawn == null)
+            {
                 return;
+            }
 
             RemovePawnFromMapIndex(corpseData.CurrentMap, corpseData.OriginalPawn);
             corpseData.UpdateLocation(newMap, newPosition);
@@ -535,7 +571,9 @@ namespace Eternal.Corpse
         private void AddPawnToMapIndex(MapType map, Pawn pawn)
         {
             if (map == null || pawn == null)
+            {
                 return;
+            }
 
             if (!corpsesByMap.TryGetValue(map, out var mapCorpses))
             {
@@ -549,7 +587,9 @@ namespace Eternal.Corpse
         private void RemovePawnFromMapIndex(MapType map, Pawn pawn)
         {
             if (map == null || pawn == null || !corpsesByMap.TryGetValue(map, out var mapCorpses))
+            {
                 return;
+            }
 
             mapCorpses.Remove(pawn);
             if (mapCorpses.Count == 0)
@@ -563,7 +603,9 @@ namespace Eternal.Corpse
             foreach (var corpseData in trackedCorpses.Values)
             {
                 if (corpseData?.OriginalPawn == null || corpseData.Corpse == null || corpseData.Corpse.Destroyed)
+                {
                     continue;
+                }
 
                 if (corpseData.Corpse.Spawned && corpseData.CurrentMap != corpseData.Corpse.Map)
                 {
@@ -601,7 +643,9 @@ namespace Eternal.Corpse
             IntVec3 sourcePosition)
         {
             if (corpse == null || corpse.Destroyed)
+            {
                 return false;
+            }
 
             try
             {
@@ -618,10 +662,16 @@ namespace Eternal.Corpse
                     "TryRelocateCorpse.RestoreSourceDespawn", corpse.InnerPawn, despawnException);
             }
 
-            if (sourceOwner != null)
+            // A spawned Thing can also have a map-owned ThingOwner (native 1.7). Adding it
+            // back to that owner does not restore Spawned/position. A captured sourceMap
+            // means the original state was spawned and must use native map spawning below;
+            // only originally unspawned corpses restore directly into their container.
+            if (sourceMap == null && sourceOwner != null)
             {
                 if (corpse.holdingOwner == sourceOwner)
+                {
                     return true;
+                }
 
                 try
                 {
@@ -638,14 +688,17 @@ namespace Eternal.Corpse
             }
 
             if (sourceMap == null || !sourcePosition.IsValid || !sourcePosition.InBounds(sourceMap))
+            {
                 return false;
+            }
 
             try
             {
                 var restoredCorpse = GenSpawn.Spawn(corpse, sourcePosition, sourceMap);
                 return restoredCorpse == corpse
                     && corpse.Spawned
-                    && corpse.Map == sourceMap;
+                    && corpse.Map == sourceMap
+                    && corpse.Position == sourcePosition;
             }
             catch (Exception restoreException)
             {
@@ -664,15 +717,48 @@ namespace Eternal.Corpse
         {
             try
             {
-                if (corpse == null) return;
-
-                var component = corpse.GetComp<EternalCorpseComponent>();
-                if (component == null)
+                if (corpse == null)
                 {
-                    component = new EternalCorpseComponent();
-                    corpse.AllComps.Add(component);
+                    return;
                 }
 
+                // AllComps returns a shared empty list when a custom corpse has no native
+                // components. Install an instance list instead of modifying that global list;
+                // native ThingWithComps exposes no runtime AddComp API in either game version.
+                if (CorpseCompsField == null)
+                {
+                    throw new MissingFieldException(typeof(ThingWithComps).FullName, "comps");
+                }
+
+                var components = (List<ThingComp>)CorpseCompsField.GetValue(corpse);
+                if (components == null)
+                {
+                    components = new List<ThingComp>();
+                    CorpseCompsField.SetValue(corpse, components);
+                }
+
+                var component = components.OfType<EternalCorpseComponent>().FirstOrDefault();
+                bool newlyAttached = component == null;
+                if (newlyAttached)
+                {
+                    component = new EternalCorpseComponent();
+                }
+
+                // CorpseData immediately initializes protection, so native parent/properties
+                // must be valid first. Repair old incomplete attachments without resetting
+                // initialized state or replacing a valid component on a loaded corpse.
+                if (component.parent != corpse)
+                {
+                    component.parent = corpse;
+                }
+                if (!(component.props is CompProperties_EternalCorpse))
+                {
+                    component.Initialize(new CompProperties_EternalCorpse());
+                }
+                if (newlyAttached)
+                {
+                    components.Add(component);
+                }
                 component.CorpseData = corpseData;
             }
             catch (Exception ex)
@@ -690,7 +776,10 @@ namespace Eternal.Corpse
         {
             try
             {
-                if (corpse == null) return;
+                if (corpse == null)
+                {
+                    return;
+                }
 
                 var component = corpse.GetComp<EternalCorpseComponent>();
                 if (component != null)
@@ -754,7 +843,9 @@ namespace Eternal.Corpse
             foreach (var entry in trackedCorpses.Values)
             {
                 if (entry?.Corpse == null || entry.Corpse.Destroyed)
+                {
                     continue;
+                }
 
                 var rottable = entry.Corpse.GetComp<CompRottable>();
                 if (rottable != null && rottable.RotProgress > 0f)

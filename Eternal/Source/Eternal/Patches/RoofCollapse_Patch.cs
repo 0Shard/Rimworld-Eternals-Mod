@@ -11,7 +11,6 @@ using System;
 using HarmonyLib;
 using Verse;
 using RimWorld;
-using Eternal;
 using Eternal.DI;
 using Eternal.Exceptions;
 using Eternal.Extensions;
@@ -46,42 +45,58 @@ namespace Eternal.Patches
             {
                 // SAFE-09: skip when mod is disabled.
                 if (EternalModState.IsDisabled)
+                {
                     return;
+                }
 
                 // Check if protection is enabled
                 if (!Eternal_Mod.GetSettings().enableRoofCollapseProtection)
+                {
                     return;
+                }
 
                 // Validate inputs
                 if (map == null || !c.InBounds(map))
+                {
                     return;
+                }
 
                 var corpseManager = EternalServiceContainer.Instance?.CorpseManager;
                 if (corpseManager == null)
+                {
                     return;
+                }
 
                 // Check all things in the collapsing cell for Eternal corpses
                 var things = c.GetThingList(map);
                 for (int i = things.Count - 1; i >= 0; i--)
                 {
                     if (!(things[i] is Verse.Corpse corpse))
+                    {
                         continue;
+                    }
 
                     var pawn = corpse.InnerPawn;
                     if (pawn == null)
+                    {
                         continue;
+                    }
 
                     // Check if Eternal (tracked OR has trait)
                     bool isTracked = corpseManager.IsTracked(pawn);
                     bool isEternal = pawn.IsValidEternalCorpse();
 
                     if (!isTracked && !isEternal)
+                    {
                         continue;
+                    }
 
                     // Skip if already has comp - IRoofCollapseAlert (primary) will handle it
                     // This avoids duplicate teleportation; we only handle corpses WITHOUT comp (fallback)
                     if (corpse.GetComp<EternalCorpseComponent>() != null)
+                    {
                         continue;
+                    }
 
                     // Find nearest safe cell and teleport
                     IntVec3 safeCell = RoofCollapseHelper.FindNearestSafeCell(c, map, 50);
@@ -101,7 +116,9 @@ namespace Eternal.Patches
                     if (isTracked)
                     {
                         if (!corpseManager.TryRelocateCorpse(pawn, map, safeCell))
+                        {
                             continue;
+                        }
                     }
                     else
                     {
@@ -155,11 +172,15 @@ namespace Eternal.Patches
                 {
                     // Skip if cell is outside map bounds
                     if (!cell.InBounds(map))
+                    {
                         continue;
+                    }
 
                     // Skip if cell is not standable (blocked by wall, water, etc.)
                     if (!cell.Standable(map))
+                    {
                         continue;
+                    }
 
                     // Check the roof at this cell
                     RoofDef roof = map.roofGrid.RoofAt(cell);

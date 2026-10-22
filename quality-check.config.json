@@ -1,0 +1,65 @@
+{
+  "author": "0Shard",
+  "solution": "Eternal/Source/EternalSolution.sln",
+  "production_project": "Eternal/Source/Eternal.csproj",
+  "test_project": "Eternal/Source/Eternal.Tests/Eternal.Tests.csproj",
+  "owned_scopes": {
+    "production": "Eternal/Source/Eternal",
+    "unit_tests": "Eternal/Source/Eternal.Tests",
+    "game_tests": "Eternal/Source/Eternal/InGameTests"
+  },
+  "excluded_components": ["bin", "obj", "packages", "RimWorld-Decompiled", "Example", "Mods"],
+  "artifact_roots": ["Eternal/1.6/Assemblies", "Eternal/1.7/Assemblies", "Eternal/Source/obj", "Eternal/Source/bin", "Eternal/Source/Eternal.Tests/obj", "Eternal/Source/Eternal.Tests/bin"],
+  "test_output": "Eternal/Source/Eternal.Tests/bin/{configuration}/net472/Eternal.Tests.dll",
+  "runner_framework": "net472",
+  "style_diagnostics": ["IDE0005", "IDE0051", "IDE0052", "IDE0059"],
+  "analyzer_diagnostics": ["CA1806", "CA2200"],
+  "format_style_diagnostics": ["IDE0011"],
+  "optional_checks": "report_unavailable",
+  "optional_checks_environment": "ETERNAL_OPTIONAL_CHECKS",
+  "workshop_root": "~/.local/share/Steam/steamapps/workshop/content/294100",
+  "workshop_root_environment": "ETERNAL_WORKSHOP_ROOT",
+  "runtime_targets": {
+    "1.6": {
+      "root": "RimWorld",
+      "root_environment": "ETERNAL_RUNTIME_16_ROOT",
+      "version_file": "Version.txt",
+      "expected_version": "1.6.4566 rev606",
+      "managed_directory": "RimWorldWin64_Data/Managed",
+      "assembly_patterns": ["Assembly-CSharp.dll", "UnityEngine*.dll"],
+      "framework_patterns": ["mscorlib.dll", "System.Numerics.dll"],
+      "harmony": "2009463077/1.6/Assemblies/0Harmony.dll",
+      "harmony_environment": "ETERNAL_RUNTIME_16_HARMONY",
+      "expected_harmony_version": "2.4.3.0"
+    },
+    "1.7": {
+      "root": "~/.local/share/Steam/steamapps/common/RimWorld",
+      "root_environment": "ETERNAL_RUNTIME_17_ROOT",
+      "version_file": "Version.txt",
+      "expected_version": "1.7.4985 rev1269",
+      "managed_directory": ".",
+      "assembly_patterns": ["Assembly-CSharp.dll", "UnityStubs.dll"],
+      "framework_patterns": ["mscorlib.dll", "System.Runtime.dll", "System.Private.CoreLib.dll", "System.Collections.dll", "System.Security.Cryptography.dll", "System.Numerics.dll", "System.Runtime.Numerics.dll"],
+      "harmony": "2009463077/1.7/Assemblies/0Harmony.dll",
+      "harmony_environment": "ETERNAL_RUNTIME_17_HARMONY",
+      "expected_harmony_version": "3.0.0.0",
+      "unity_redirect": "UnityStubs"
+    }
+  },
+  "optional_assemblies": {
+    "SOS2": "1909914131/1.6/Assemblies/ShipsHaveInsides.dll",
+    "VGE": "3609835606/1.6/Assemblies/VanillaGravshipExpanded.dll",
+    "VEF17": "2023507013/1.7/Assemblies/VEF.dll"
+  },
+  "reference_assemblies": {
+    "RJW": {
+      "path": ".references/rjw/6.2.1/rjw-ce78ea5a7f43771b34b32b7b78afaa0d84b29f9e/1.6/Assemblies/RJW.dll",
+      "environment": "ETERNAL_RJW_REFERENCE"
+    }
+  },
+  "historical_inventory": {
+    "production": {"files": 146, "lines": 35033},
+    "unit_tests": {"files": 29, "lines": 4616},
+    "game_tests": {"files": 16, "lines": 3362}
+  }
+}

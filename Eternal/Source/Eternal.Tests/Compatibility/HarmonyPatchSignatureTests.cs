@@ -1,379 +1,346 @@
-// Relative Path: Eternal/Source/Eternal.Tests/Compatibility/HarmonyPatchSignatureTests.cs
-// Creation Date: 11-07-2026
-// Last Edit: 11-07-2026
 // Author: 0Shard
-// Description: Regression test for Harmony patch-time signature failures. Harmony binds
-//              non-"__" prefix/postfix parameters to the target method's parameters BY NAME
-//              and throws at patch time on a mismatch. Two such bugs shipped (bool __result
-//              on void CheckRemoveMapNow; "Trait t" vs GainTrait's "trait"), each silently
-//              aborting PatchAll for every class after it. This test cross-checks every
-//              attribute-targeted patch class in Eternal.dll against the real game signatures
-//              using PE metadata only (CauseDeathNowTests pattern) — no CLR loading of
-//              Verse/RimWorld types, so it runs under Mono without Assembly-CSharp.
-
+// Description: Exact Harmony attribute targets and injected parameter compatibility; no CLR game loading.
 using System;
 using System.Collections.Generic;
-using System.IO;
+using System.Collections.Immutable;
 using System.Linq;
 using System.Reflection.Metadata;
-using System.Reflection.PortableExecutable;
+using Eternal.Tests.Infrastructure;
 using Xunit;
+using Xunit.Abstractions;
 
 namespace Eternal.Tests.Compatibility
 {
-    /// <summary>
-    /// Validates that every prefix/postfix parameter name in Eternal's attribute-targeted
-    /// Harmony patch classes exists on the target method. Classes resolving their target via
-    /// TargetMethod()/Prepare() reflection (RimImmortal, SOS2, VGE crash-landing, Odyssey)
-    /// carry no typeof(...) in their attributes and are skipped — their targets live in
-    /// optional mod assemblies that are not present at test time.
-    /// </summary>
     public class HarmonyPatchSignatureTests
     {
-        private static readonly string EternalDllPath = LocateBesideTestAssembly("Eternal.dll");
-
-        /// <summary>Injection-style parameter names Harmony resolves without a target-name match.</summary>
-        private static bool IsInjectedParameter(string parameterName) =>
-            parameterName.StartsWith("__", StringComparison.Ordinal);
-
-        private static string LocateBesideTestAssembly(string fileName)
-        {
-            string codeBase = typeof(HarmonyPatchSignatureTests).Assembly.CodeBase;
-            string testDllDir = Path.GetDirectoryName(new Uri(codeBase).LocalPath);
-            return Path.Combine(testDllDir, fileName);
-        }
-
-        /// <summary>
-        /// Assembly-CSharp source for target signatures: prefer the Krafs reference assembly the
-        /// project compiles against (restored by NuGet, version-pinned in the csproj), fall back
-        /// to an installed game copy.
-        /// </summary>
-        private static string LocateAssemblyCSharp()
-        {
-            string home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-            string nugetRoot = Path.Combine(home, ".nuget", "packages", "krafs.rimworld.ref");
-            if (Directory.Exists(nugetRoot))
-            {
-                string candidate = Directory.GetDirectories(nugetRoot)
-                    .OrderBy(versionDir => versionDir, StringComparer.Ordinal)
-                    .Select(versionDir => Path.Combine(versionDir, "ref", "net472", "Assembly-CSharp.dll"))
-                    .LastOrDefault(File.Exists);
-                if (candidate != null)
-                    return candidate;
-            }
-
-            string steamCopy = Path.Combine(home,
-                ".local", "share", "Steam", "steamapps", "common", "RimWorld",
-                "RimWorldLinux_Data", "Managed", "Assembly-CSharp.dll");
-            return File.Exists(steamCopy) ? steamCopy : null;
-        }
-
-        // -----------------------------------------------------------------
-        // The test
-        // -----------------------------------------------------------------
+        private readonly ITestOutputHelper output;
+        public HarmonyPatchSignatureTests(ITestOutputHelper output) { this.output = output; }
 
         [Fact]
         public void AllAttributeTargetedPatchClasses_ParameterNames_MatchTargetSignature()
         {
-            Assert.True(File.Exists(EternalDllPath),
-                $"Eternal.dll not found at: {EternalDllPath}. Run dotnet build first.");
-            string gameDllPath = LocateAssemblyCSharp();
-            Assert.False(gameDllPath == null,
-                "Assembly-CSharp.dll not found in the Krafs NuGet cache or the Steam install. " +
-                "Run dotnet restore first.");
-
-            List<PatchClassTarget> patchClasses = ReadAttributeTargetedPatchClasses(EternalDllPath);
-
-            // Decoder sanity guard: if attribute decoding silently breaks, this test must fail
-            // rather than pass on an empty set. TraitSet/MapPawns/CompRottable/Pawn_HealthTracker
-            // style classes guarantee well above this floor.
-            Assert.True(patchClasses.Count >= 5,
-                $"Only {patchClasses.Count} attribute-targeted patch classes decoded from Eternal.dll — " +
-                "the attribute decoder is likely broken.");
-
-            Dictionary<string, HashSet<string>> gameMethodParams = ReadMethodParameterNames(
-                gameDllPath,
-                patchClasses.Select(patch => patch.TargetTypeFullName).ToHashSet());
-
-            var violations = new List<string>();
-            int validatedClasses = 0;
-
-            foreach (PatchClassTarget patchClass in patchClasses)
+            using var patches = CompiledBuildReferences.OpenProduction();
+            using var targets = new CompiledAssemblyContract(CompiledBuildReferences.GameReferencePath);
+            var dynamic = new List<string>();
+            int checkedMethods = Validate(patches, targets, dynamic);
+            Assert.True(checkedMethods >= 15, "Exact Harmony target discovery unexpectedly small");
+            Assert.Equal(new[]
             {
-                string targetKey = patchClass.TargetTypeFullName + "::" + patchClass.TargetMethodName;
-                if (!gameMethodParams.TryGetValue(targetKey, out HashSet<string> targetParamNames))
-                {
-                    violations.Add($"{patchClass.PatchClassFullName}: target method " +
-                        $"{targetKey} not found in {Path.GetFileName(gameDllPath)}");
-                    continue;
-                }
-
-                validatedClasses++;
-                foreach (PatchMethod patchMethod in patchClass.PatchMethods)
-                {
-                    foreach (string parameterName in patchMethod.ParameterNames)
-                    {
-                        if (IsInjectedParameter(parameterName))
-                            continue;
-                        if (!targetParamNames.Contains(parameterName))
-                        {
-                            violations.Add(
-                                $"{patchClass.PatchClassFullName}.{patchMethod.Name}: parameter " +
-                                $"'{parameterName}' does not exist on {targetKey} " +
-                                $"(has: {string.Join(", ", targetParamNames.OrderBy(n => n))}) — " +
-                                "Harmony binds by name and will throw at patch time.");
-                        }
-                    }
-                }
+                "CTR_BodyCultivationTick_Patch", "CTR_OnReadingTick_Patch", "GravshipUtility_AbandonMap_Patch",
+                "GravshipUtility_PreLaunchConfirmation_Patch", "GroundMapParent_Destroy_Patch", "ISF_AddExperience_Patch", "ISF_ApplyOptions_Patch", "ISF_SchemaUse_Patch",
+                "RI_GetFloatUpgrade_Patch", "RI_SetExp_Patch", "Rjw_LegacyBiology_Patch", "Rjw_SurgeryMutation_Patch",
+                "SOS2_FloatAndDestroy_Patch", "SOS2_KillAllOffShip_Patch",
+                "SOS2_MoveShip_Patch", "SOS2_OrbitingShipPatch", "SOS2_RemoveShipOrArea_Patch", "SOS2_ShipDestroyPatch",
+                "SOS2_ShuttleShootdown_Patch", "VEF_CorpseDecayer_Patch", "VGE_LandingEnded_Patch"
+            }, dynamic.Select(n => n.Substring(n.LastIndexOf('.') + 1)).OrderBy(n => n, StringComparer.Ordinal));
+            foreach (string name in dynamic)
+            {
+                output.WriteLine("Reflection target accounted for, runtime resolution pending: " + name);
             }
 
-            Assert.True(validatedClasses > 0, "No patch class was validated against the game assembly.");
-            Assert.True(violations.Count == 0,
-                "Harmony signature mismatches found:\n" + string.Join("\n", violations));
+            Assert.Contains(dynamic, n => n.EndsWith(".RI_SetExp_Patch", StringComparison.Ordinal));
+            Assert.Contains(dynamic, n => n.EndsWith(".VGE_LandingEnded_Patch", StringComparison.Ordinal));
         }
 
-        // -----------------------------------------------------------------
-        // Eternal.dll side: patch classes and their attribute-declared targets
-        // -----------------------------------------------------------------
-
-        private sealed class PatchClassTarget
+        internal sealed class Target
         {
-            public string PatchClassFullName;
-            public string TargetTypeFullName;
-            public string TargetMethodName;
-            public List<PatchMethod> PatchMethods = new List<PatchMethod>();
-        }
-
-        private sealed class PatchMethod
-        {
+            public string Type;
             public string Name;
-            public List<string> ParameterNames = new List<string>();
+            public int Kind;
+            public string[] Parameters;
+            public Target Copy() => new Target { Type = Type, Name = Name, Kind = Kind, Parameters = Parameters };
+            public string MethodName => Kind == 0 ? Name : Kind == 1 ? "get_" + Name : Kind == 2 ? "set_" + Name :
+                Kind == 3 ? ".ctor" : Kind == 4 ? ".cctor" : throw new NotSupportedException("Unsupported Harmony MethodType " + Kind);
         }
 
-        private static List<PatchClassTarget> ReadAttributeTargetedPatchClasses(string dllPath)
+        private static string AttributeName(CompiledAssemblyContract assembly, CustomAttributeHandle handle)
         {
-            var patchClasses = new List<PatchClassTarget>();
-
-            using var stream = File.OpenRead(dllPath);
-            using var peReader = new PEReader(stream);
-            MetadataReader reader = peReader.GetMetadataReader();
-
-            foreach (TypeDefinitionHandle typeHandle in reader.TypeDefinitions)
+            string constructor = assembly.MemberName(assembly.Reader.GetCustomAttribute(handle).Constructor);
+            if (!constructor.EndsWith("..ctor", StringComparison.Ordinal))
             {
-                TypeDefinition typeDef = reader.GetTypeDefinition(typeHandle);
-
-                string targetTypeFullName = null;
-                string targetMethodName = null;
-                int methodType = 0; // HarmonyLib.MethodType.Normal
-                bool hasHarmonyPatchAttribute = false;
-
-                foreach (CustomAttributeHandle attrHandle in typeDef.GetCustomAttributes())
-                {
-                    CustomAttribute attr = reader.GetCustomAttribute(attrHandle);
-                    if (GetAttributeTypeName(reader, attr) != "HarmonyPatch")
-                        continue;
-                    hasHarmonyPatchAttribute = true;
-
-                    CustomAttributeValue<string> decoded;
-                    try
-                    {
-                        decoded = attr.DecodeValue(new NameOnlyTypeProvider());
-                    }
-                    catch
-                    {
-                        continue; // Undecodable overload — treated like a reflection-targeted class below.
-                    }
-
-                    foreach (CustomAttributeTypedArgument<string> fixedArg in decoded.FixedArguments)
-                    {
-                        if (fixedArg.Type == "System.Type" && targetTypeFullName == null &&
-                            fixedArg.Value is string serializedTypeName)
-                        {
-                            targetTypeFullName = serializedTypeName.Split(',')[0].Trim();
-                        }
-                        else if (fixedArg.Type == "System.String" && targetMethodName == null &&
-                            fixedArg.Value is string methodName)
-                        {
-                            targetMethodName = methodName;
-                        }
-                        else if (fixedArg.Type != null && fixedArg.Type.EndsWith(".MethodType", StringComparison.Ordinal) &&
-                            fixedArg.Value is int methodTypeValue)
-                        {
-                            methodType = methodTypeValue;
-                        }
-                    }
-                }
-
-                // Reflection-targeted classes ([HarmonyPatch] with TargetMethod()) have the
-                // attribute but no typeof/name arguments — nothing to validate statically.
-                if (!hasHarmonyPatchAttribute || targetTypeFullName == null || targetMethodName == null)
-                    continue;
-
-                // HarmonyLib.MethodType: 1 = Getter, 2 = Setter.
-                if (methodType == 1)
-                    targetMethodName = "get_" + targetMethodName;
-                else if (methodType == 2)
-                    targetMethodName = "set_" + targetMethodName;
-
-                var patchClass = new PatchClassTarget
-                {
-                    PatchClassFullName = GetTypeFullName(reader, typeDef),
-                    TargetTypeFullName = targetTypeFullName,
-                    TargetMethodName = targetMethodName,
-                };
-
-                foreach (MethodDefinitionHandle methodHandle in typeDef.GetMethods())
-                {
-                    MethodDefinition methodDef = reader.GetMethodDefinition(methodHandle);
-                    if (!IsPrefixOrPostfix(reader, methodDef))
-                        continue;
-
-                    var patchMethod = new PatchMethod { Name = reader.GetString(methodDef.Name) };
-                    foreach (ParameterHandle parameterHandle in methodDef.GetParameters())
-                    {
-                        Parameter parameter = reader.GetParameter(parameterHandle);
-                        if (parameter.SequenceNumber == 0)
-                            continue; // Return-value pseudo-parameter.
-                        patchMethod.ParameterNames.Add(reader.GetString(parameter.Name));
-                    }
-                    patchClass.PatchMethods.Add(patchMethod);
-                }
-
-                if (patchClass.PatchMethods.Count > 0)
-                    patchClasses.Add(patchClass);
+                throw new BadImageFormatException("Invalid attribute constructor " + constructor);
             }
 
-            return patchClasses;
+            return constructor.Substring(0, constructor.Length - "..ctor".Length);
         }
 
-        private static bool IsPrefixOrPostfix(MetadataReader reader, MethodDefinition methodDef)
+        internal static bool ReadTarget(CompiledAssemblyContract assembly, CustomAttributeHandleCollection attributes, Target target, string context)
         {
-            string methodName = reader.GetString(methodDef.Name);
-            if (methodName == "Prefix" || methodName == "Postfix")
+            bool present = false;
+            foreach (var handle in attributes)
+            {
+                if (AttributeName(assembly, handle) != "HarmonyLib.HarmonyPatch")
+                {
+                    continue;
+                }
+
+                present = true;
+                var attribute = assembly.DecodeAttribute(handle, context);
+                foreach (var argument in attribute.FixedArguments)
+                {
+                    if (argument.Type == "System.Type")
+                    {
+                        target.Type = (string)argument.Value;
+                    }
+                    else if (argument.Type == "System.String")
+                    {
+                        target.Name = (string)argument.Value;
+                    }
+                    else if (argument.Type == "HarmonyLib.MethodType")
+                    {
+                        target.Kind = (int)argument.Value;
+                    }
+                    else if (argument.Type == "System.Type[]")
+                    {
+                        target.Parameters = ((ImmutableArray<CustomAttributeTypedArgument<string>>)argument.Value).Select(a => (string)a.Value).ToArray();
+                    }
+                    else if (argument.Type == "HarmonyLib.ArgumentType[]")
+                    {
+                        var variations = ((ImmutableArray<CustomAttributeTypedArgument<string>>)argument.Value).Select(a => (int)a.Value).ToArray();
+                        if (target.Parameters == null || variations.Length != target.Parameters.Length)
+                        {
+                            throw new InvalidOperationException(context + ": ArgumentType array without matching types");
+                        }
+
+                        target.Parameters = target.Parameters.Select((t, i) => variations[i] == 0 ? t : variations[i] == 1 || variations[i] == 2 ? t + "&" :
+                            variations[i] == 3 ? t + "*" : throw new NotSupportedException(context + ": unsupported ArgumentType")).ToArray();
+                    }
+                    else
+                    {
+                        throw new NotSupportedException(context + ": unsupported HarmonyPatch argument " + argument.Type);
+                    }
+                }
+                if (attribute.NamedArguments.Length != 0)
+                {
+                    throw new NotSupportedException(context + ": unsupported HarmonyPatch named arguments");
+                }
+            }
+            return present;
+        }
+
+        internal static int Validate(CompiledAssemblyContract patches, CompiledAssemblyContract targets, List<string> dynamic,
+            Func<string, bool> include = null)
+        {
+            int count = 0;
+            foreach (var typeHandle in patches.Reader.TypeDefinitions)
+            {
+                var type = patches.Reader.GetTypeDefinition(typeHandle);
+                string name = patches.MemberName(typeHandle);
+                if (include != null && !include(name))
+                {
+                    continue;
+                }
+
+                var classTarget = new Target();
+                bool classPatch = ReadTarget(patches, type.GetCustomAttributes(), classTarget, name);
+                var stateTypes = new List<string>();
+                bool dynamicRecorded = false;
+                foreach (var methodHandle in type.GetMethods())
+                {
+                    var method = patches.Reader.GetMethodDefinition(methodHandle);
+                    string methodName = patches.Reader.GetString(method.Name);
+                    var attributes = method.GetCustomAttributes();
+                    bool patchMethod = methodName == "Prefix" || methodName == "Postfix" || methodName == "Finalizer" ||
+                        (methodName == "Transpiler" && name == "Eternal.Patches.VEF.VEF_CorpseDecayer_Patch") ||
+                        attributes.Any(a => AttributeName(patches, a) == "HarmonyLib.HarmonyPrefix" ||
+                            AttributeName(patches, a) == "HarmonyLib.HarmonyPostfix" || AttributeName(patches, a) == "HarmonyLib.HarmonyFinalizer");
+                    var target = classTarget.Copy();
+                    bool methodPatch = ReadTarget(patches, attributes, target, name + "." + methodName);
+                    if (!patchMethod || !(classPatch || methodPatch))
+                    {
+                        continue;
+                    }
+
+                    if (target.Type == null || (target.Name == null && target.Kind != 3 && target.Kind != 4))
+                    {
+                        if (target.Type != null || target.Name != null)
+                        {
+                            throw new InvalidOperationException(name + ": incomplete Harmony target");
+                        }
+
+                        if (!patches.Methods(name, "TargetMethod").Any() && !patches.Methods(name, "TargetMethods").Any())
+                        {
+                            throw new InvalidOperationException(name + ": dynamic Harmony target without resolver");
+                        }
+
+                        if (!dynamicRecorded) { dynamic.Add(name); dynamicRecorded = true; }
+                        continue;
+                    }
+                    var original = targets.Method(target.Type, target.MethodName, target.Parameters, inherited: true);
+                    ValidateParameters(patches, methodHandle, targets, original, target.Type, stateTypes);
+                    count++;
+                }
+                Assert.True(stateTypes.Distinct().Count() <= 1, name + ": incompatible patch __state types");
+            }
+            return count;
+        }
+
+        internal static void ValidateParameters(CompiledAssemblyContract patches, MethodDefinitionHandle patch,
+            CompiledAssemblyContract targets, MethodDefinitionHandle original, string targetType, List<string> stateTypes)
+        {
+            var signature = patches.Signature(patch);
+            var originalSignature = targets.Signature(original);
+            var names = patches.ParameterNames(patch);
+            var originals = targets.ParameterNames(original);
+            string context = patches.Describe(patch) + " targeting " + targets.Describe(original);
+            Assert.False(signature.Header.IsInstance, "Harmony patch must be static: " + context);
+            string patchName = patches.Reader.GetString(patches.Reader.GetMethodDefinition(patch).Name);
+            bool prefix = patchName == "Prefix" || patches.Reader.GetMethodDefinition(patch).GetCustomAttributes().Any(a => AttributeName(patches, a) == "HarmonyLib.HarmonyPrefix");
+            bool finalizer = patchName == "Finalizer" || patches.Reader.GetMethodDefinition(patch).GetCustomAttributes().Any(a => AttributeName(patches, a) == "HarmonyLib.HarmonyFinalizer");
+            int firstInjection = 0;
+            if (finalizer)
+            {
+                Assert.True(signature.ReturnType == "System.Void" || signature.ReturnType == "System.Exception",
+                    "Finalizer return requires System.Void or System.Exception: " + context);
+            }
+            else if (prefix)
+            {
+                Assert.Contains(signature.ReturnType, new[] { "System.Void", "System.Boolean" });
+            }
+            else if (signature.ReturnType != "System.Void")
+            {
+                Assert.True(signature.ReturnType == originalSignature.ReturnType,
+                    "Postfix return incompatible with exact target: " + context);
+                // Harmony 2.4.2 AddPostfixes consumes the first parameter by type,
+                // independently of its name, before interpreting any injections.
+                Assert.True(names.Length > 0 && signature.ParameterTypes[0] == signature.ReturnType,
+                    "Returning postfix requires an exact passthrough first parameter: " + context);
+                firstInjection = 1;
+            }
+            for (int i = firstInjection; i < names.Length; i++)
+            {
+                string name = names[i];
+                string actual = Element(signature.ParameterTypes[i]);
+                string expected;
+                if (name == "__instance")
+                {
+                    Assert.True(originalSignature.Header.IsInstance, "Static target cannot inject __instance: " + context);
+                    Assert.True(Assignable(targets, targetType, actual), "Incompatible __instance " + actual + ": " + context);
+                    continue;
+                }
+                if (name == "__state") { stateTypes.Add(actual); continue; }
+                if (name == "__exception")
+                {
+                    Assert.True(finalizer, "__exception injection requires a finalizer: " + context);
+                    Assert.True(signature.ParameterTypes[i] == "System.Exception" || signature.ParameterTypes[i] == "System.Exception&",
+                        "__exception injection requires System.Exception or System.Exception&: " + context);
+                    continue;
+                }
+                if (name == "__result")
+                {
+                    Assert.True(originalSignature.ReturnType != "System.Void", "Cannot inject __result from System.Void: " + context);
+                    // Harmony 2.4.2 keeps the managed reference for ref returns; stripping
+                    // both sides would incorrectly accept a value parameter for int&.
+                    expected = originalSignature.ReturnType;
+                    string resultType = expected.EndsWith("&", StringComparison.Ordinal) ? signature.ParameterTypes[i] : actual;
+                    Assert.True(Assignable(targets, expected, resultType), "Incompatible __result " + resultType + " for " + expected + ": " + context);
+                    continue;
+                }
+                else if (name == "__runOriginal" || name == "__args")
+                {
+                    expected = name == "__runOriginal" ? "System.Boolean" : "System.Object[]";
+                    Assert.True(signature.ParameterTypes[i] == expected, "Readonly injection '" + name + "' requires " + expected + ": " + context);
+                    continue;
+                }
+                else if (name == "__originalMethod")
+                {
+                    string originalName = targets.Reader.GetString(targets.Reader.GetMethodDefinition(original).Name);
+                    string methodType = originalName == ".ctor" || originalName == ".cctor" ? "System.Reflection.ConstructorInfo" : "System.Reflection.MethodInfo";
+                    Assert.True(signature.ParameterTypes[i] == actual && (actual == "System.Reflection.MethodBase" || actual == methodType),
+                        "Incompatible __originalMethod " + actual + " for " + methodType + ": " + context);
+                    continue;
+                }
+                else if (name.StartsWith("___", StringComparison.Ordinal))
+                {
+                    var current = targets.Type(targetType);
+                    var fields = new List<FieldDefinitionHandle>();
+                    for (int depth = 0; depth < 64; depth++)
+                    {
+                        var definition = targets.Reader.GetTypeDefinition(current);
+                        fields.AddRange(definition.GetFields().Where(h => targets.Reader.GetString(targets.Reader.GetFieldDefinition(h).Name) == name.Substring(3)));
+                        if (fields.Count > 0 || definition.BaseType.IsNil || !targets.TryType(targets.MemberName(definition.BaseType), out current))
+                        {
+                            break;
+                        }
+                    }
+                    Assert.Single(fields);
+                    var field = targets.Reader.GetFieldDefinition(fields.Single());
+                    expected = field.DecodeSignature(targets.Names, (object)null);
+                    Assert.True((field.Attributes & System.Reflection.FieldAttributes.Static) != 0 || originalSignature.Header.IsInstance,
+                        "Instance field '" + name + "' needs an instance target: " + context);
+                    // Harmony emits ldfld/ldflda here without boxing. Managed references
+                    // must keep the exact element type; a value field cannot become object.
+                    bool byref = signature.ParameterTypes[i].EndsWith("&", StringComparison.Ordinal);
+                    Assert.True(byref ? signature.ParameterTypes[i] == expected + "&" :
+                        actual == expected || (!IsValueType(targets, expected) && Assignable(targets, expected, actual)),
+                        "Incompatible field injection '" + name + "' type " + signature.ParameterTypes[i] + " for " + expected + ": " + context);
+                    continue;
+                }
+                else
+                {
+                    int index = name.StartsWith("__", StringComparison.Ordinal) && int.TryParse(name.Substring(2), out int numeric) ? numeric : Array.IndexOf(originals, name);
+                    Assert.True(index >= 0 && index < originals.Length, "Parameter '" + name + "' absent from exact target: " + context);
+                    expected = Element(originalSignature.ParameterTypes[index]);
+                }
+                Assert.True(Assignable(targets, expected, actual), "Parameter '" + name + "' type " + actual + " differs from " + expected + ": " + context);
+            }
+        }
+
+        private static string Element(string type) => type.EndsWith("&", StringComparison.Ordinal) ? type.Substring(0, type.Length - 1) : type;
+        private static bool IsValueType(CompiledAssemblyContract assembly, string type)
+        {
+            if (type == "System.Object" || type == "System.String" || type.EndsWith("[]", StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            if (new[] { "System.Boolean", "System.Byte", "System.SByte", "System.Char", "System.Int16", "System.UInt16", "System.Int32", "System.UInt32",
+                "System.Int64", "System.UInt64", "System.IntPtr", "System.UIntPtr", "System.Single", "System.Double", "System.Decimal" }.Contains(type))
+            {
                 return true;
-
-            foreach (CustomAttributeHandle attrHandle in methodDef.GetCustomAttributes())
-            {
-                string attrName = GetAttributeTypeName(reader, reader.GetCustomAttribute(attrHandle));
-                if (attrName == "HarmonyPrefix" || attrName == "HarmonyPostfix")
-                    return true;
             }
-            return false;
+
+            if (!assembly.TryType(type, out var handle))
+            {
+                throw new NotSupportedException("Cannot resolve injected field type " + type);
+            }
+
+            string parent = assembly.MemberName(assembly.Reader.GetTypeDefinition(handle).BaseType);
+            return parent == "System.ValueType" || parent == "System.Enum";
         }
-
-        // -----------------------------------------------------------------
-        // Assembly-CSharp side: parameter names of the targeted methods
-        // -----------------------------------------------------------------
-
-        /// <summary>
-        /// Returns "Namespace.Type::Method" → union of parameter names across all overloads,
-        /// keyed by the WANTED type but collected up its base-type chain, because Harmony's
-        /// [HarmonyPatch(typeof(X), "m")] resolves inherited methods too. Union across
-        /// overloads keeps the check conservative for overloaded targets.
-        /// </summary>
-        private static Dictionary<string, HashSet<string>> ReadMethodParameterNames(
-            string dllPath, HashSet<string> wantedTypeFullNames)
+        private static bool Assignable(CompiledAssemblyContract assembly, string target, string wanted)
         {
-            var methodParams = new Dictionary<string, HashSet<string>>();
-
-            using var stream = File.OpenRead(dllPath);
-            using var peReader = new PEReader(stream);
-            MetadataReader reader = peReader.GetMetadataReader();
-
-            var typeHandlesByFullName = new Dictionary<string, TypeDefinitionHandle>();
-            foreach (TypeDefinitionHandle typeHandle in reader.TypeDefinitions)
+            if (target.EndsWith("&", StringComparison.Ordinal) || wanted.EndsWith("&", StringComparison.Ordinal))
             {
-                typeHandlesByFullName[GetTypeFullName(reader, reader.GetTypeDefinition(typeHandle))] = typeHandle;
+                return target == wanted;
             }
 
-            foreach (string wantedTypeFullName in wantedTypeFullNames)
+            if (wanted == "System.Object")
             {
-                if (!typeHandlesByFullName.TryGetValue(wantedTypeFullName, out TypeDefinitionHandle currentHandle))
-                    continue;
+                return true;
+            }
 
-                // Walk the base chain while it stays inside this assembly (System.Object and
-                // cross-assembly bases end the walk; game targets all live in Assembly-CSharp).
-                while (true)
+            for (int depth = 0; depth < 64; depth++)
+            {
+                if (target == wanted)
                 {
-                    TypeDefinition typeDef = reader.GetTypeDefinition(currentHandle);
-                    foreach (MethodDefinitionHandle methodHandle in typeDef.GetMethods())
-                    {
-                        MethodDefinition methodDef = reader.GetMethodDefinition(methodHandle);
-                        string key = wantedTypeFullName + "::" + reader.GetString(methodDef.Name);
-                        if (!methodParams.TryGetValue(key, out HashSet<string> parameterNames))
-                        {
-                            parameterNames = new HashSet<string>();
-                            methodParams[key] = parameterNames;
-                        }
-                        foreach (ParameterHandle parameterHandle in methodDef.GetParameters())
-                        {
-                            Parameter parameter = reader.GetParameter(parameterHandle);
-                            if (parameter.SequenceNumber != 0)
-                                parameterNames.Add(reader.GetString(parameter.Name));
-                        }
-                    }
-
-                    if (typeDef.BaseType.IsNil || typeDef.BaseType.Kind != HandleKind.TypeDefinition)
-                        break;
-                    currentHandle = (TypeDefinitionHandle)typeDef.BaseType;
+                    return true;
                 }
+
+                if (!assembly.TryType(target, out var type))
+                {
+                    return false;
+                }
+
+                var baseType = assembly.Reader.GetTypeDefinition(type).BaseType;
+                if (baseType.IsNil)
+                {
+                    return false;
+                }
+
+                target = assembly.MemberName(baseType);
             }
-
-            return methodParams;
-        }
-
-        // -----------------------------------------------------------------
-        // Metadata helpers
-        // -----------------------------------------------------------------
-
-        private static string GetTypeFullName(MetadataReader reader, TypeDefinition typeDef)
-        {
-            string ns = reader.GetString(typeDef.Namespace);
-            string name = reader.GetString(typeDef.Name);
-            return string.IsNullOrEmpty(ns) ? name : ns + "." + name;
-        }
-
-        private static string GetAttributeTypeName(MetadataReader reader, CustomAttribute attr)
-        {
-            switch (attr.Constructor.Kind)
-            {
-                case HandleKind.MemberReference:
-                    MemberReference memberRef = reader.GetMemberReference((MemberReferenceHandle)attr.Constructor);
-                    if (memberRef.Parent.Kind == HandleKind.TypeReference)
-                        return reader.GetString(reader.GetTypeReference((TypeReferenceHandle)memberRef.Parent).Name);
-                    return null;
-                case HandleKind.MethodDefinition:
-                    MethodDefinition ctorDef = reader.GetMethodDefinition((MethodDefinitionHandle)attr.Constructor);
-                    return reader.GetString(reader.GetTypeDefinition(ctorDef.GetDeclaringType()).Name);
-                default:
-                    return null;
-            }
-        }
-
-        /// <summary>
-        /// Minimal ICustomAttributeTypeProvider that represents every type as its full-name string —
-        /// enough to classify HarmonyPatch fixed arguments (System.Type / System.String / MethodType).
-        /// </summary>
-        private sealed class NameOnlyTypeProvider : ICustomAttributeTypeProvider<string>
-        {
-            public string GetPrimitiveType(PrimitiveTypeCode typeCode) => "System." + typeCode;
-            public string GetSystemType() => "System.Type";
-            public string GetSZArrayType(string elementType) => elementType + "[]";
-            public string GetTypeFromDefinition(MetadataReader reader, TypeDefinitionHandle handle, byte rawTypeKind)
-            {
-                TypeDefinition typeDef = reader.GetTypeDefinition(handle);
-                return GetTypeFullName(reader, typeDef);
-            }
-            public string GetTypeFromReference(MetadataReader reader, TypeReferenceHandle handle, byte rawTypeKind)
-            {
-                TypeReference typeRef = reader.GetTypeReference(handle);
-                string ns = reader.GetString(typeRef.Namespace);
-                string name = reader.GetString(typeRef.Name);
-                return string.IsNullOrEmpty(ns) ? name : ns + "." + name;
-            }
-            public string GetTypeFromSerializedName(string name) => name;
-            public bool IsSystemType(string type) => type == "System.Type";
-            public PrimitiveTypeCode GetUnderlyingEnumType(string type) => PrimitiveTypeCode.Int32;
+            throw new BadImageFormatException("Harmony __instance ancestry bound exceeded");
         }
     }
 }

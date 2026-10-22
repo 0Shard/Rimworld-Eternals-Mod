@@ -62,16 +62,24 @@ namespace Eternal.Elixir
             int cap)
         {
             if (isDead)
+            {
                 return RejectDeadKey;
+            }
 
             if (!hasTraitStorage)
+            {
                 return RejectNoTraitsKey;
+            }
 
             if (isAlreadyEternal)
+            {
                 return RejectAlreadyEternalKey;
+            }
 
             if (IsPopulationCapReached(capEnabled, totalEternals, cap))
+            {
                 return RejectCapReachedKey;
+            }
 
             return null;
         }

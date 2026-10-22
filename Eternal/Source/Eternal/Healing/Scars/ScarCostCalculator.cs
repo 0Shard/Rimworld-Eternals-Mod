@@ -49,14 +49,18 @@ namespace Eternal.Healing.Scars
         public float GetScarCost(ScarHealingRecord record)
         {
             if (record?.Scar == null)
+            {
                 return float.MaxValue;
+            }
 
             // Cost based on severity - lower severity = lower cost = heal first
             float costValue = record.InitialSeverity * 1000f;
 
             // Critical body parts cost less (heal first)
             if (record.Scar.Part != null && record.Scar.Part.IsCritical())
+            {
                 costValue *= 0.5f;
+            }
 
             return costValue;
         }
@@ -69,7 +73,9 @@ namespace Eternal.Healing.Scars
         public float EstimateHealingTime(Hediff scar, Pawn pawn)
         {
             if (scar == null)
+            {
                 return float.MaxValue;
+            }
 
             float baseRate = _settings.BaseHealingRate;
             int rareTickRate = _settings.RareTickRate;
@@ -89,7 +95,9 @@ namespace Eternal.Healing.Scars
         public float CalculateNutritionCost(ScarHealingRecord record)
         {
             if (record?.Scar == null)
+            {
                 return 0f;
+            }
 
             // Uniform cost: severity directly determines nutrition cost
             // No part-specific multipliers
@@ -109,7 +117,9 @@ namespace Eternal.Healing.Scars
         public float GetBaseHealingRate(Hediff scar)
         {
             if (scar == null)
+            {
                 return 0f;
+            }
 
             // Unified formula: use global baseHealingRate directly
             // This matches EternalHediffHealer for consistent healing speed
@@ -123,32 +133,16 @@ namespace Eternal.Healing.Scars
         public float CalculateHealingAmount(float deltaTime, Hediff scar)
         {
             if (scar == null)
+            {
                 return 0f;
+            }
 
             float baseRate = _settings.BaseHealingRate;
             int rareTickRate = _settings.RareTickRate;
 
             // Unified formula: baseRate per tick (matches EternalHediffHealer)
             // deltaTime represents ticks since last heal, normalize by rareTickRate
-            return baseRate * (deltaTime / rareTickRate);
-        }
-
-        /// <summary>
-        /// Determines if a pawn has enough nutrition to heal.
-        /// </summary>
-        public bool HasSufficientNutrition(Pawn pawn, float cost)
-        {
-            float drainThreshold = (pawn?.needs?.food?.MaxLevel ?? 1f) * _settings.FoodDrainThreshold;
-            float availableNutrition = pawn?.needs?.food?.CurLevel ?? 0f;
-            return availableNutrition > (cost + drainThreshold);
-        }
-
-        /// <summary>
-        /// Resets the default instance (for testing or mod reload).
-        /// </summary>
-        public static void ResetDefault()
-        {
-            _defaultInstance = null;
+            return ScarHealingTiming.CalculateHealingAmount(deltaTime, baseRate, rareTickRate);
         }
     }
 }

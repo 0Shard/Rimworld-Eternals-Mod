@@ -8,7 +8,6 @@
 
 #if DEBUG
 
-using System;
 using System.Collections.Generic;
 using System.Linq;
 using Verse;
@@ -25,24 +24,16 @@ namespace Eternal.InGameTests.TestSuites
     {
         public static TestSuiteResult RunAll(Verse.Map map)
         {
-            int passed = 0;
-            int failed = 0;
-            var failures = new List<string>();
+            var result = new TestSuiteResult(0, 0, new List<string>());
 
-            RunTest("CorpseTrackedOnDeath", () => CorpseTrackedOnDeath(map),
-                ref passed, ref failed, failures);
-            RunTest("CorpseExistsOnMap", () => CorpseExistsOnMap(map),
-                ref passed, ref failed, failures);
-            RunTest("CorpseMapIndexMatchesScan", () => CorpseMapIndexMatchesScan(map),
-                ref passed, ref failed, failures);
-            RunTest("ManagerRelocationCommitsAtomically", () => ManagerRelocationCommitsAtomically(map),
-                ref passed, ref failed, failures);
-            RunTest("FailedRelocationRestoresUnspawnedHolder", () => FailedRelocationRestoresUnspawnedHolder(map),
-                ref passed, ref failed, failures);
-            RunTest("ActiveCorpseHydrationHasExplicitOwner", ActiveCorpseHydrationHasExplicitOwner,
-                ref passed, ref failed, failures);
+            result.RunTest("MapProtection", "CorpseTrackedOnDeath", () => CorpseTrackedOnDeath(map));
+            result.RunTest("MapProtection", "CorpseExistsOnMap", () => CorpseExistsOnMap(map));
+            result.RunTest("MapProtection", "CorpseMapIndexMatchesScan", () => CorpseMapIndexMatchesScan(map));
+            result.RunTest("MapProtection", "ManagerRelocationCommitsAtomically", () => ManagerRelocationCommitsAtomically(map));
+            result.RunTest("MapProtection", "FailedRelocationRestoresUnspawnedHolder", () => FailedRelocationRestoresUnspawnedHolder(map));
+            result.RunTest("MapProtection", "ActiveCorpseHydrationHasExplicitOwner", ActiveCorpseHydrationHasExplicitOwner);
 
-            return new TestSuiteResult(passed, failed, failures);
+            return result;
         }
 
         private static void CorpseTrackedOnDeath(Verse.Map map)
@@ -68,6 +59,8 @@ namespace Eternal.InGameTests.TestSuites
 
         private static void CorpseMapIndexMatchesScan(Verse.Map map)
         {
+            var ownedPawn = TestPawnFactory.SpawnEternalPawn(map);
+            TestPawnFactory.KillPawn(ownedPawn);
             var corpseManager = EternalServiceContainer.Instance.CorpseManager;
             var indexedPawns = new HashSet<Pawn>(corpseManager.GetCorpsesOnMap(map)
                 .Where(corpseData => corpseData?.OriginalPawn != null)
@@ -79,6 +72,8 @@ namespace Eternal.InGameTests.TestSuites
                     && (corpseData.CurrentMap == map || corpseData.Corpse.Map == map))
                 .Select(corpseData => corpseData.OriginalPawn));
 
+            TestAssert.IsTrue(indexedPawns.Contains(ownedPawn), "Test-owned corpse must appear in map index");
+            TestAssert.IsTrue(scannedPawns.Contains(ownedPawn), "Test-owned corpse must appear in authoritative scan");
             TestAssert.AreEqual(scannedPawns.Count, indexedPawns.Count,
                 "Indexed and authoritative corpse scans should have equal cardinality");
             foreach (var pawn in scannedPawns)
@@ -169,7 +164,7 @@ namespace Eternal.InGameTests.TestSuites
             var corpseProcessor = EternalServiceContainer.Instance.CorpseHealingProcessor;
             TestAssert.IsNotNull(corpseProcessor, "Corpse healing processor should be registered");
 
-            corpseProcessor.RebuildActiveHealingCorpses();
+            // Observe the initialized live index without rebuilding queues for unrelated corpses.
             TestAssert.IsTrue(corpseProcessor.ActiveHealingCorpsesHydrated,
                 "Active corpse ownership should be explicitly hydrated before indexed iteration");
         }
@@ -203,28 +198,7 @@ namespace Eternal.InGameTests.TestSuites
         // 5. Verify corpse is teleported to colony map
         // This requires quest generation infrastructure beyond test scope.
 
-        private static void RunTest(string name, Action test, ref int passed, ref int failed, List<string> failures)
-        {
-            Log.Message($"[EternalTests] Running: {name}");
-            try
-            {
-                test();
-                passed++;
-                Log.Message($"[EternalTests] PASSED: {name}");
-            }
-            catch (TestFailedException ex)
-            {
-                failed++;
-                failures.Add($"[MapProtection] {name}: {ex.Message}");
-                Log.Error($"[EternalTests] FAILED: {name} -- {ex.Message}");
-            }
-            catch (Exception ex)
-            {
-                failed++;
-                failures.Add($"[MapProtection] {name}: {ex.Message}");
-                Log.Error($"[EternalTests] ERROR: {name} -- {ex}");
-            }
-        }
+
     }
 }
 

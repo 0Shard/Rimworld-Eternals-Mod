@@ -51,7 +51,7 @@ namespace Eternal
     ///
     /// SERVICE ACCESS:
     /// ================
-    /// Via properties (preferred - implements IEternalServices):
+    /// Via properties:
     /// - HealingProcessor - Living pawn healing
     /// - CorpseManager - Dead pawn corpse tracking
     /// - CorpseHealingProcessor - Corpse healing/resurrection
@@ -70,7 +70,7 @@ namespace Eternal
     /// - Destroyed: When the game session ends (return to main menu)
     /// - Thread safety: All access should occur on the main Unity thread
     /// </summary>
-    public class Eternal_Component : GameComponent, IEternalServices
+    public class Eternal_Component : GameComponent
     {
         #region Static Instance
 
@@ -103,6 +103,10 @@ namespace Eternal
         // Tick orchestrator handles timing and processing
         private TickOrchestrator tickOrchestrator;
 
+        /// <summary>Actual scheduler phase, unavailable before initialization.</summary>
+        public int? LastNormalHealTick => tickOrchestrator?.GetTimingValues().normalHeal;
+        public int? LastRareHealTick => tickOrchestrator?.GetTimingValues().rareHeal;
+
         #endregion
 
         #region Initialization
@@ -133,9 +137,14 @@ namespace Eternal
             if (Eternal_Mod.settings?.debugMode == true)
             {
                 if (wasInitialized)
+                {
                     Log.Message("[Eternal] EternalServiceContainer hard reset for new game session");
+                }
+
                 if (evictedPawns > 0)
+                {
                     Log.Message($"[Eternal] Pawn cache cleared on session start ({evictedPawns} stale entries evicted)");
+                }
             }
 
             // Initialize all managers as new instances (no singletons)
@@ -185,9 +194,9 @@ namespace Eternal
         /// Called every game tick to update Eternal mechanics.
         /// Delegates all tick processing to the TickOrchestrator.
         /// </summary>
-        public override void GameComponentUpdate()
+        public override void GameComponentTick()
         {
-            base.GameComponentUpdate();
+            base.GameComponentTick();
             tickOrchestrator?.ProcessTick();
         }
 
@@ -201,7 +210,9 @@ namespace Eternal
         public void StartRegrowth(Pawn pawn)
         {
             if (!pawn.IsValidEternal())
+            {
                 return;
+            }
 
             if (pawn.Dead)
             {
@@ -225,7 +236,9 @@ namespace Eternal
         public void EnqueueHealthReconciliation(Pawn pawn, Hediff removedHediff = null)
         {
             if (!ShouldQueueHealthReconciliation(pawn, removedHediff))
+            {
                 return;
+            }
 
             tickOrchestrator?.EnqueueHealthReconciliation(pawn, removedHediff);
         }
@@ -238,7 +251,9 @@ namespace Eternal
         public static bool ShouldQueueHealthReconciliation(Pawn pawn, Hediff removedHediff = null)
         {
             if (pawn == null)
+            {
                 return false;
+            }
 
             if (removedHediff?.def != null
                 && removedHediff.def == EternalDefOf.Eternal_Essence)
@@ -247,7 +262,9 @@ namespace Eternal
             }
 
             if (!pawn.Dead)
+            {
                 return pawn.IsValidEternal();
+            }
 
             return pawn.IsValidEternalCorpse()
                 || EternalServiceContainer.Instance?.CorpseManager?.IsTracked(pawn) == true;
@@ -259,12 +276,16 @@ namespace Eternal
         /// </summary>
         public void ReconcileLiveHealth(Pawn pawn)
         {
+            // The saved health set bypasses third-party add callbacks during resurrection.
+            var anatomy = EternalServiceContainer.Instance.RjwAnatomy;
+            anatomy?.RestoreAvailable(pawn);
+            anatomy?.RefreshCaches(pawn);
             healingProcessor?.ReconcileLiveHealth(pawn);
         }
 
         #endregion
 
-        #region Service Access (IEternalServices Implementation)
+        #region Service Access
 
         /// <summary>
         /// Gets the food debt tracking system.
@@ -318,7 +339,9 @@ namespace Eternal
                 {
                     // Skip null or destroyed pawns (defensive check)
                     if (pawn == null || pawn.Destroyed)
+                    {
                         continue;
+                    }
 
                     EnsureEternalHediff(pawn);
                 }
@@ -327,13 +350,17 @@ namespace Eternal
                 foreach (var caravan in Find.WorldObjects.Caravans)
                 {
                     if (caravan?.PawnsListForReading == null)
+                    {
                         continue;
+                    }
 
                     foreach (var pawn in caravan.PawnsListForReading)
                     {
                         // Skip null or destroyed pawns (defensive check)
                         if (pawn == null || pawn.Destroyed)
+                        {
                             continue;
+                        }
 
                         EnsureEternalHediff(pawn);
                     }
@@ -352,10 +379,14 @@ namespace Eternal
         private void EnsureEternalHediff(Pawn pawn)
         {
             if (pawn == null || pawn.Destroyed)
+            {
                 return;
+            }
 
             if (pawn.health?.hediffSet == null)
+            {
                 return;
+            }
 
             // Check if pawn has trait but missing hediff
             bool hasTrait = pawn.HasTraitIgnoringSuppression(EternalDefOf.Eternal_GeneticMarker);
@@ -423,42 +454,48 @@ namespace Eternal
             }
             mapProtection.ExposeData();
 
-            // Food debt system serialization (cast to IExposable)
-            if (Scribe.mode == LoadSaveMode.Saving)
+            // Reference lists need the same instance through cross-reference resolution.
+            if (Scribe.mode == LoadSaveMode.LoadingVars && foodDebtSystem == null)
             {
-                // Serialize the debt system's data
-                (foodDebtSystem as IExposable)?.ExposeData();
+                foodDebtSystem = new UnifiedFoodDebtManager();
             }
-            else if (Scribe.mode == LoadSaveMode.LoadingVars)
-            {
-                // Create new debt system instance and load its data
-                if (foodDebtSystem == null)
-                {
-                    foodDebtSystem = new UnifiedFoodDebtManager();
-                }
-                (foodDebtSystem as IExposable)?.ExposeData();
-            }
+            (foodDebtSystem as IExposable)?.ExposeData();
 
             // Threshold and live healing history serialization (stored in service container and
             // the processor). Both use loadID-aware scalar keys and migrate legacy rows during
             // the next live-health reconciliation.
             EternalServiceContainer.Instance.ThresholdTracker?.ExposeData();
             healingProcessor?.HediffHealer?.ExposeData();
+            EternalServiceContainer.Instance.RjwAnatomy?.ExposeData();
 
             // Post-load initialization
             if (Scribe.mode == LoadSaveMode.PostLoadInit)
             {
                 // Create new instances for non-serialized managers
                 if (healingProcessor == null)
+                {
                     healingProcessor = new EternalHealingProcessor();
+                }
+
                 if (corpseHealingProcessor == null)
+                {
                     corpseHealingProcessor = new EternalCorpseHealingProcessor();
+                }
+
                 if (corpsePreservation == null)
+                {
                     corpsePreservation = new EternalCorpsePreservation();
+                }
+
                 if (corpseManager == null)
+                {
                     corpseManager = new EternalCorpseManager();
+                }
+
                 if (foodDebtSystem == null)
+                {
                     foodDebtSystem = new UnifiedFoodDebtManager();
+                }
 
                 // Update service container with loaded manager references
                 EternalServiceContainer.Instance.UpdateManagerReferences(
@@ -518,15 +555,19 @@ namespace Eternal
             EternalDefOf.VerifyBindings();
 
             if (EternalModState.IsDisabled)
+            {
                 return;
+            }
 
             // Initialize SOS2 reflection cache eagerly — fail-fast if SOS2 API changed between versions.
             // Must run after mods are loaded (FinalizeInit is the correct hook).
             EternalServiceContainer.Instance.SpaceModCache?.Initialize(SpaceModDetection.SaveOurShip2Active);
+            EternalServiceContainer.Instance.RjwAnatomy?.Initialize();
 
             // Initialize healing processor now that game world is fully loaded
             // This is the correct lifecycle hook - called after maps and pawns exist
             healingProcessor?.Initialize();
+            corpseManager?.ReconcileLoadedCorpseLocations();
             corpseHealingProcessor?.RebuildActiveHealingCorpses();
         }
 

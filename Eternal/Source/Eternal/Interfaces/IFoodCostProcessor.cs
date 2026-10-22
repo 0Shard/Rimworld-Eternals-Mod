@@ -17,6 +17,8 @@ namespace Eternal.Interfaces
     /// </summary>
     public interface IFoodCostProcessor
     {
+        float GetAvailableNutrition(Pawn pawn);
+        float SettleNutrition(Pawn pawn, float nutrition);
         /// <summary>
         /// Processes the food cost for a healing operation on a living pawn.
         /// First drains from food bar, then adds to debt if at threshold.

@@ -3,7 +3,7 @@
 // Last Edit: 24-02-2026
 // Author: 0Shard
 // Description: Unit tests for SOS2ReflectionCache and BoolLookupResult.
-//              Tests requiring Initialize(), IsShipBurningUp(), or IsShipDestroyed() are deferred
+//              Tests requiring Initialize() or IsShipBurningUp() are deferred
 //              to the in-game harness because those methods reference Verse.Map/MapParent which
 //              triggers Assembly-CSharp loading at JIT time.
 //              Constructor validation and BoolLookupResult (pure value type) are fully testable.
@@ -48,7 +48,7 @@ namespace Eternal.Tests.Compatibility
         }
 
         // -----------------------------------------------------------------
-        // Initialize / IsShipBurningUp / IsShipDestroyed / IsOrbitingShip
+        // Initialize / IsShipBurningUp / IsOrbitingShip
         // DEFERRED to in-game harness — these methods reference Verse.Map,
         // MapParent, and Log.Warning which trigger Assembly-CSharp loading.
         // -----------------------------------------------------------------

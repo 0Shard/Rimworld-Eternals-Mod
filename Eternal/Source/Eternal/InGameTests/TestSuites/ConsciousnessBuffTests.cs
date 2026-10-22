@@ -9,7 +9,6 @@
 
 #if DEBUG
 
-using System;
 using System.Collections.Generic;
 using Verse;
 using RimWorld;
@@ -26,27 +25,18 @@ namespace Eternal.InGameTests.TestSuites
     {
         public static TestSuiteResult RunAll(Verse.Map map)
         {
-            int passed = 0;
-            int failed = 0;
-            var failures = new List<string>();
+            var result = new TestSuiteResult(0, 0, new List<string>());
 
-            try
-            {
-                RunTest("ConsciousnessBuffAppliesWhenEnabled",
-                    () => ConsciousnessBuffAppliesWhenEnabled(map), ref passed, ref failed, failures);
-                RunTest("ConsciousnessBuffDisabledNoModifier",
-                    () => ConsciousnessBuffDisabledNoModifier(map), ref passed, ref failed, failures);
-                RunTest("ConsciousnessMultiplierChangesLive",
-                    () => ConsciousnessMultiplierChangesLive(map), ref passed, ref failed, failures);
-                RunTest("ConsciousnessFloorEnforcement",
-                    () => ConsciousnessFloorEnforcement(map), ref passed, ref failed, failures);
-            }
-            finally
-            {
-                TestPawnFactory.CleanupAll();
-            }
+            result.RunTest("ConsciousnessBuff", "ConsciousnessBuffAppliesWhenEnabled",
+                () => ConsciousnessBuffAppliesWhenEnabled(map));
+            result.RunTest("ConsciousnessBuff", "ConsciousnessBuffDisabledNoModifier",
+                () => ConsciousnessBuffDisabledNoModifier(map));
+            result.RunTest("ConsciousnessBuff", "ConsciousnessMultiplierChangesLive",
+                () => ConsciousnessMultiplierChangesLive(map));
+            result.RunTest("ConsciousnessBuff", "ConsciousnessFloorEnforcement",
+                () => ConsciousnessFloorEnforcement(map));
 
-            return new TestSuiteResult(passed, failed, failures);
+            return result;
         }
 
         // ─── Test Bodies ────────────────────────────────────────────────────
@@ -57,7 +47,7 @@ namespace Eternal.InGameTests.TestSuites
             {
                 // Arrange: enable buff at 2× multiplier
                 Eternal_Mod.settings.consciousnessBuffEnabled = true;
-                Eternal_Mod.settings.consciousnessMultiplier  = 2.0f;
+                Eternal_Mod.settings.consciousnessMultiplier = 2.0f;
 
                 var pawn = TestPawnFactory.SpawnEternalPawn(map);
                 TestAssert.IsNotNull(pawn, "Eternal pawn should spawn");
@@ -102,7 +92,7 @@ namespace Eternal.InGameTests.TestSuites
             {
                 // Arrange: start at 3x
                 Eternal_Mod.settings.consciousnessBuffEnabled = true;
-                Eternal_Mod.settings.consciousnessMultiplier  = 3.0f;
+                Eternal_Mod.settings.consciousnessMultiplier = 3.0f;
 
                 var pawn = TestPawnFactory.SpawnEternalPawn(map);
                 TestAssert.IsNotNull(pawn, "Eternal pawn should spawn");
@@ -139,49 +129,26 @@ namespace Eternal.InGameTests.TestSuites
         {
             using (new SettingsScope())
             {
-                // Arrange: multiplier below floor (floor is 1.0 in CurStage override)
-                Eternal_Mod.settings.consciousnessBuffEnabled = true;
-                Eternal_Mod.settings.consciousnessMultiplier  = 0.5f;  // below floor
-
+                Eternal_Mod.settings.consciousnessBuffEnabled = false;
                 var pawn = TestPawnFactory.SpawnEternalPawn(map);
                 TestAssert.IsNotNull(pawn, "Eternal pawn should spawn");
+                pawn.health.hediffSet.DirtyCache();
+                float baseline = pawn.health.capacities.GetLevel(PawnCapacityDefOf.Consciousness);
 
-                TickAdvancer.AdvanceTicks(60);
-
+                // The production floor applies to the multiplier, preserving this pawn's
+                // native conditions. Read both capacities at the same tick and health state.
+                Eternal_Mod.settings.consciousnessBuffEnabled = true;
+                Eternal_Mod.settings.consciousnessMultiplier = 0.5f;
+                pawn.health.hediffSet.DirtyCache();
                 float consciousness = pawn.health.capacities.GetLevel(PawnCapacityDefOf.Consciousness);
-                Log.Message($"[EternalTests] ConsciousnessFloorEnforcement: consciousness = {consciousness}");
-
-                // Floor clamps 0.5 → 1.0, so postFactor = 1.0 → same as baseline.
-                // A healthy pawn at baseline is 1.0, so we expect >= 1.0.
-                TestAssert.InRange(consciousness, 0.99f, 1.01f,
-                    $"Expected consciousness ~1.0 when floor clamps 0.5x multiplier, got {consciousness}");
+                Log.Message($"[EternalTests] ConsciousnessFloorEnforcement: baseline = {baseline}, clamped = {consciousness}");
+                TestAssert.InRange(consciousness, baseline - 0.0001f, baseline + 0.0001f,
+                    $"Clamping the multiplier to 1x must preserve same-pawn unbuffed capacity {baseline}, got {consciousness}");
             }
         }
 
-        // ─── RunTest helper (copied from ResurrectionCycleTests — intentional, per design) ───
 
-        private static void RunTest(string name, Action test, ref int passed, ref int failed, List<string> failures)
-        {
-            Log.Message($"[EternalTests] Running: {name}");
-            try
-            {
-                test();
-                passed++;
-                Log.Message($"[EternalTests] PASSED: {name}");
-            }
-            catch (TestFailedException ex)
-            {
-                failed++;
-                failures.Add($"[ConsciousnessBuff] {name}: {ex.Message}");
-                Log.Error($"[EternalTests] FAILED: {name} -- {ex.Message}");
-            }
-            catch (Exception ex)
-            {
-                failed++;
-                failures.Add($"[ConsciousnessBuff] {name}: {ex.Message}");
-                Log.Error($"[EternalTests] ERROR: {name} -- {ex}");
-            }
-        }
+
     }
 }
 

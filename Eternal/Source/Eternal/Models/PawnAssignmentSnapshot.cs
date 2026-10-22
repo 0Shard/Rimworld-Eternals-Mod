@@ -104,7 +104,6 @@ namespace Eternal.Models
         /// <summary>
         /// Cached MethodInfo for PriorityTracker.SetPriority(WorkGiverDef, int, List{int}).
         /// </summary>
-        private static MethodInfo setWorkGiverPriorityMethod;
 
         #endregion
 
@@ -235,9 +234,6 @@ namespace Eternal.Models
                         workGiverIndexerGetter = workGiverIndexer.GetGetMethod();
                     }
 
-                    // SetPriority(WorkGiverDef, int, List<int>) method
-                    setWorkGiverPriorityMethod = AccessTools.Method(priorityTrackerType, "SetPriority",
-                        new[] { typeof(WorkGiverDef), typeof(int), typeof(List<int>) });
                 }
 
                 // WorkPriority.Priorities property
@@ -498,6 +494,16 @@ namespace Eternal.Models
             if (pawn.workSettings == null || workTypePriorities == null)
             {
                 return;
+            }
+
+            // A native resurrection can fail after becoming alive but before initialization.
+            // Restore the captured map rather than re-entering the failing default-priority
+            // initializer; SetPriority below still performs native work-cache notifications.
+            if (!pawn.workSettings.Initialized)
+            {
+                var priorities = AccessTools.Field(typeof(Pawn_WorkSettings), "priorities");
+                if (priorities == null) { throw new MissingFieldException(typeof(Pawn_WorkSettings).FullName, "priorities"); }
+                priorities.SetValue(pawn.workSettings, new DefMap<WorkTypeDef, int>());
             }
 
             foreach (var kvp in workTypePriorities)
@@ -796,7 +802,7 @@ namespace Eternal.Models
                 Scribe_Collections.Look(ref workTypeDefNames, "workTypeDefNames", LookMode.Value);
                 Scribe_Collections.Look(ref workTypePriorityValues, "workTypePriorities", LookMode.Value);
             }
-            else
+            else if (Scribe.mode == LoadSaveMode.LoadingVars)
             {
                 var workTypeDefNames = new List<string>();
                 var workTypePriorityValues = new List<int>();
@@ -828,7 +834,7 @@ namespace Eternal.Models
                 Scribe_Collections.Look(ref workGiverDefNames, "workGiverDefNames", LookMode.Value);
                 Scribe_Collections.Look(ref workGiverPriorityStrings, "workGiverPriorities", LookMode.Value);
             }
-            else
+            else if (Scribe.mode == LoadSaveMode.LoadingVars)
             {
                 var workGiverDefNames = new List<string>();
                 var workGiverPriorityStrings = new List<string>();

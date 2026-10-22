@@ -20,9 +20,8 @@ using System.Collections.Generic;
 using System.Linq;
 using Verse;
 using RimWorld;
-using RimWorld.Planet;
-using Eternal.Healing;
 using Eternal.Corpse;
+using Eternal.UI;
 
 // Type aliases to resolve namespace shadowing (Eternal.Corpse and Eternal.Map shadow Verse types)
 using CorpseType = Verse.Corpse;
@@ -76,7 +75,8 @@ namespace Eternal.Models
         public float HealingProgress;
 
         /// <summary>
-        /// Accumulated food debt for this corpse.
+        /// Food-debt display projection and legacy-save fallback. The resource manager owns
+        /// authoritative debt, including exact amounts this float cannot represent.
         /// </summary>
         public float FoodDebt;
 
@@ -220,18 +220,6 @@ namespace Eternal.Models
             _eternalComponentCached = true;
         }
 
-        /// <summary>
-        /// Invalidates cached components.
-        /// Call if the corpse reference changes.
-        /// </summary>
-        public void InvalidateComponentCache()
-        {
-            _cachedRottableComponent = null;
-            _rottableCached = false;
-            _cachedEternalComponent = null;
-            _eternalComponentCached = false;
-        }
-
         #endregion
 
         /// <summary>
@@ -276,7 +264,10 @@ namespace Eternal.Models
         {
             // Core references - use Scribe_References for Thing/Pawn references
             Scribe_References.Look(ref Corpse, "corpse");
-            Scribe_References.Look(ref OriginalPawn, "originalPawn");
+            // Native dead pawns are Destroyed Things but remain deep-owned by their corpse.
+            // The default Scribe flag otherwise writes null and drops tracking on reload.
+            Scribe_References.Look(ref OriginalPawn, "originalPawn", saveDestroyedThings: true);
+            Scribe_References.Look(ref CurrentMap, "currentMap");
 
             // Simple values
             Scribe_Values.Look(ref DeathTick, "deathTick", 0);
@@ -317,15 +308,9 @@ namespace Eternal.Models
             // Reconstruct map reference and re-cache components after loading
             if (Scribe.mode == LoadSaveMode.PostLoadInit)
             {
+                RestoreCorpseReferencesAfterLoad();
                 if (Corpse != null)
                 {
-                    CurrentMap = Corpse.Map;
-                    if (Corpse.Spawned)
-                    {
-                        // The corpse owns the authoritative position after cross-reference resolution.
-                        Position = Corpse.Position;
-                    }
-
                     // Rebind references without changing the live HediffSet. The processor owns
                     // old-save queue reconstruction; this phase only repairs references in a queue
                     // that was actually serialized.
@@ -354,6 +339,28 @@ namespace Eternal.Models
         }
 
         /// <summary>
+        /// Repairs old saves whose destroyed-pawn reference was written as null. The surviving
+        /// corpse supplies both its authoritative pawn and physical map; no corpse is fabricated.
+        /// Called by the manager as well because nested PostLoadInit callback order is not ownership.
+        /// </summary>
+        internal void RestoreCorpseReferencesAfterLoad()
+        {
+            if (Corpse == null)
+            {
+                return;
+            }
+            if (OriginalPawn == null)
+            {
+                OriginalPawn = Corpse.InnerPawn;
+            }
+            if (Corpse.Spawned && Corpse.Map != null)
+            {
+                CurrentMap = Corpse.Map;
+                Position = Corpse.Position;
+            }
+        }
+
+        /// <summary>
         /// Rebinds queued hediff references to the current live HediffSet by persisted load ID.
         /// Missing references remain represented by their scalar queue state and are handled by
         /// the processor's deterministic fallback rather than mutating the HediffSet directly.
@@ -367,12 +374,16 @@ namespace Eternal.Models
         private void RebindQueue(List<HealingItem> healingQueue)
         {
             if (healingQueue == null)
+            {
                 return;
+            }
 
             foreach (var healingItem in healingQueue)
             {
                 if (healingItem == null)
+                {
                     continue;
+                }
 
                 healingItem.Pawn = OriginalPawn;
                 healingItem.TryRebindHediff(OriginalPawn);
@@ -391,20 +402,14 @@ namespace Eternal.Models
                 return true;
             }
 
-            List<HealingItem> hydratedQueue = null;
-            if (PreCalculatedHealingQueue != null && PreCalculatedHealingQueue.Count > 0)
+            var selected = HealingQueueSelector.Select(HealingQueueHydrated, HealingQueue,
+                PreCalculatedHealingQueue, fallbackCalculator == null ? (Func<IReadOnlyList<HealingItem>>)null : () => fallbackCalculator());
+            if (selected.Items == null)
             {
-                hydratedQueue = new List<HealingItem>(PreCalculatedHealingQueue);
-            }
-            else if (fallbackCalculator != null)
-            {
-                hydratedQueue = fallbackCalculator();
-            }
-
-            if (hydratedQueue == null)
                 return false;
+            }
 
-            HealingQueue = hydratedQueue;
+            HealingQueue = new List<HealingItem>(selected.Items);
             HealingQueueHydrated = true;
             RebindHealingQueueReferences();
             return true;
@@ -433,7 +438,9 @@ namespace Eternal.Models
         public bool NeedsLocationUpdate()
         {
             if (Corpse == null)
+            {
                 return false;
+            }
 
             return CurrentMap != Corpse.Map || Position != Corpse.Position;
         }

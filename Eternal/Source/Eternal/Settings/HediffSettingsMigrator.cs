@@ -23,7 +23,9 @@ namespace Eternal.Settings
         public static bool NeedsMigration(HediffSettingsStore store)
         {
             if (store == null)
+            {
                 return false;
+            }
 
             // Check if we have any old settings and no XML file
             bool hasOldSettings = store.HasOldSavedSettings();
@@ -58,7 +60,9 @@ namespace Eternal.Settings
                 EternalHediffSetting oldSetting = kvp.Value;
 
                 if (oldSetting == null || string.IsNullOrEmpty(defName))
+                {
                     continue;
+                }
 
                 // Get the hediff def to determine correct defaults
                 HediffDef hediffDef = DefDatabase<HediffDef>.GetNamedSilentFail(defName);
@@ -112,15 +116,21 @@ namespace Eternal.Settings
         private static bool GetDefaultCanHeal(HediffDef hediffDef)
         {
             if (hediffDef == null)
+            {
                 return SettingsDefaults.HediffCanHeal; // Unknown hediffs default to healing
+            }
 
             // Beneficial hediffs should NOT heal by default
             if (!hediffDef.isBad)
+            {
                 return false;
+            }
 
             // Injuries heal by default
             if (hediffDef.injuryProps != null)
+            {
                 return true;
+            }
 
             // Diseases and conditions require opt-in
             return false;

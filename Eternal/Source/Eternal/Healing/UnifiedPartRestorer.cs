@@ -39,7 +39,9 @@ namespace Eternal.Healing
         public void RestoreAllMissingParts(Pawn pawn)
         {
             if (pawn?.health == null)
+            {
                 return;
+            }
 
             var partsToRestore = GetMissingPartsToRestore(pawn).ToList();
 
@@ -53,11 +55,16 @@ namespace Eternal.Healing
         public bool TryRestorePart(Pawn pawn, BodyPartRecord part)
         {
             if (pawn?.health == null || part == null)
+            {
                 return false;
+            }
 
             try
             {
+                var anatomy = Eternal.DI.EternalServiceContainer.Instance.RjwAnatomy;
+                anatomy?.CaptureBeforeLoss(pawn, part);
                 pawn.health.RestorePart(part);
+                anatomy?.RestorePart(pawn, part);
 
                 if (_settings?.DebugMode == true)
                 {
@@ -78,7 +85,9 @@ namespace Eternal.Healing
         public IEnumerable<BodyPartRecord> GetMissingPartsToRestore(Pawn pawn)
         {
             if (pawn?.health?.hediffSet == null)
+            {
                 return Enumerable.Empty<BodyPartRecord>();
+            }
 
             // Get common ancestors to avoid redundant restoration
             // (restoring a leg automatically restores foot, toes, etc.)

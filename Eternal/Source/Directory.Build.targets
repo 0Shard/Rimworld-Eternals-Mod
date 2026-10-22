@@ -1,0 +1,42 @@
+<!-- Author: 0Shard. Private quality evidence from the same reference items passed to Csc. -->
+<Project>
+  <PropertyGroup>
+    <_EternalCanonicalSharedTarget>$([MSBuild]::NormalizePath('$(MSBuildProjectDirectory)', '..', '1.6', 'Assemblies', 'net472', 'Eternal.dll'))</_EternalCanonicalSharedTarget>
+  </PropertyGroup>
+  <!-- The source mod's explicit 1.7 load folder shares the normal 1.6 build.
+       Scratch OutputPath builds must remain entirely in their selected directory. -->
+  <Target Name="EternalMirrorSharedGameAssembly" AfterTargets="Build"
+          Condition="'$(MSBuildProjectName)' == 'Eternal' and '$(TargetPath)' == '$(_EternalCanonicalSharedTarget)'">
+    <PropertyGroup>
+      <_EternalSharedOutputDirectory>$([MSBuild]::NormalizePath('$(MSBuildProjectDirectory)', '..', '1.7', 'Assemblies', 'net472'))</_EternalSharedOutputDirectory>
+      <_EternalSharedPdb>$(TargetDir)$(TargetName).pdb</_EternalSharedPdb>
+    </PropertyGroup>
+    <Copy SourceFiles="$(TargetPath)" DestinationFiles="$(_EternalSharedOutputDirectory)/Eternal.dll"
+          SkipUnchangedFiles="true" />
+    <Copy SourceFiles="$(_EternalSharedPdb)" DestinationFiles="$(_EternalSharedOutputDirectory)/Eternal.pdb"
+          Condition="Exists('$(_EternalSharedPdb)')" SkipUnchangedFiles="true" />
+    <Delete Files="$(_EternalSharedOutputDirectory)/Eternal.pdb"
+            Condition="!Exists('$(_EternalSharedPdb)')" />
+  </Target>
+  <Target Name="EternalCaptureCompileReferences" AfterTargets="FindReferenceAssembliesForReferences"
+          Condition="'$(EternalQualityReferenceDirectory)' != '' and '$(MSBuildProjectName)' == 'Eternal'">
+    <WriteLinesToFile File="$(EternalQualityReferenceDirectory)/$(Configuration)-references.txt"
+      Lines="@(ReferencePathWithRefAssemblies->'%(FullPath)|%(FusionName)|%(NuGetPackageId)|%(NuGetPackageVersion)')"
+      Overwrite="true" Encoding="UTF-8" />
+    <!-- FusionName can be empty for framework facades. Ask the SDK for every
+         assembly identity in the same order as the actual compiler items. -->
+    <GetAssemblyIdentity AssemblyFiles="@(ReferencePathWithRefAssemblies)">
+      <Output TaskParameter="Assemblies" ItemName="_EternalQualityReferenceIdentities" />
+    </GetAssemblyIdentity>
+    <WriteLinesToFile File="$(EternalQualityReferenceDirectory)/$(Configuration)-reference-identities.txt"
+      Lines="@(_EternalQualityReferenceIdentities->'%(Identity)')" Overwrite="true" Encoding="UTF-8" />
+  </Target>
+  <Target Name="EternalCaptureArtifactIdentity" AfterTargets="Build"
+          Condition="'$(EternalQualityReferenceDirectory)' != '' and '$(MSBuildProjectName)' == 'Eternal'">
+    <GetAssemblyIdentity AssemblyFiles="$(TargetPath)">
+      <Output TaskParameter="Assemblies" ItemName="_EternalQualityArtifactIdentity" />
+    </GetAssemblyIdentity>
+    <WriteLinesToFile File="$(EternalQualityReferenceDirectory)/$(Configuration)-artifact.txt"
+      Lines="@(_EternalQualityArtifactIdentity->'%(Identity)')" Overwrite="true" Encoding="UTF-8" />
+  </Target>
+</Project>

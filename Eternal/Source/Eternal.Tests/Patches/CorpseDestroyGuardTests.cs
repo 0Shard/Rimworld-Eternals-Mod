@@ -33,19 +33,27 @@ namespace Eternal.Tests.Patches
         public void PassesThrough_InAllOtherFifteenCells()
         {
             foreach (bool isTrackedCurrentCorpse in new[] { false, true })
-            foreach (bool spawned in new[] { false, true })
-            foreach (bool isVanishMode in new[] { false, true })
-            foreach (bool expectedDestruction in new[] { false, true })
             {
-                bool isGuardedCell = isTrackedCurrentCorpse && !spawned && isVanishMode && !expectedDestruction;
-                if (isGuardedCell)
-                    continue;
+                foreach (bool spawned in new[] { false, true })
+                {
+                    foreach (bool isVanishMode in new[] { false, true })
+                    {
+                        foreach (bool expectedDestruction in new[] { false, true })
+                        {
+                            bool isGuardedCell = isTrackedCurrentCorpse && !spawned && isVanishMode && !expectedDestruction;
+                            if (isGuardedCell)
+                            {
+                                continue;
+                            }
 
-                Assert.False(
+                            Assert.False(
                     Corpse_Destroy_Patch.ShouldRescueFromDestroy(
                         isTrackedCurrentCorpse, spawned, isVanishMode, expectedDestruction),
                     $"Guard must pass through for tracked={isTrackedCurrentCorpse}, spawned={spawned}, " +
                     $"vanish={isVanishMode}, expected={expectedDestruction}");
+                        }
+                    }
+                }
             }
         }
     }

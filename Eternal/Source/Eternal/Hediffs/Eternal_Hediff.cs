@@ -23,7 +23,6 @@ using Eternal.Healing;
 using Eternal.Utils;
 using Eternal.Exceptions;
 using Eternal.Models;
-using Eternal.Resources;
 using Eternal.UI;
 
 namespace Eternal
@@ -54,7 +53,9 @@ namespace Eternal
                 // Dead pawns skip the consciousness buff entirely — corpses have no need for it
                 // and bypassing here also prevents null pawn crashes during the death sequence.
                 if (pawn == null || pawn.Dead)
+                {
                     return base.CurStage;
+                }
 
                 bool buffEnabled = Eternal_Mod.settings?.consciousnessBuffEnabled
                     ?? SettingsDefaults.ConsciousnessBuffEnabled;
@@ -64,7 +65,9 @@ namespace Eternal
                 // Floor enforced here even though the UI slider is already clamped — defence-in-depth
                 // against programmatic writes that bypass the slider range check.
                 if (multiplier < 1.0f)
+                {
                     multiplier = 1.0f;
+                }
 
                 // Float == is safe here: the slider moves in 0.5-step increments (Mathf.Round(x * 2f) / 2f),
                 // so the stored value is always one of a discrete set and never drifts via floating point ops.
@@ -109,7 +112,9 @@ namespace Eternal
 
                 // Only show buff status for living pawns — dead pawns don't have the buff active
                 if (pawn == null || pawn.Dead)
+                {
                     return baseText;
+                }
 
                 bool buffEnabled = Eternal_Mod.settings?.consciousnessBuffEnabled
                     ?? SettingsDefaults.ConsciousnessBuffEnabled;
@@ -170,7 +175,7 @@ namespace Eternal
             catch (EternalValidationException ex)
             {
                 EternalLogger.LogException(ex);
-                throw ex; // Re-throw validation exceptions
+                throw; // Preserve the original validation stack after logging.
             }
             catch (Exception ex)
             {
@@ -178,7 +183,7 @@ namespace Eternal
                 throw new EternalException("Failed to add Eternal Essence hediff", operation, ex) { Pawn = pawn };
             }
         }
-         
+
         /// <summary>
         /// Called when hediff is removed from a pawn.
         /// </summary>
@@ -226,7 +231,7 @@ namespace Eternal
             catch (EternalValidationException ex)
             {
                 EternalLogger.LogException(ex);
-                throw ex; // Re-throw validation exceptions
+                throw; // Preserve the original validation stack after logging.
             }
             catch (Exception ex)
             {
@@ -350,7 +355,7 @@ namespace Eternal
         public override void Tick()
         {
             const string operation = "Tick";
-            
+
             try
             {
                 // Validate pawn state before proceeding
@@ -364,7 +369,7 @@ namespace Eternal
                     EternalLogger.Warning("Tick called with null pawn, skipping processing", operation);
                     return;
                 }
-                
+
                 // Ensure pawn still has Eternal trait with safe navigation
                 // Use HasTraitIgnoringSuppression to handle Biotech gene trait suppression
                 if (pawn.story?.traits != null)
@@ -373,7 +378,7 @@ namespace Eternal
                     {
                         // Remove hediff if trait is no longer present
                         EternalLogger.Debug($"Removing Eternal Essence from {pawn.Name} - trait no longer present", operation, pawn);
-                        
+
                         if (pawn.health?.hediffSet != null)
                         {
                             pawn.health.RemoveHediff(this);
@@ -404,7 +409,7 @@ namespace Eternal
                 // Don't re-throw exceptions in Tick to avoid breaking game loop
             }
         }
-         
+
         /// <summary>
         /// Gets the severity label for the hediff with healing system information.
         /// </summary>

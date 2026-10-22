@@ -7,7 +7,6 @@
 //              Legacy nutritionCost input is handled and discarded by the v1 migrator.
 
 using System.Collections.Generic;
-using UnityEngine;
 using Verse;
 
 namespace Eternal.Settings
@@ -42,6 +41,9 @@ namespace Eternal.Settings
         /// </summary>
         public bool noThreshold = SettingsDefaults.HediffNoThreshold;
 
+        public float nutritionCostMultiplier = SettingsDefaults.HediffNutritionCostMultiplier;
+        public float nutritionSeverityRangeOverride = SettingsDefaults.HediffNutritionSeverityRangeOverride;
+
         public HediffSettingSlim()
         {
         }
@@ -55,6 +57,8 @@ namespace Eternal.Settings
             canHeal = fullSetting.canHeal;
             healingRate = fullSetting.healingRate;
             noThreshold = fullSetting.noThreshold;
+            nutritionCostMultiplier = fullSetting.nutritionCostMultiplier;
+            nutritionSeverityRangeOverride = fullSetting.nutritionSeverityRangeOverride;
         }
 
         /// <summary>
@@ -65,6 +69,8 @@ namespace Eternal.Settings
             fullSetting.canHeal = canHeal;
             fullSetting.healingRate = healingRate;
             fullSetting.noThreshold = noThreshold;
+            fullSetting.nutritionCostMultiplier = SettingsDefaults.NormalizeNutritionMultiplier(nutritionCostMultiplier);
+            fullSetting.nutritionSeverityRangeOverride = SettingsDefaults.NormalizeNutritionRange(nutritionSeverityRangeOverride);
         }
 
         public bool HasCustomHealingRate => healingRate != USE_GLOBAL_RATE;
@@ -74,21 +80,18 @@ namespace Eternal.Settings
         /// </summary>
         public bool Validate(List<string> warnings)
         {
-            if (healingRate == USE_GLOBAL_RATE)
-                return false;
-
-            float clamped = Mathf.Clamp(
-                healingRate,
-                SettingsDefaults.HediffHealingRateMin,
-                SettingsDefaults.HediffHealingRateMax);
-            if (clamped == healingRate)
-                return false;
-
-            warnings?.Add(
-                $"'{defName}'.healingRate: {healingRate} clamped to {clamped} " +
-                $"(valid: {SettingsDefaults.HediffHealingRateMin}-{SettingsDefaults.HediffHealingRateMax})");
-            healingRate = clamped;
-            return true;
+            float rate = healingRate == USE_GLOBAL_RATE ? healingRate : SettingsDefaults.NormalizePersistedHediffRate(healingRate);
+            float multiplier = SettingsDefaults.NormalizeNutritionMultiplier(nutritionCostMultiplier);
+            float range = SettingsDefaults.NormalizeNutritionRange(nutritionSeverityRangeOverride);
+            bool changed = rate != healingRate || multiplier != nutritionCostMultiplier || range != nutritionSeverityRangeOverride;
+            if (changed)
+            {
+                warnings?.Add($"{defName}: invalid rate or nutrition override normalized");
+            }
+            healingRate = rate;
+            nutritionCostMultiplier = multiplier;
+            nutritionSeverityRangeOverride = range;
+            return changed;
         }
 
         /// <summary>
@@ -100,6 +103,8 @@ namespace Eternal.Settings
             Scribe_Values.Look(ref canHeal, "canHeal", SettingsDefaults.HediffCanHeal);
             Scribe_Values.Look(ref healingRate, "healingRate", SettingsDefaults.HediffHealingRateUseGlobal);
             Scribe_Values.Look(ref noThreshold, "noThreshold", SettingsDefaults.HediffNoThreshold);
+            Scribe_Values.Look(ref nutritionCostMultiplier, "nutritionCostMultiplier", SettingsDefaults.HediffNutritionCostMultiplier);
+            Scribe_Values.Look(ref nutritionSeverityRangeOverride, "nutritionSeverityRangeOverride", SettingsDefaults.HediffNutritionSeverityRangeOverride);
         }
 
         public override string ToString()

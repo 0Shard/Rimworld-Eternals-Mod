@@ -41,11 +41,15 @@ namespace Eternal.Extensions
         public static bool IsValidEternal(this Pawn pawn)
         {
             if (pawn == null || pawn.Destroyed || pawn.health?.hediffSet == null)
+            {
                 return false;
+            }
 
             // Check hediff first (most reliable - not subject to gene suppression)
             if (pawn.health.hediffSet.HasHediff(EternalDefOf.Eternal_Essence))
+            {
                 return true;
+            }
 
             // Fallback: Check trait exists, ignoring suppression
             return pawn.HasTraitIgnoringSuppression(EternalDefOf.Eternal_GeneticMarker);
@@ -60,7 +64,10 @@ namespace Eternal.Extensions
         /// </summary>
         public static bool IsValidEternalCorpse(this Pawn pawn)
         {
-            if (pawn == null) return false;
+            if (pawn == null)
+            {
+                return false;
+            }
 
             // NOTE: We intentionally do NOT check pawn.Destroyed here.
             // When Notify_PawnDied() is called, the pawn is already marked Destroyed
@@ -69,7 +76,9 @@ namespace Eternal.Extensions
 
             // Check hediff first (most reliable - not subject to gene suppression)
             if (pawn.health?.hediffSet?.HasHediff(EternalDefOf.Eternal_Essence) == true)
+            {
                 return true;
+            }
 
             // DefOf null safety - catch binding failures early
             if (EternalDefOf.Eternal_GeneticMarker == null)
@@ -88,11 +97,17 @@ namespace Eternal.Extensions
         /// </summary>
         public static bool HasTraitIgnoringSuppression(this Pawn pawn, TraitDef traitDef)
         {
-            if (pawn?.story?.traits?.allTraits == null) return false;
+            if (pawn?.story?.traits?.allTraits == null)
+            {
+                return false;
+            }
 
             foreach (var trait in pawn.story.traits.allTraits)
             {
-                if (trait.def == traitDef) return true;
+                if (trait.def == traitDef)
+                {
+                    return true;
+                }
             }
             return false;
         }
@@ -109,33 +124,47 @@ namespace Eternal.Extensions
         public static bool HasFoodNeedDisabled(this Pawn pawn)
         {
             if (pawn == null)
+            {
                 return true;
+            }
 
             // Living pawns with needs tracker: use RimWorld's existing logic
             if (!pawn.Dead && pawn.needs != null)
+            {
                 return pawn.needs.food == null;
+            }
 
             // Dead pawns or no needs tracker: check underlying conditions
 
             // Race doesn't eat food (mechanoids, etc.)
             if (pawn.RaceProps != null && !pawn.RaceProps.EatsFood)
+            {
                 return true;
+            }
 
             // Hediff disables food need
             if (pawn.health?.hediffSet?.DisablesNeed(NeedDefOf.Food) == true)
+            {
                 return true;
+            }
 
             // Gene disables food need (Biotech DLC)
             if (ModsConfig.BiotechActive && pawn.genes?.DisablesNeed(NeedDefOf.Food) == true)
+            {
                 return true;
+            }
 
             // Trait disables food need
             if (pawn.story?.traits?.DisablesNeed(NeedDefOf.Food) == true)
+            {
                 return true;
+            }
 
             // Ideology disables food need (Ideology DLC)
             if (ModsConfig.IdeologyActive && pawn.Ideo?.DisablesNeed(NeedDefOf.Food) == true)
+            {
                 return true;
+            }
 
             return false;
         }
@@ -150,7 +179,9 @@ namespace Eternal.Extensions
         public static IEnumerable<Pawn> GetAllEternalPawns(this MapType map)
         {
             if (map?.mapPawns?.AllPawns == null)
+            {
                 return Enumerable.Empty<Pawn>();
+            }
 
             return map.mapPawns.AllPawns.Where(p => p.IsValidEternal());
         }
@@ -164,7 +195,9 @@ namespace Eternal.Extensions
             // Guard against early initialization when game isn't loaded yet
             // Current.Game is null during component construction; Find.Maps would throw
             if (Current.Game == null || Find.Maps == null)
+            {
                 return Enumerable.Empty<Pawn>();
+            }
 
             return Find.Maps.SelectMany(m => m.GetAllEternalPawns());
         }
@@ -218,7 +251,21 @@ namespace Eternal.Extensions
             // This prevents stale cache issues where pawns die at tick 0
             if (_cachedEternals == null || currentTick != _cacheTickStamp || currentTick == 0)
             {
-                _cachedEternals = GetAllEternalPawnsAllMaps().ToList();
+                var pawns = new HashSet<Pawn>(GetAllEternalPawnsAllMaps());
+                if (Current.Game != null && Find.WorldObjects != null)
+                {
+                    foreach (var caravan in Find.WorldObjects.Caravans)
+                    {
+                        foreach (var pawn in caravan.PawnsListForReading)
+                        {
+                            if (pawn.IsValidEternal() && !pawn.Dead)
+                            {
+                                pawns.Add(pawn);
+                            }
+                        }
+                    }
+                }
+                _cachedEternals = pawns.ToList();
                 _cachedLivingEternals = _cachedEternals.Where(p => !p.Dead).ToList();
                 _cacheTickStamp = currentTick;
             }

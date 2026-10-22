@@ -9,7 +9,6 @@
 
 using System.Collections.Generic;
 using System.Linq;
-using RimWorld;
 using Verse;
 
 namespace Eternal.Settings
@@ -23,6 +22,10 @@ namespace Eternal.Settings
         private Dictionary<string, EternalHediffSetting> settings = new Dictionary<string, EternalHediffSetting>();
         private Dictionary<string, EternalHediffSetting> savedSettings = new Dictionary<string, EternalHediffSetting>();
         private bool isInitialized = false;
+        public HediffSettingsLoadOutcome XmlLoadOutcome { get; private set; } = HediffSettingsLoadOutcome.Missing;
+
+        public EternalHediffSetting GetExisting(string defName)
+            => defName != null && settings.TryGetValue(defName, out var value) ? value : null;
 
         /// <summary>
         /// Gets a setting by hediff def name.
@@ -32,7 +35,9 @@ namespace Eternal.Settings
             EnsureInitialized();
 
             if (settings.TryGetValue(defName, out var setting))
+            {
                 return setting;
+            }
 
             return null;
         }
@@ -43,7 +48,9 @@ namespace Eternal.Settings
         public EternalHediffSetting GetOrCreate(HediffDef hediffDef)
         {
             if (hediffDef == null)
+            {
                 return null;
+            }
 
             EnsureInitialized();
 
@@ -117,7 +124,9 @@ namespace Eternal.Settings
             foreach (var hediffDef in DefDatabase<HediffDef>.AllDefs)
             {
                 if (hediffDef == null || ShouldExcludeHediff(hediffDef))
+                {
                     continue;
+                }
 
                 var setting = GetOrCreate(hediffDef);
                 yield return new KeyValuePair<string, EternalHediffSetting>(hediffDef.defName, setting);
@@ -194,17 +203,21 @@ namespace Eternal.Settings
         /// </summary>
         public void SaveToXml()
         {
-            var slimSettings = new Dictionary<string, HediffSettingSlim>();
-
-            foreach (var kvp in settings)
+            if (XmlLoadOutcome == HediffSettingsLoadOutcome.Rejected)
             {
-                if (kvp.Value != null && kvp.Value.HasCustomSettings())
-                {
-                    slimSettings[kvp.Key] = new HediffSettingSlim(kvp.Key, kvp.Value);
-                }
+                Log.Warning("[Eternal] Rejected hediff settings source remains protected; reload a valid file or explicitly Reset All to replace it.");
+                return;
             }
+            var slimSettings = GetCustomizedSettings().ToDictionary(
+                kvp => kvp.Key, kvp => new HediffSettingSlim(kvp.Key, kvp.Value));
 
             HediffSettingsXmlStore.Save(slimSettings);
+        }
+
+        private IEnumerable<KeyValuePair<string, EternalHediffSetting>> GetCustomizedSettings()
+        {
+            return settings.Where(kvp => kvp.Value != null && HediffPersistencePolicy.ShouldPersistSetting(
+                DefDatabase<HediffDef>.GetNamedSilentFail(kvp.Key) != null, kvp.Value.HasCustomSettings()));
         }
 
         /// <summary>
@@ -212,7 +225,13 @@ namespace Eternal.Settings
         /// </summary>
         public void LoadFromXml()
         {
-            var slimSettings = HediffSettingsXmlStore.Load();
+            var load = HediffSettingsXmlStore.Load();
+            XmlLoadOutcome = load.Outcome;
+            if (load.Outcome == HediffSettingsLoadOutcome.Rejected)
+            {
+                return;
+            }
+            var slimSettings = load.Settings;
 
             foreach (var kvp in slimSettings)
             {
@@ -245,8 +264,23 @@ namespace Eternal.Settings
         /// </summary>
         public void ResetAllAndDeleteXml()
         {
+            // Reset is an explicit recovery choice. Never destroy rejected user bytes if
+            // the durable recovery copy cannot be created.
+            if (XmlLoadOutcome == HediffSettingsLoadOutcome.Rejected && !HediffSettingsXmlStore.BackupRejectedSource())
+            {
+                return;
+            }
+            EnsureInitialized();
+            // An absent definition has no authoritative reset default. Explicit reset
+            // removes that override; ordinary saves still retain unresolved choices.
+            foreach (string name in settings.Keys.Where(name => DefDatabase<HediffDef>.GetNamedSilentFail(name) == null).ToList())
+            {
+                settings.Remove(name);
+            }
+            savedSettings.Clear();
             ResetAll();
             HediffSettingsXmlStore.Delete();
+            XmlLoadOutcome = HediffSettingsLoadOutcome.Missing;
             Log.Message("[Eternal] Reset all hediff settings to defaults and deleted XML file");
         }
 
@@ -298,10 +332,14 @@ namespace Eternal.Settings
         private void Initialize()
         {
             if (settings == null)
+            {
                 settings = new Dictionary<string, EternalHediffSetting>();
+            }
 
             if (savedSettings == null)
+            {
                 savedSettings = new Dictionary<string, EternalHediffSetting>();
+            }
 
             // Load saved settings
             foreach (var kvp in savedSettings)
@@ -333,7 +371,9 @@ namespace Eternal.Settings
         private bool ShouldExcludeHediff(HediffDef hediffDef)
         {
             if (hediffDef == null)
+            {
                 return true;
+            }
 
             string defName = hediffDef.defName;
 
@@ -341,12 +381,16 @@ namespace Eternal.Settings
             // NOTE: Removed AA_ (Alpha Animals), zzz_/ZZZ_ (may be legitimate), Abstract (may be real hediffs)
             if (defName.StartsWith("DEBUG_") || defName.StartsWith("Test_") ||
                 defName.StartsWith("___"))
+            {
                 return true;
+            }
 
             // Only exclude explicit debug/test suffixes
             if (defName.EndsWith("_Debug") || defName.EndsWith("_Test") ||
                 defName.EndsWith("_Dummy"))
+            {
                 return true;
+            }
 
             return false;
         }
@@ -360,22 +404,8 @@ namespace Eternal.Settings
 
             if (Scribe.mode == LoadSaveMode.Saving)
             {
-                if (savedSettings == null)
-                    savedSettings = new Dictionary<string, EternalHediffSetting>();
-                else
-                    savedSettings.Clear();
-
-                // Only save customized settings
-                if (settings != null)
-                {
-                    foreach (var kvp in settings)
-                    {
-                        if (kvp.Value != null && kvp.Value.HasCustomSettings())
-                        {
-                            savedSettings[kvp.Key] = kvp.Value;
-                        }
-                    }
-                }
+                // Keep full record references for callers using the legacy Scribe route.
+                savedSettings = GetCustomizedSettings().ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
             }
 
             Scribe_Collections.Look(ref savedSettings, "hediffSettingsSave", LookMode.Value, LookMode.Deep);
@@ -383,12 +413,23 @@ namespace Eternal.Settings
             if (Scribe.mode == LoadSaveMode.LoadingVars)
             {
                 if (settings == null)
+                {
                     settings = new Dictionary<string, EternalHediffSetting>();
+                }
+
                 if (savedSettings == null)
+                {
                     savedSettings = new Dictionary<string, EternalHediffSetting>();
+                }
 
                 isInitialized = false;
             }
         }
+    }
+
+    internal static class HediffPersistencePolicy
+    {
+        internal static bool ShouldPersistSetting(bool definitionResolved, bool hasCustomSettings)
+            => !definitionResolved || hasCustomSettings;
     }
 }

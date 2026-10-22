@@ -108,18 +108,20 @@ namespace Eternal.Compatibility
             _sos2Present = sos2ModActive;
 
             if (!sos2ModActive)
+            {
                 return;
+            }
 
             try
             {
                 _worldObjectOrbitingShipType = _typeResolver("SaveOurShip2.WorldObjectOrbitingShip");
-                _shipMapCompType             = _typeResolver("SaveOurShip2.ShipMapComp");
-                _shipMapStateType            = _typeResolver("SaveOurShip2.ShipMapState");
+                _shipMapCompType = _typeResolver("SaveOurShip2.ShipMapComp");
+                _shipMapStateType = _typeResolver("SaveOurShip2.ShipMapState");
 
                 if (_shipMapCompType == null || _shipMapStateType == null)
                 {
                     Log.Warning("[Eternal] SOS2 detected but ShipMapComp/ShipMapState types not found — " +
-                                "reflection cache incomplete. IsShipBurningUp/IsShipDestroyed will return false.");
+                                "reflection cache incomplete. IsShipBurningUp will return false.");
                     return;
                 }
 
@@ -133,13 +135,15 @@ namespace Eternal.Compatibility
                         .FirstOrDefault(n => n.Equals("burnUpSet", StringComparison.OrdinalIgnoreCase));
 
                     if (burnUpName != null)
+                    {
                         _burnUpSetValue = Enum.Parse(_shipMapStateType, burnUpName);
+                    }
                 }
 
                 if (_shipMapStateField == null || _burnUpSetValue == null)
                 {
                     Log.Warning("[Eternal] SOS2 reflection cache incomplete — ShipMapState field or burnUpSet " +
-                                "value could not be resolved. IsShipBurningUp/IsShipDestroyed will return false.");
+                                "value could not be resolved. IsShipBurningUp will return false.");
                 }
                 else if (Eternal_Mod.settings?.debugMode == true)
                 {
@@ -175,22 +179,30 @@ namespace Eternal.Compatibility
         public BoolLookupResult IsShipBurningUp(MapParent orbitingShip)
         {
             if (!_sos2Present)
+            {
                 return BoolLookupResult.ModNotPresent();
+            }
 
             if (_shipMapStateField == null || _burnUpSetValue == null || orbitingShip == null)
+            {
                 return BoolLookupResult.ReflectionFailed();
+            }
 
             try
             {
                 var map = orbitingShip.Map;
                 if (map == null)
+                {
                     return BoolLookupResult.SuccessFalse();
+                }
 
                 // Access ShipMapComp from map.components — cannot use GetComponent<T>() without a
                 // compile-time reference to the SOS2 type (standard RimWorld mod-interop pattern).
                 var comp = map.components?.FirstOrDefault(c => _shipMapCompType.IsInstanceOfType(c));
                 if (comp == null)
+                {
                     return BoolLookupResult.ReflectionFailed();
+                }
 
                 var currentState = _shipMapStateField.GetValue(comp);
                 return currentState != null && currentState.Equals(_burnUpSetValue)
@@ -206,43 +218,6 @@ namespace Eternal.Compatibility
         }
 
         /// <summary>
-        /// Returns a tri-state result for whether the ship map has entered the terminal
-        /// <c>burnUpSet</c> state (same detection as <see cref="IsShipBurningUp"/> — in SOS2,
-        /// all destruction paths — combat loss, re-entry, manual abandon — converge on
-        /// <c>ShipMapComp.ShipMapState == burnUpSet</c>).
-        ///
-        /// <para>Takes <c>Map</c> directly (matching the original
-        /// <c>SpaceModDetection.IsShipDestroyed(Map)</c> signature).</para>
-        /// </summary>
-        /// <param name="map">The ship map to inspect.</param>
-        public BoolLookupResult IsShipDestroyed(Verse.Map map)
-        {
-            if (!_sos2Present)
-                return BoolLookupResult.ModNotPresent();
-
-            if (_shipMapStateField == null || _burnUpSetValue == null || map == null)
-                return BoolLookupResult.ReflectionFailed();
-
-            try
-            {
-                var comp = map.components?.FirstOrDefault(c => _shipMapCompType.IsInstanceOfType(c));
-                if (comp == null)
-                    return BoolLookupResult.ReflectionFailed();
-
-                var currentState = _shipMapStateField.GetValue(comp);
-                return currentState != null && currentState.Equals(_burnUpSetValue)
-                    ? BoolLookupResult.SuccessTrue()
-                    : BoolLookupResult.SuccessFalse();
-            }
-            catch (Exception ex)
-            {
-                EternalLogger.HandleException(EternalExceptionCategory.CompatibilityFailure,
-                    "SOS2ReflectionCache.IsShipDestroyed", null, ex);
-                return BoolLookupResult.ReflectionFailed();
-            }
-        }
-
-        /// <summary>
         /// Returns true if <paramref name="mapParent"/> is an instance of
         /// <c>SaveOurShip2.WorldObjectOrbitingShip</c>.
         /// Returns false if SOS2 is not loaded, the type was not resolved, or mapParent is null.
@@ -250,7 +225,9 @@ namespace Eternal.Compatibility
         public bool IsOrbitingShip(MapParent mapParent)
         {
             if (!_sos2Present || _worldObjectOrbitingShipType == null || mapParent == null)
+            {
                 return false;
+            }
 
             return _worldObjectOrbitingShipType.IsInstanceOfType(mapParent);
         }

@@ -20,14 +20,18 @@ namespace Eternal.Healing.Scars
             var scars = new List<Hediff>();
 
             if (pawn?.health?.hediffSet == null)
+            {
                 return scars;
+            }
 
             foreach (var hediff in pawn.health.hediffSet.hediffs)
             {
                 if (hediff == null || hediff.def == EternalDefOf.Eternal_Essence)
+                {
                     continue;
+                }
 
-                if (HediffUtility.IsPermanent(hediff) || IsScarHediff(hediff))
+                if (HediffHealingConfig.CanHealScar(hediff))
                 {
                     scars.Add(hediff);
                 }
@@ -40,30 +44,7 @@ namespace Eternal.Healing.Scars
         /// Checks if a hediff is considered a scar for healing purposes.
         /// </summary>
         public static bool IsScarHediff(Hediff hediff)
-        {
-            if (hediff == null)
-                return false;
-
-            string defName = hediff.def.defName.ToLower();
-
-            // Check for common scar hediffs
-            if (defName.Contains("scar") || defName.Contains("permanent"))
-                return true;
-
-            // Check for old wounds and injuries
-            if (defName.Contains("old") && defName.Contains("wound"))
-                return true;
-
-            // Check for chronic pain and nerve damage
-            if (defName.Contains("chronic") || defName.Contains("nerve"))
-                return true;
-
-            // Check for missing body parts (permanent injuries)
-            if (hediff is Hediff_MissingPart)
-                return true;
-
-            return false;
-        }
+            => HediffHealingConfig.AllowsGenericHealing(hediff) && hediff.IsPermanentInjuryScar();
 
         /// <summary>
         /// Checks if a hediff is a high-severity scar.
@@ -87,24 +68,36 @@ namespace Eternal.Healing.Scars
         public static string GetScarCategory(Hediff hediff)
         {
             if (hediff == null)
+            {
                 return "Unknown";
+            }
 
             if (hediff is Hediff_MissingPart)
+            {
                 return "Missing Part";
+            }
 
             string defName = hediff.def.defName.ToLower();
 
             if (defName.Contains("scar"))
+            {
                 return "Scar";
+            }
 
             if (defName.Contains("chronic"))
+            {
                 return "Chronic Condition";
+            }
 
             if (defName.Contains("nerve"))
+            {
                 return "Nerve Damage";
+            }
 
             if (HediffUtility.IsPermanent(hediff))
+            {
                 return "Permanent Injury";
+            }
 
             return "Other";
         }

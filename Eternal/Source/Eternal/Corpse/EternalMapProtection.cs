@@ -1,7 +1,8 @@
 /*
  * Relative Path: Eternal/Source/Eternal/Corpse/EternalMapProtection.cs
  * Creation Date: 09-11-2025
- * Last Edit: 16-07-2026
+ * Last Edit: 13-10-2026
+ *              Ground removals recover before native teardown; late ground callbacks only retire protection.
  *              05-02: HandleMapRemoval() event-driven rescue hook called from EternalMapManager.MapRemoved() (PERF-07).
  *              Gate 1: Pending teleport state is explicitly wired through Eternal_Component and
  *                       every relocation commits through EternalCorpseManager.
@@ -19,10 +20,12 @@ using Verse;
 using RimWorld;
 using Eternal.DI;
 using Eternal.Exceptions;
-using Eternal.UI;
 using Eternal.Utils;
-using Eternal.Models;
 using Eternal.Utilities;
+using Eternal.Compatibility;
+using Eternal.World;
+using Eternal.Extensions;
+using RimWorld.Planet;
 using MapType = Verse.Map;
 
 // Type alias for backwards compatibility
@@ -32,7 +35,7 @@ namespace Eternal.Corpse
 {
     /// <summary>
     /// Prevents destruction of temporary maps containing Eternal corpses.
-    /// Provides multiple strategies for handling Eternal corpses on temporary maps.
+    /// Schedules delayed corpse teleportation to the player home map.
     /// </summary>
     public class EternalMapProtection
     {
@@ -63,10 +66,7 @@ namespace Eternal.Corpse
         /// </summary>
         public enum MapProtectionStrategy
         {
-            TeleportToHome,     // Teleport corpses to home map
-            BlockDestruction,   // Prevent map destruction entirely
-            TransferToNearest,  // Transfer to nearest permanent map
-            AskPlayer          // Ask player what to do
+            TeleportToHome = 0
         }
 
         /// <summary>
@@ -92,27 +92,260 @@ namespace Eternal.Corpse
         // Pending teleportation queue for delayed corpse transfers
         private List<PendingTeleport> pendingTeleports = new List<PendingTeleport>();
 
+        // Removal entrypoints nest (Site.Destroy -> WorldObject.Destroy -> Remove -> Game).
+        // Keep their destinations excluded until the outermost native call finishes.
+        private readonly Dictionary<MapType, int> removingMaps = new Dictionary<MapType, int>();
+        private readonly HashSet<MapType> preparingRemoval = new HashSet<MapType>();
+        private readonly Dictionary<WorldObject_EternalCrashSite, int> removingSites = new Dictionary<WorldObject_EternalCrashSite, int>();
+        private readonly HashSet<WorldObject_EternalCrashSite> preparingSiteRemoval = new HashSet<WorldObject_EternalCrashSite>();
+
+        public static bool IsGroundMap(MapType map)
+        {
+            return map != null && !(map.Parent is SpaceMapParent)
+                && !SpaceModDetection.IsOrbitingShip(map.Parent);
+        }
+
+        public bool IsRemovalInProgress(MapType map)
+        {
+            return map != null && removingMaps.ContainsKey(map);
+        }
+
+        public bool BeginRecoverySiteRemoval(WorldObject_EternalCrashSite site)
+        {
+            removingSites.TryGetValue(site, out int depth);
+            removingSites[site] = depth + 1;
+            if (!preparingSiteRemoval.Add(site))
+            {
+                return false;
+            }
+
+            try
+            {
+                var manager = EternalServiceContainer.Instance?.CorpseManager;
+                if (manager == null)
+                {
+                    return !site.PendingCorpsesForRecovery().Any(corpse => corpse.InnerPawn.IsValidEternalCorpse());
+                }
+
+                bool recovered = true;
+                foreach (var corpse in site.PendingCorpsesForRecovery())
+                {
+                    var entry = manager.GetCorpseData(corpse.InnerPawn);
+                    if (entry?.Corpse != corpse)
+                    {
+                        // Solo death stages the real corpse before Notify_PawnDied registers
+                        // it. Keep the persistent owner through that synchronous gap; do not
+                        // synthesize a queue or treat a mismatched registration as acceptance.
+                        if (corpse.InnerPawn.IsValidEternalCorpse())
+                        {
+                            recovered = false;
+                        }
+
+                        continue;
+                    }
+
+                    if (TryRecoverCorpse(entry, site.HasMap ? site.Map : null, site))
+                    {
+                        site.ForgetPendingCorpse(corpse);
+                    }
+                    else
+                    {
+                        recovered = false;
+                    }
+                }
+                return recovered && !site.PendingCorpsesForRecovery().Any(corpse =>
+                    corpse.InnerPawn.IsValidEternalCorpse()
+                        || manager.GetCorpseData(corpse.InnerPawn)?.Corpse == corpse);
+            }
+            catch (Exception ex)
+            {
+                EternalLogger.HandleException(EternalExceptionCategory.MapProtection, "BeginRecoverySiteRemoval", null, ex);
+                return false;
+            }
+            finally { preparingSiteRemoval.Remove(site); }
+        }
+
+        public void EndRecoverySiteRemoval(WorldObject_EternalCrashSite site)
+        {
+            if (site == null || !removingSites.TryGetValue(site, out int depth))
+            {
+                return;
+            }
+
+            if (depth > 1)
+            {
+                removingSites[site] = depth - 1;
+            }
+            else
+            {
+                removingSites.Remove(site);
+            }
+        }
+
         /// <summary>
-        /// Event-driven corpse rescue called immediately when a map is removed.
-        /// Fires via EternalMapManager.MapRemoved() — catches all standard RimWorld map closures.
-        /// The periodic fallback in CheckAndProtectMaps() at 5000 ticks handles modded edge cases.
-        /// Each corpse rescue is independently guarded so one failure does not abort the others.
+        /// Runs before any native map or parent destruction. False cancels that entrypoint;
+        /// entries, queues and debt remain owned by their existing managers.
+        /// </summary>
+        public bool BeginMapRemoval(MapType closingMap)
+        {
+            if (!IsGroundMap(closingMap))
+            {
+                return true;
+            }
+
+            removingMaps.TryGetValue(closingMap, out int depth);
+            removingMaps[closingMap] = depth + 1;
+            // A transfer callback may re-enter removal. It must not destroy its source while
+            // ownership is between maps; the outer call will recheck every remaining entry.
+            if (!preparingRemoval.Add(closingMap))
+            {
+                return false;
+            }
+
+            try
+            {
+                return TryPrepareMapRemoval(closingMap);
+            }
+            catch (Exception ex)
+            {
+                EternalLogger.HandleException(EternalExceptionCategory.MapProtection,
+                    "BeginMapRemoval", null, ex);
+                return false;
+            }
+            finally
+            {
+                preparingRemoval.Remove(closingMap);
+            }
+        }
+
+        public void EndMapRemoval(MapType closingMap)
+        {
+            if (closingMap == null || !removingMaps.TryGetValue(closingMap, out int depth))
+            {
+                return;
+            }
+
+            if (depth > 1)
+            {
+                removingMaps[closingMap] = depth - 1;
+            }
+            else
+            {
+                removingMaps.Remove(closingMap);
+            }
+
+            // A failed transfer or another prefix cancelling removal must leave protection
+            // and scheduled work intact. The native maps collection proves committed removal.
+            if (Find.Maps != null && !Find.Maps.Contains(closingMap))
+            {
+                RemoveMapProtection(closingMap);
+            }
+        }
+
+        private bool TryPrepareMapRemoval(MapType closingMap)
+        {
+            var manager = EternalServiceContainer.Instance?.CorpseManager;
+            if (manager == null)
+            {
+                return true;
+            }
+
+            // Include held/unspawned corpses; Spawned was the late callback's loss window.
+            var entries = manager.GetAllCorpses()
+                .Where(entry => IsSourceOwnedCorpse(entry, closingMap)).ToList();
+            bool allRecovered = true;
+            foreach (var entry in entries)
+            {
+                allRecovered &= TryRecoverCorpse(entry, closingMap, closingMap.Parent as WorldObject_EternalCrashSite)
+                    && !IsSourceOwnedCorpse(entry, closingMap);
+            }
+
+            // Re-query after partial success so the failed subset keeps its source index.
+            // Require both accepted delivery and surviving ownership before native teardown.
+            return allRecovered && !manager.GetAllCorpses()
+                .Any(entry => IsSourceOwnedCorpse(entry, closingMap));
+        }
+
+        private bool TryRecoverCorpse(EternalCorpseData entry, MapType closingMap, WorldObject_EternalCrashSite closingSite)
+        {
+            var manager = EternalServiceContainer.Instance.CorpseManager;
+            bool UnavailableMap(MapType map) => map == closingMap || IsRemovalInProgress(map)
+                || map.Parent?.Destroyed == true
+                || (map.Parent is WorldObject_EternalCrashSite parent && removingSites.ContainsKey(parent));
+            foreach (var home in Find.Maps.Where(map => map.IsPlayerHome && !UnavailableMap(map)).ToList())
+            {
+                try
+                {
+                    var locations = FindValidSpawnLocations(home, 1);
+                    var location = locations.Count > 0 ? locations[0] : CellFinder.RandomEdgeCell(home);
+                    if (manager.TryRelocateCorpse(entry.OriginalPawn, home, location))
+                    {
+                        return !entry.Corpse.Destroyed && entry.Corpse.Spawned && entry.Corpse.Map == home
+                            && ReferenceEquals(manager.GetCorpseData(entry.OriginalPawn), entry);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    EternalLogger.HandleException(EternalExceptionCategory.MapProtection,
+                        "TryRecoverCorpse.Home", entry.OriginalPawn, ex);
+                }
+            }
+            // A closing unloaded site has no Map, so exclude its world object explicitly.
+            bool delivered = SpaceCrashRescueService.DeliverCorpsesToCrashSite(new[] { entry.Corpse },
+                closingSite != null ? closingSite.Tile : closingMap.Tile, UnavailableMap,
+                site => site == closingSite || site.Destroyed || removingSites.ContainsKey(site)) > 0;
+            return delivered && !entry.Corpse.Destroyed
+                && ReferenceEquals(manager.GetCorpseData(entry.OriginalPawn), entry);
+        }
+
+        private static bool IsSourceOwnedCorpse(EternalCorpseData entry, MapType source)
+        {
+            if (entry?.OriginalPawn == null || entry.Corpse == null || entry.Corpse.Destroyed)
+            {
+                return false;
+            }
+
+            if (SpaceCrashRescueService.IsDepartingGravshipCargo(entry.Corpse)) { return false; }
+            var physicalMap = entry.Corpse.MapHeld;
+            return physicalMap == source || (physicalMap == null && entry.CurrentMap == source);
+        }
+
+        /// <summary>
+        /// Late removal notification: ground recovery has already run before deinitialization.
+        /// Retains the existing space-map callback policy and retires committed ground protection.
         /// </summary>
         /// <param name="closingMap">The map being removed</param>
         public void HandleMapRemoval(MapType closingMap)
         {
             if (closingMap == null)
+            {
                 return;
+            }
+
+            if (IsGroundMap(closingMap))
+            {
+                // MapRemoved runs after deinitialization. Recovery belongs to early prefixes;
+                // this callback only retires protection for a committed native removal.
+                if (Find.Maps != null && !Find.Maps.Contains(closingMap))
+                {
+                    RemoveMapProtection(closingMap);
+                }
+                return;
+            }
 
             try
             {
                 var corpseManager = EternalServiceContainer.Instance?.CorpseManager;
                 if (corpseManager == null)
+                {
                     return;
+                }
 
                 var corpses = corpseManager.GetCorpsesOnMap(closingMap)?.ToList();
                 if (corpses == null || corpses.Count == 0)
+                {
                     return;
+                }
 
                 Verse.Map homeMap = Find.AnyPlayerHomeMap;
                 if (homeMap == null)
@@ -129,7 +362,9 @@ namespace Eternal.Corpse
                     {
                         // Idempotent guard: skip already-despawned or destroyed corpses (Pitfall 6)
                         if (entry?.Corpse == null || entry.Corpse.Destroyed || !entry.Corpse.Spawned)
+                        {
                             continue;
+                        }
 
                         string pawnName = entry.OriginalPawn?.Name?.ToStringShort ?? "Unknown";
 
@@ -224,7 +459,9 @@ namespace Eternal.Corpse
             try
             {
                 if (map == null)
+                {
                     return;
+                }
 
                 // Check if map contains Eternal corpses
                 var eternalCorpses = EternalServiceContainer.Instance.CorpseManager?.GetCorpsesOnMap(map)?.ToList() ?? new List<EternalCorpseData>();
@@ -273,16 +510,13 @@ namespace Eternal.Corpse
                     {
                         data.EternalCorpseCount = eternalCorpses.Count;
                     }
+                    ScheduleCorpseTeleport(map, eternalCorpses);
                     return;
                 }
 
-                // Determine protection strategy
-                MapProtectionStrategy strategy = DetermineProtectionStrategy();
+                ApplyMapProtection(map, eternalCorpses);
 
-                // Apply protection
-                ApplyMapProtection(map, eternalCorpses, strategy);
-
-                Log.Message($"[Eternal] Applied {strategy} protection to temporary map with {eternalCorpses.Count} Eternal corpses");
+                Log.Message($"[Eternal] Applied {MapProtectionStrategy.TeleportToHome} protection to temporary map with {eternalCorpses.Count} Eternal corpses");
             }
             catch (Exception ex)
             {
@@ -323,23 +557,11 @@ namespace Eternal.Corpse
         }
 
         /// <summary>
-        /// Determines the appropriate protection strategy for a map.
-        /// </summary>
-        /// <returns>Protection strategy to use</returns>
-        private MapProtectionStrategy DetermineProtectionStrategy()
-        {
-            // Teleport-to-home is the only strategy with a complete, reliable implementation.
-            // Keep the decision internal rather than exposing unsafe or no-op choices in settings.
-            return MapProtectionStrategy.TeleportToHome;
-        }
-
-        /// <summary>
-        /// Applies protection to a map based on the chosen strategy.
+        /// Protects a map and schedules its corpses for delayed teleportation home.
         /// </summary>
         /// <param name="map">The map to protect</param>
         /// <param name="eternalCorpses">The Eternal corpses on the map</param>
-        /// <param name="strategy">The protection strategy to use</param>
-        private void ApplyMapProtection(MapType map, List<EternalCorpseData> eternalCorpses, MapProtectionStrategy strategy)
+        private void ApplyMapProtection(MapType map, List<EternalCorpseData> eternalCorpses)
         {
             try
             {
@@ -348,7 +570,7 @@ namespace Eternal.Corpse
                     Map = map,
                     ProtectionStartTick = Find.TickManager.TicksGame,
                     EternalCorpseCount = eternalCorpses.Count,
-                    Strategy = strategy,
+                    Strategy = MapProtectionStrategy.TeleportToHome,
                     IsTemporaryMap = IsTemporaryMap(map),
                     OriginalMapPurpose = GetMapPurpose(map)
                 };
@@ -356,21 +578,7 @@ namespace Eternal.Corpse
                 this.protectionData[map] = protectionData;
                 protectedMaps.Add(map);
 
-                switch (strategy)
-                {
-                    case MapProtectionStrategy.TeleportToHome:
-                        ScheduleCorpseTeleport(map, eternalCorpses);
-                        break;
-                    case MapProtectionStrategy.BlockDestruction:
-                        BlockMapDestruction(map);
-                        break;
-                    case MapProtectionStrategy.TransferToNearest:
-                        ScheduleCorpseTransfer(map, eternalCorpses);
-                        break;
-                    case MapProtectionStrategy.AskPlayer:
-                        AskPlayerForAction(map, eternalCorpses);
-                        break;
-                }
+                ScheduleCorpseTeleport(map, eternalCorpses);
             }
             catch (Exception ex)
             {
@@ -388,6 +596,9 @@ namespace Eternal.Corpse
         {
             try
             {
+                eternalCorpses = eternalCorpses.Where(entry => entry?.Corpse != null
+                    && !pendingTeleports.Any(pending => pending.Corpse == entry.Corpse)).ToList();
+                if (eternalCorpses.Count == 0) { return; }
                 Verse.Map homeMap = Find.AnyPlayerHomeMap;
                 if (homeMap == null)
                 {
@@ -424,140 +635,6 @@ namespace Eternal.Corpse
             {
                 EternalLogger.HandleException(EternalExceptionCategory.MapProtection,
                     "ScheduleCorpseTeleport", null, ex);
-            }
-        }
-
-        /// <summary>
-        /// Blocks destruction of a map containing Eternal corpses.
-        /// </summary>
-        /// <param name="map">The map to protect</param>
-        private void BlockMapDestruction(MapType map)
-        {
-            try
-            {
-                // This is more complex and would require patching into RimWorld's map destruction system
-                // For now, we'll notify the player and log the protection
-                Log.Message($"[Eternal] Map {map} is protected from destruction due to {protectionData[map]?.EternalCorpseCount} Eternal corpses");
-
-                // Notify player
-                Messages.Message(
-                    new Message($"Map {map} cannot be destroyed because it contains Eternal corpses.",
-                    MessageTypeDefOf.NeutralEvent));
-            }
-            catch (Exception ex)
-            {
-                EternalLogger.HandleException(EternalExceptionCategory.MapProtection,
-                    "BlockMapDestruction", null, ex);
-            }
-        }
-
-        /// <summary>
-        /// Schedules transfer of corpses to nearest permanent map.
-        /// </summary>
-        /// <param name="map">The source map</param>
-        /// <param name="eternalCorpses">The corpses to transfer</param>
-        private void ScheduleCorpseTransfer(MapType map, List<EternalCorpseData> eternalCorpses)
-        {
-            try
-            {
-                Verse.Map nearestMap = FindNearestPermanentMap(map);
-                if (nearestMap == null)
-                {
-                    Log.Warning("[Eternal] No permanent map found for corpse transfer");
-                    return;
-                }
-
-                // Find valid spawn locations on nearest map
-                var spawnLocations = FindValidSpawnLocations(nearestMap, eternalCorpses.Count);
-                if (spawnLocations.Count < eternalCorpses.Count)
-                {
-                    Log.Warning($"[Eternal] Not enough spawn locations on target map. Found: {spawnLocations.Count}, Needed: {eternalCorpses.Count}");
-                }
-
-                // Schedule transfer after a delay
-                int delayTicks = 25000; // ~12 hours
-
-                for (int i = 0; i < eternalCorpses.Count && i < spawnLocations.Count; i++)
-                {
-                    var corpseData = eternalCorpses[i];
-                    var spawnLocation = spawnLocations[i];
-
-                    // Create transfer job
-                    ScheduleDelayedTransfer(corpseData, nearestMap, spawnLocation, delayTicks);
-                }
-
-                // Notify player
-                Messages.Message(
-                    new Message($"Eternal corpses will be transferred to nearest map in approximately {delayTicks / GenDate.TicksPerHour:F1} hours.",
-                    MessageTypeDefOf.NeutralEvent));
-            }
-            catch (Exception ex)
-            {
-                EternalLogger.HandleException(EternalExceptionCategory.MapProtection,
-                    "ScheduleCorpseTransfer", null, ex);
-            }
-        }
-
-        /// <summary>
-        /// Asks the player what to do with Eternal corpses on a temporary map.
-        /// </summary>
-        /// <param name="map">The map containing corpses</param>
-        /// <param name="eternalCorpses">The corpses on the map</param>
-        private void AskPlayerForAction(MapType map, List<EternalCorpseData> eternalCorpses)
-        {
-            try
-            {
-                // Create dialog asking player what to do
-                string dialogText = $"A temporary map containing {eternalCorpses.Count} Eternal corpse(s) is about to be destroyed.\n\n" +
-                                   "What would you like to do with the Eternal corpses?";
-
-                DiaNode node = new DiaNode("Eternal Corpses on Temporary Map");
-                node.text = dialogText;
-
-                // Option: Teleport to home
-                DiaOption teleportOption = new DiaOption("Teleport to Home Map");
-                teleportOption.resolveTree = true;
-                teleportOption.action = () =>
-                {
-                    ScheduleCorpseTeleport(map, eternalCorpses);
-                };
-
-                // Option: Transfer to nearest permanent map
-                DiaOption transferOption = new DiaOption("Transfer to Nearest Map");
-                transferOption.resolveTree = true;
-                transferOption.action = () =>
-                {
-                    ScheduleCorpseTransfer(map, eternalCorpses);
-                };
-
-                // Option: Block destruction
-                DiaOption blockOption = new DiaOption("Block Map Destruction");
-                blockOption.resolveTree = true;
-                blockOption.action = () =>
-                {
-                    BlockMapDestruction(map);
-                };
-
-                // Option: Do nothing (risky)
-                DiaOption riskyOption = new DiaOption("Do Nothing (Corpses May Be Lost)");
-                riskyOption.resolveTree = true;
-                riskyOption.action = () =>
-                {
-                    RemoveMapProtection(map);
-                    Log.Warning($"[Eternal] Player chose to do nothing - {eternalCorpses.Count} Eternal corpses may be lost");
-                };
-
-                node.options.Add(teleportOption);
-                node.options.Add(transferOption);
-                node.options.Add(blockOption);
-                node.options.Add(riskyOption);
-
-                Find.WindowStack.Add(new Dialog_NodeTree(node));
-            }
-            catch (Exception ex)
-            {
-                EternalLogger.HandleException(EternalExceptionCategory.MapProtection,
-                    "AskPlayerForAction", null, ex);
             }
         }
 
@@ -628,13 +705,19 @@ namespace Eternal.Corpse
         private bool IsValidSpawnLocation(MapType map, IntVec3 cell)
         {
             if (!cell.InBounds(map))
+            {
                 return false;
+            }
 
             if (!cell.Standable(map))
+            {
                 return false;
+            }
 
             if (cell.Roofed(map))
+            {
                 return false; // Prefer outdoor spawn
+            }
 
             // PERF: Avoid LINQ allocation - use direct iteration
             var pawns = map.mapPawns.AllPawnsSpawned;
@@ -703,26 +786,14 @@ namespace Eternal.Corpse
         }
 
         /// <summary>
-        /// Schedules delayed transfer of a corpse.
-        /// Uses the same underlying teleportation mechanism.
-        /// </summary>
-        /// <param name="corpseData">The corpse to transfer</param>
-        /// <param name="targetMap">The target map</param>
-        /// <param name="targetLocation">The target location</param>
-        /// <param name="delayTicks">Delay in ticks</param>
-        private void ScheduleDelayedTransfer(EternalCorpseData corpseData, Verse.Map targetMap, IntVec3 targetLocation, int delayTicks)
-        {
-            // Transfer uses the same mechanism as teleport
-            ScheduleDelayedTeleport(corpseData, targetMap, targetLocation, delayTicks);
-        }
-
-        /// <summary>
         /// Processes all pending teleportations, executing those that have reached their trigger time.
         /// </summary>
         public void ProcessPendingTeleports()
         {
             if (pendingTeleports.Count == 0)
+            {
                 return;
+            }
 
             var currentTick = Find.TickManager.TicksGame;
             var toRemove = new List<PendingTeleport>();
@@ -731,7 +802,9 @@ namespace Eternal.Corpse
             {
                 // Skip if not yet time
                 if (entry.TriggerTick > currentTick)
+                {
                     continue;
+                }
 
                 // Validate corpse
                 if (entry.Corpse == null || entry.Corpse.Destroyed)
@@ -809,12 +882,16 @@ namespace Eternal.Corpse
         private bool ExecuteTeleport(PendingTeleport entry)
         {
             if (entry?.Corpse == null || entry.TargetMap == null)
+            {
                 return false;
+            }
 
             var corpseManager = EternalServiceContainer.Instance?.CorpseManager;
             var originalPawn = entry.Corpse.InnerPawn;
             if (corpseManager == null || originalPawn == null)
+            {
                 return false;
+            }
 
             // Store source map for logging before the manager performs the transfer.
             var sourceMap = entry.Corpse.Map;
@@ -822,7 +899,9 @@ namespace Eternal.Corpse
             string targetLabel = entry.TargetMap.Parent?.Label ?? "home map";
 
             if (!corpseManager.TryRelocateCorpse(originalPawn, entry.TargetMap, entry.TargetLocation))
+            {
                 return false;
+            }
 
             string pawnName = originalPawn.Name?.ToStringShort ?? "Unknown";
             Log.Message($"[Eternal] Teleported {pawnName}'s corpse from {sourceLabel} to {targetLabel} at {entry.TargetLocation}");
@@ -842,7 +921,9 @@ namespace Eternal.Corpse
         private bool IsTemporaryMap(MapType map)
         {
             if (map == null)
+            {
                 return false;
+            }
 
             // Check various indicators of temporary maps
             return map.Parent?.def?.defName?.Contains("Quest") == true ||
@@ -859,38 +940,11 @@ namespace Eternal.Corpse
         private string GetMapPurpose(MapType map)
         {
             if (map?.Parent == null)
-                return "Unknown";
-
-            return map.Parent.def.defName ?? "Unknown";
-        }
-
-        /// <summary>
-        /// Finds the nearest permanent map to a given map.
-        /// </summary>
-        /// <param name="sourceMap">The source map</param>
-        /// <returns>Nearest permanent map or null</returns>
-        private Verse.Map FindNearestPermanentMap(Verse.Map sourceMap)
-        {
-            if (sourceMap == null)
-                return null;
-
-            Verse.Map nearestMap = null;
-            float nearestDistance = float.MaxValue;
-
-            foreach (var map in Find.Maps)
             {
-                if (map == sourceMap || IsTemporaryMap(map))
-                    continue;
-
-                float distance = sourceMap.Center.DistanceTo(map.Center);
-                if (distance < nearestDistance)
-                {
-                    nearestDistance = distance;
-                    nearestMap = map;
-                }
+                return "Unknown";
             }
 
-            return nearestMap;
+            return map.Parent.def.defName ?? "Unknown";
         }
 
         /// <summary>

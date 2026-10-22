@@ -7,12 +7,51 @@
 
 using System.Linq;
 using Xunit;
-using Eternal;
 
 namespace Eternal.Tests.Settings
 {
     public class SettingsCatalogTests
     {
+        [Theory]
+        [InlineData(float.NaN)]
+        [InlineData(float.PositiveInfinity)]
+        [InlineData(float.NegativeInfinity)]
+        public void EveryGlobalFloatUsesItsCatalogDefaultForNonfiniteInput(float invalid)
+        {
+            foreach (string name in new[] { "BaseHealingRate", "NutritionCostMultiplier", "MaxDebtMultiplier",
+                "FoodDrainThreshold", "DebtRepaymentDays", "ConsciousnessMultiplier" })
+            {
+                var catalog = typeof(SettingsDefaults);
+                float fallback = (float)catalog.GetField(name).GetRawConstantValue();
+                float min = (float)catalog.GetField(name + "Min").GetRawConstantValue();
+                float max = (float)catalog.GetField(name + "Max").GetRawConstantValue();
+                Assert.Equal(fallback, SettingsDefaults.NormalizeGlobalFloat(invalid, fallback, min, max));
+                Assert.Equal(min, SettingsDefaults.NormalizeGlobalFloat(min - 1f, fallback, min, max));
+                Assert.Equal(max, SettingsDefaults.NormalizeGlobalFloat(max + 1f, fallback, min, max));
+                float ordinary = (min + max) * 0.5f;
+                Assert.Equal(ordinary, SettingsDefaults.NormalizeGlobalFloat(ordinary, fallback, min, max));
+            }
+        }
+
+        [Theory]
+        [InlineData(0.001f)]
+        [InlineData(0.005f)]
+        [InlineData(1.2f)]
+        [InlineData(3f)]
+        [InlineData(-1f)]
+        public void PersistedOverrides_PreserveLowHighAndInheritedRates(float value)
+        {
+            Assert.Equal(value, SettingsDefaults.NormalizePersistedHediffRate(value));
+            Assert.Equal(SettingsDefaults.BaseHealingRateMin, SettingsDefaults.HediffHealingRateMin);
+            Assert.Equal(SettingsDefaults.BaseHealingRateMax, SettingsDefaults.HediffHealingRateMax);
+        }
+
+        [Fact]
+        public void InvalidPersistedRate_UsesGlobalSentinel()
+        {
+            Assert.Equal(-1f, SettingsDefaults.NormalizePersistedHediffRate(float.NaN));
+            Assert.Equal(-1f, SettingsDefaults.NormalizePersistedHediffRate(float.PositiveInfinity));
+        }
         [Fact]
         public void MapCheckInterval_DefaultIsInsideTheCanonicalRange()
         {
@@ -77,8 +116,8 @@ namespace Eternal.Tests.Settings
         [Fact]
         public void SeverityConversion_IsAnInternalNamedConstant()
         {
-            Assert.Equal(0.004f, SettingsDefaults.SeverityToNutritionRatio, 6);
-            Assert.Equal("250 : 1", SettingsDefaults.GetSeverityToNutritionRatioDisplay());
+            Assert.Equal(1f / 1200f, SettingsDefaults.SeverityToNutritionRatio, 9);
+            Assert.Equal("1200 : 1", SettingsDefaults.GetSeverityToNutritionRatioDisplay());
         }
 
         [Fact]

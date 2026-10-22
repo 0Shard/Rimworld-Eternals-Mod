@@ -11,7 +11,6 @@ using System;
 using HarmonyLib;
 using RimWorld.Planet;
 using Verse;
-using Eternal;
 using Eternal.Exceptions;
 using Eternal.Utils;
 
@@ -47,7 +46,9 @@ namespace Eternal.Patches
             {
                 // SAFE-09: skip when mod is disabled.
                 if (EternalModState.IsDisabled)
+                {
                     return;
+                }
 
                 if (Eternal_Mod.settings?.debugMode == true && __state && !__instance.HasMap)
                 {

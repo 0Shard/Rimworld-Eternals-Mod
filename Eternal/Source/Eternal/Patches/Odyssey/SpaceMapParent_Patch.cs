@@ -20,7 +20,6 @@ using Eternal.Utils;
 using Eternal.World;
 
 // Type aliases to resolve namespace shadowing (Eternal.Map/Corpse shadows Verse types)
-using MapType = Verse.Map;
 using CorpseType = Verse.Corpse;
 
 namespace Eternal.Patches.Odyssey

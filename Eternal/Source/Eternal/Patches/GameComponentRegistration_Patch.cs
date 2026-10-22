@@ -5,7 +5,6 @@
 // Description: Harmony patch to programmatically register Eternal_Component in RimWorld 1.6.
 
 using System;
-using System.Reflection;
 using HarmonyLib;
 using Verse;
 using Eternal.Exceptions;
@@ -35,7 +34,7 @@ namespace Eternal.Patches
                     // Create and register the Eternal_Component instance
                     Eternal_Component component = new Eternal_Component(Current.Game);
                     Current.Game.components.Add(component);
-                    
+
                     Log.Message("[Eternal] Successfully registered Eternal_Component via Harmony patch");
                 }
                 else

@@ -8,6 +8,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using Verse;
+using Eternal.Infrastructure;
 using Eternal.Utils;
 
 namespace Eternal.Healing.Scars
@@ -17,11 +18,11 @@ namespace Eternal.Healing.Scars
     /// </summary>
     public class ScarHealingApplier
     {
-        private readonly Dictionary<string, ScarHealingRecord> activeHealingRecords;
+        private readonly Dictionary<HealingDictionaryKey, ScarHealingRecord> activeHealingRecords;
 
         public ScarHealingApplier()
         {
-            activeHealingRecords = new Dictionary<string, ScarHealingRecord>();
+            activeHealingRecords = new Dictionary<HealingDictionaryKey, ScarHealingRecord>();
         }
 
         #region Record Management
@@ -29,21 +30,25 @@ namespace Eternal.Healing.Scars
         /// <summary>
         /// Gets a unique key for a scar healing record.
         /// </summary>
-        public static string GetRecordKey(Hediff scar, Pawn pawn)
+        public static HealingDictionaryKey GetRecordKey(Hediff scar, Pawn pawn)
         {
-            return $"{pawn.ThingID}_{scar.def.defName}_{scar.Part?.def.defName ?? "unknown"}";
+            return new HealingDictionaryKey(pawn, scar);
         }
 
         /// <summary>
-        /// Gets or creates a healing record for a scar.
+        /// Gets the existing record only while it still belongs to this live scar instance.
         /// </summary>
         public ScarHealingRecord GetHealingRecord(Hediff scar, Pawn pawn)
         {
-            if (scar == null || pawn == null)
+            if (!IsLiveScar(scar, pawn))
+            {
                 return null;
+            }
 
-            string recordKey = GetRecordKey(scar, pawn);
-            return activeHealingRecords.GetValueOrDefault(recordKey);
+            var recordKey = GetRecordKey(scar, pawn);
+            return activeHealingRecords.TryGetValue(recordKey, out var record)
+                && ReferenceEquals(record.Scar, scar) && ReferenceEquals(record.Pawn, pawn)
+                ? record : null;
         }
 
         /// <summary>
@@ -51,11 +56,27 @@ namespace Eternal.Healing.Scars
         /// </summary>
         public void UpdateHealingRecords(Pawn pawn, List<Hediff> scars)
         {
+            // Records are session-local: detached instances must never donate elapsed time
+            // to a replacement, even if its load ID or body-part description is reused.
+            var staleKeys = activeHealingRecords
+                .Where(kvp => ReferenceEquals(kvp.Value.Pawn, pawn)
+                    && (!IsLiveScar(kvp.Value.Scar, pawn) || !scars.Contains(kvp.Value.Scar)))
+                .Select(kvp => kvp.Key).ToList();
+            foreach (var key in staleKeys)
+            {
+                activeHealingRecords.Remove(key);
+            }
+
             foreach (var scar in scars)
             {
-                string recordKey = GetRecordKey(scar, pawn);
+                if (!IsLiveScar(scar, pawn) || !HediffHealingConfig.CanHealScar(scar))
+                {
+                    continue;
+                }
+                var recordKey = GetRecordKey(scar, pawn);
 
-                if (!activeHealingRecords.TryGetValue(recordKey, out var record))
+                var record = GetHealingRecord(scar, pawn);
+                if (record == null)
                 {
                     // Create new healing record
                     record = new ScarHealingRecord
@@ -75,7 +96,6 @@ namespace Eternal.Healing.Scars
                 else
                 {
                     // Update existing record
-                    record.Scar = scar;
                     record.IsHealing = scar.Severity > 0f;
                 }
             }
@@ -87,7 +107,7 @@ namespace Eternal.Healing.Scars
         public void CleanupCompletedHealing()
         {
             var completedRecords = activeHealingRecords
-                .Where(kvp => !kvp.Value.IsHealing || kvp.Value.Scar == null)
+                .Where(kvp => !kvp.Value.IsHealing || !IsLiveScar(kvp.Value.Scar, kvp.Value.Pawn))
                 .Select(kvp => kvp.Key)
                 .ToList();
 
@@ -112,7 +132,9 @@ namespace Eternal.Healing.Scars
         public void ClearPawnHealingRecords(Pawn pawn)
         {
             if (pawn == null)
+            {
                 return;
+            }
 
             var recordsToRemove = activeHealingRecords
                 .Where(kvp => kvp.Value.Pawn == pawn)
@@ -127,6 +149,12 @@ namespace Eternal.Healing.Scars
 
         #endregion
 
+        private static bool IsLiveScar(Hediff scar, Pawn pawn)
+        {
+            return scar != null && pawn?.health?.hediffSet != null
+                && ReferenceEquals(scar.pawn, pawn) && pawn.health.hediffSet.hediffs.Contains(scar);
+        }
+
         #region Healing Application
 
         /// <summary>
@@ -135,14 +163,24 @@ namespace Eternal.Healing.Scars
         public void HealScar(ScarHealingRecord record)
         {
             if (record?.Scar == null || record.Pawn == null)
+            {
                 return;
+            }
+            if (!IsLiveScar(record.Scar, record.Pawn) || !HediffHealingConfig.CanHealScar(record.Scar))
+            {
+                record.IsHealing = false;
+                activeHealingRecords.Remove(GetRecordKey(record.Scar, record.Pawn));
+                return;
+            }
 
             var currentTick = Find.TickManager.TicksGame;
 
             // Calculate time since last healing
             float deltaTime = currentTick - record.LastHealedTick;
             if (deltaTime <= 0f)
+            {
                 return;
+            }
 
             // Calculate healing amount (no throttling - uses global baseHealingRate)
             float healingAmount = ScarCostCalculator.Default.CalculateHealingAmount(
@@ -169,7 +207,9 @@ namespace Eternal.Healing.Scars
         private void ApplyScarHealing(ScarHealingRecord record, float healingAmount)
         {
             if (record?.Scar == null)
+            {
                 return;
+            }
 
             var scar = record.Scar;
 
@@ -192,7 +232,9 @@ namespace Eternal.Healing.Scars
         public void EmergencyHealAllScars(Pawn pawn)
         {
             if (pawn?.health?.hediffSet == null)
+            {
                 return;
+            }
 
             var scars = ScarIdentifier.GetPawnScars(pawn);
             int healedCount = 0;
@@ -202,7 +244,7 @@ namespace Eternal.Healing.Scars
                 pawn.health.RemoveHediff(scar);
                 healedCount++;
 
-                string recordKey = GetRecordKey(scar, pawn);
+                var recordKey = GetRecordKey(scar, pawn);
                 activeHealingRecords.Remove(recordKey);
             }
 

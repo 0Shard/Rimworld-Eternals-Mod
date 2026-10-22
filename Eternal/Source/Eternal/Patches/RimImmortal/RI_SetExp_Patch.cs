@@ -36,27 +36,9 @@ namespace Eternal.Patches.RimImmortal
         /// Uses ModsConfig.IsActive() via RimImmortalDetection — multiple mod ID variants are checked.
         /// Returning false skips the patch entirely (Harmony will not call TargetMethod).
         /// </summary>
-        public static bool Prepare()
-        {
-            bool isActive = RimImmortalDetection.RimImmortalActive;
-
-            if (!isActive)
-            {
-                // Only log at debug level — absence of RimImmortal is the normal case
-                if (Eternal_Mod.settings?.debugMode == true)
-                {
-                    Log.Message("[Eternal] Skipping RimImmortal SetExp patch — mod not active");
-                }
-                return false;
-            }
-
-            if (Eternal_Mod.settings?.debugMode == true)
-            {
-                Log.Message("[Eternal] RimImmortal detected - enabling instant-max cultivation progress patch");
-            }
-
-            return true;
-        }
+        public static bool Prepare() => CompatibilityBinding.Prepare(RimImmortalDetection.RimImmortalActive,
+            "[Eternal] Skipping RimImmortal SetExp patch — mod not active",
+            "[Eternal] RimImmortal detected - enabling instant-max cultivation progress patch");
 
         /// <summary>
         /// Resolve the target method via reflection.
@@ -67,12 +49,8 @@ namespace Eternal.Patches.RimImmortal
         {
             var method = RimImmortalDetection.SetExpMethod;
 
-            if (method == null)
-            {
-                Log.Warning("[Eternal] Skipping RimImmortal SetExp patch — method not found (mod absent or API changed)");
-            }
-
-            return method;
+            return CompatibilityBinding.WarnMissing(method,
+                "[Eternal] Skipping RimImmortal SetExp patch — method not found (mod absent or API changed)");
         }
 
         /// <summary>
@@ -87,7 +65,9 @@ namespace Eternal.Patches.RimImmortal
         {
             // Only boost positive exp gains
             if (num <= 0f)
+            {
                 return;
+            }
 
             try
             {
@@ -95,11 +75,15 @@ namespace Eternal.Patches.RimImmortal
                 Pawn pawn = RimImmortalDetection.GetPawnFromEnergyTracker(__instance);
 
                 if (pawn == null)
+                {
                     return;
+                }
 
                 // Check if this pawn is an Eternal
                 if (!pawn.IsValidEternal())
+                {
                     return;
+                }
 
                 // Store original value for debug logging
                 float originalNum = num;

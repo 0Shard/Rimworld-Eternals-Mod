@@ -9,7 +9,6 @@
 
 #if DEBUG
 
-using System;
 using System.Collections.Generic;
 using System.Linq;
 using Verse;
@@ -27,25 +26,16 @@ namespace Eternal.InGameTests.TestSuites
     {
         public static TestSuiteResult RunAll(Verse.Map map)
         {
-            int passed = 0;
-            int failed = 0;
-            var failures = new List<string>();
+            var result = new TestSuiteResult(0, 0, new List<string>());
 
-            try
-            {
-                RunTest("MoodBuffPresentWhenEnabled",
-                    () => MoodBuffPresentWhenEnabled(map), ref passed, ref failed, failures);
-                RunTest("MoodBuffAbsentWhenDisabled",
-                    () => MoodBuffAbsentWhenDisabled(map), ref passed, ref failed, failures);
-                RunTest("MoodBuffNotOnNonEternal",
-                    () => MoodBuffNotOnNonEternal(map), ref passed, ref failed, failures);
-            }
-            finally
-            {
-                TestPawnFactory.CleanupAll();
-            }
+            result.RunTest("MoodBuff", "MoodBuffPresentWhenEnabled",
+                () => MoodBuffPresentWhenEnabled(map));
+            result.RunTest("MoodBuff", "MoodBuffAbsentWhenDisabled",
+                () => MoodBuffAbsentWhenDisabled(map));
+            result.RunTest("MoodBuff", "MoodBuffNotOnNonEternal",
+                () => MoodBuffNotOnNonEternal(map));
 
-            return new TestSuiteResult(passed, failed, failures);
+            return result;
         }
 
         // ─── Test Bodies ────────────────────────────────────────────────────
@@ -55,7 +45,7 @@ namespace Eternal.InGameTests.TestSuites
             using (new SettingsScope())
             {
                 Eternal_Mod.settings.moodBuffEnabled = true;
-                Eternal_Mod.settings.moodBuffValue   = 15;
+                Eternal_Mod.settings.moodBuffValue = 15;
 
                 var pawn = TestPawnFactory.SpawnEternalPawn(map);
                 TestAssert.IsNotNull(pawn, "Eternal pawn should spawn");
@@ -64,7 +54,9 @@ namespace Eternal.InGameTests.TestSuites
                 TickAdvancer.AdvanceTicks(120);
 
                 var thoughts = new List<Thought>();
-                pawn.needs?.mood?.thoughts?.GetAllMoodThoughts(thoughts);
+                TestAssert.Available(pawn.needs?.mood?.thoughts, "Mood thought handler");
+                TestAssert.Available(EternalDefOf.Eternal_MoodBuff, "Eternal mood thought definition");
+                pawn.needs.mood.thoughts.GetAllMoodThoughts(thoughts);
 
                 bool hasBuff = thoughts.Any(t => t.def == EternalDefOf.Eternal_MoodBuff);
                 Log.Message($"[EternalTests] MoodBuffPresentWhenEnabled: hasBuff = {hasBuff}, thought count = {thoughts.Count}");
@@ -86,7 +78,9 @@ namespace Eternal.InGameTests.TestSuites
                 TickAdvancer.AdvanceTicks(120);
 
                 var thoughts = new List<Thought>();
-                pawn.needs?.mood?.thoughts?.GetAllMoodThoughts(thoughts);
+                TestAssert.Available(pawn.needs?.mood?.thoughts, "Mood thought handler");
+                TestAssert.Available(EternalDefOf.Eternal_MoodBuff, "Eternal mood thought definition");
+                pawn.needs.mood.thoughts.GetAllMoodThoughts(thoughts);
 
                 bool hasBuff = thoughts.Any(t => t.def == EternalDefOf.Eternal_MoodBuff);
                 Log.Message($"[EternalTests] MoodBuffAbsentWhenDisabled: hasBuff = {hasBuff}, thought count = {thoughts.Count}");
@@ -109,7 +103,9 @@ namespace Eternal.InGameTests.TestSuites
                 TickAdvancer.AdvanceTicks(120);
 
                 var thoughts = new List<Thought>();
-                pawn.needs?.mood?.thoughts?.GetAllMoodThoughts(thoughts);
+                TestAssert.Available(pawn.needs?.mood?.thoughts, "Mood thought handler");
+                TestAssert.Available(EternalDefOf.Eternal_MoodBuff, "Eternal mood thought definition");
+                pawn.needs.mood.thoughts.GetAllMoodThoughts(thoughts);
 
                 bool hasBuff = thoughts.Any(t => t.def == EternalDefOf.Eternal_MoodBuff);
                 Log.Message($"[EternalTests] MoodBuffNotOnNonEternal: hasBuff = {hasBuff}");
@@ -119,30 +115,8 @@ namespace Eternal.InGameTests.TestSuites
             }
         }
 
-        // ─── RunTest helper (copied from ResurrectionCycleTests — intentional, per design) ───
 
-        private static void RunTest(string name, Action test, ref int passed, ref int failed, List<string> failures)
-        {
-            Log.Message($"[EternalTests] Running: {name}");
-            try
-            {
-                test();
-                passed++;
-                Log.Message($"[EternalTests] PASSED: {name}");
-            }
-            catch (TestFailedException ex)
-            {
-                failed++;
-                failures.Add($"[MoodBuff] {name}: {ex.Message}");
-                Log.Error($"[EternalTests] FAILED: {name} -- {ex.Message}");
-            }
-            catch (Exception ex)
-            {
-                failed++;
-                failures.Add($"[MoodBuff] {name}: {ex.Message}");
-                Log.Error($"[EternalTests] ERROR: {name} -- {ex}");
-            }
-        }
+
     }
 }
 

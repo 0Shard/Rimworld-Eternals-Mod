@@ -6,10 +6,8 @@
 //              about Eternal pawns that will be left behind and fall to the planet.
 
 using System;
-using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
-using System.Reflection.Emit;
 using HarmonyLib;
 using RimWorld;
 using Verse;

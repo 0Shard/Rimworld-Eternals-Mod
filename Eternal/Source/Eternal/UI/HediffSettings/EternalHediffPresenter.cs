@@ -7,7 +7,6 @@
 //              Added per-hediff and global reset operations.
 //              PERF-02: Added GetFilteredHediffsCached() proxy for render-loop use.
 
-using System;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
@@ -25,23 +24,22 @@ namespace Eternal.UI.HediffSettings
 
         #region Filter State
 
-        // Defaults live in HediffFilterState; the constructor rehydrates these
-        // mirrors from the manager's persisted instance.
-        public string SearchTerm { get; private set; }
-        public HediffCategory SelectedCategory { get; private set; }
-        public bool ShowOnlyEnabled { get; private set; }
-        public bool ShowOnlyCustom { get; private set; }
+        // Read the manager's authoritative state, including changes made outside this presenter.
+        public string SearchTerm => model.FilterState.SearchTerm;
+        public HediffCategory SelectedCategory => model.FilterState.CategoryFilter;
+        public bool ShowOnlyEnabled => model.FilterState.ShowOnlyEnabled;
+        public bool ShowOnlyCustom => model.FilterState.ShowOnlyCustom;
 
         // Advanced filter state
-        public string ModSourceFilter { get; private set; }
-        public bool FilterBaseGame { get; private set; }
-        public bool FilterDLC { get; private set; }
-        public bool FilterMods { get; private set; }
-        public bool FilterIsBad { get; private set; }
-        public bool FilterIsLethal { get; private set; }
-        public bool FilterTendable { get; private set; }
-        public bool FilterChronic { get; private set; }
-        public bool FilterBeneficial { get; private set; }
+        public string ModSourceFilter => model.FilterState.ModSourceFilter;
+        public bool FilterBaseGame => model.FilterState.FilterByBaseGame;
+        public bool FilterDLC => model.FilterState.FilterByDLC;
+        public bool FilterMods => model.FilterState.FilterByMods;
+        public bool FilterIsBad => model.FilterState.FilterIsBad;
+        public bool FilterIsLethal => model.FilterState.FilterIsLethal;
+        public bool FilterTendable => model.FilterState.FilterIsTendable;
+        public bool FilterChronic => model.FilterState.FilterIsChronic;
+        public bool FilterBeneficial => model.FilterState.FilterBeneficial;
 
         #endregion
 
@@ -49,10 +47,6 @@ namespace Eternal.UI.HediffSettings
 
         public int SelectedTabIndex { get; private set; } = 0;
         public readonly string[] TabLabels = { "General", "Bulk" };
-
-        // Scroll state
-        public Vector2 ScrollPosition { get; set; } = Vector2.zero;
-        public float ScrollViewHeight { get; set; } = 0f;
 
         // Bulk template
         public EternalHediffSetting BulkTemplate { get; private set; }
@@ -63,24 +57,6 @@ namespace Eternal.UI.HediffSettings
         {
             this.model = model;
             BulkTemplate = new EternalHediffSetting();
-
-            // Rehydrate from the manager's persisted filter state: the manager outlives
-            // this presenter (a fresh presenter is built on every settings-window open),
-            // so hardcoded defaults here would desync the checkboxes from the active filter.
-            var persisted = model.FilterState;
-            SearchTerm = persisted.SearchTerm;
-            SelectedCategory = persisted.CategoryFilter;
-            ShowOnlyEnabled = persisted.ShowOnlyEnabled;
-            ShowOnlyCustom = persisted.ShowOnlyCustom;
-            ModSourceFilter = persisted.ModSourceFilter;
-            FilterBaseGame = persisted.FilterByBaseGame;
-            FilterDLC = persisted.FilterByDLC;
-            FilterMods = persisted.FilterByMods;
-            FilterIsBad = persisted.FilterIsBad;
-            FilterIsLethal = persisted.FilterIsLethal;
-            FilterTendable = persisted.FilterIsTendable;
-            FilterChronic = persisted.FilterIsChronic;
-            FilterBeneficial = persisted.FilterBeneficial;
         }
 
         #region Tab Events
@@ -102,7 +78,6 @@ namespace Eternal.UI.HediffSettings
         /// </summary>
         public void OnSearchTermChanged(string newSearchTerm)
         {
-            SearchTerm = newSearchTerm;
             model.SetSearchFilter(newSearchTerm);
         }
 
@@ -111,7 +86,6 @@ namespace Eternal.UI.HediffSettings
         /// </summary>
         public void OnCategoryChanged(HediffCategory category)
         {
-            SelectedCategory = category;
             model.SetCategoryFilter(category);
         }
 
@@ -120,7 +94,6 @@ namespace Eternal.UI.HediffSettings
         /// </summary>
         public void OnModSourceChanged(string modSource)
         {
-            ModSourceFilter = modSource;
             model.SetModSourceFilter(modSource);
         }
 
@@ -129,9 +102,6 @@ namespace Eternal.UI.HediffSettings
         /// </summary>
         public void OnSourceTypeFilterChanged(bool baseGame, bool dlc, bool mods)
         {
-            FilterBaseGame = baseGame;
-            FilterDLC = dlc;
-            FilterMods = mods;
             model.SetSourceTypeFilter(baseGame, dlc, mods);
         }
 
@@ -140,11 +110,6 @@ namespace Eternal.UI.HediffSettings
         /// </summary>
         public void OnPropertyFilterChanged(bool isBad, bool isLethal, bool tendable, bool chronic, bool beneficial = false)
         {
-            FilterIsBad = isBad;
-            FilterIsLethal = isLethal;
-            FilterTendable = tendable;
-            FilterChronic = chronic;
-            FilterBeneficial = beneficial;
             model.SetPropertyFilters(isBad, isLethal, tendable, chronic, beneficial);
         }
 
@@ -153,7 +118,6 @@ namespace Eternal.UI.HediffSettings
         /// </summary>
         public void OnShowOnlyEnabledChanged(bool showOnlyEnabled)
         {
-            ShowOnlyEnabled = showOnlyEnabled;
             model.SetShowOnlyEnabled(showOnlyEnabled);
         }
 
@@ -162,7 +126,6 @@ namespace Eternal.UI.HediffSettings
         /// </summary>
         public void OnShowOnlyCustomChanged(bool showOnlyCustom)
         {
-            ShowOnlyCustom = showOnlyCustom;
             model.SetShowOnlyCustom(showOnlyCustom);
         }
 
@@ -171,20 +134,6 @@ namespace Eternal.UI.HediffSettings
         /// </summary>
         public void OnClearAllFilters()
         {
-            SearchTerm = "";
-            SelectedCategory = HediffCategory.All;
-            ShowOnlyEnabled = false;
-            ShowOnlyCustom = false;
-            ModSourceFilter = "";
-            FilterBaseGame = false;
-            FilterDLC = false;
-            FilterMods = false;
-            FilterIsBad = false;
-            FilterIsLethal = false;
-            FilterTendable = false;
-            FilterChronic = false;
-            FilterBeneficial = false;
-
             model.ClearAllFilters();
         }
 
@@ -240,8 +189,7 @@ namespace Eternal.UI.HediffSettings
             var selected = model.GetSelectedHediffs().ToList();
             if (selected.Any())
             {
-                model.ApplySettingsToGroup(selected, BulkTemplate);
-                return selected.Count;
+                return model.ApplySettingsToGroupWithCount(selected, BulkTemplate);
             }
             return 0;
         }
@@ -253,8 +201,7 @@ namespace Eternal.UI.HediffSettings
         public int OnApplyToAll()
         {
             var allHediffs = model.GetFilteredHediffs().Select(kvp => kvp.Key).ToList();
-            model.ApplySettingsToGroup(allHediffs, BulkTemplate);
-            return allHediffs.Count;
+            return model.ApplySettingsToGroupWithCount(allHediffs, BulkTemplate);
         }
 
         /// <summary>
@@ -282,7 +229,7 @@ namespace Eternal.UI.HediffSettings
 
         /// <summary>
         /// Gets cached filtered hediff results for render-loop use.
-        /// Delegates to model's cached version with debounce.
+        /// Delegates to the model's cache, rebuilt immediately when dirty.
         /// </summary>
         public IReadOnlyList<KeyValuePair<string, EternalHediffSetting>> GetFilteredHediffsCached()
             => model.GetFilteredHediffsCached();

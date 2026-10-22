@@ -6,7 +6,6 @@
 
 using System;
 using System.Collections.Generic;
-using Verse;
 
 namespace Eternal.Exceptions
 {
@@ -20,22 +19,22 @@ namespace Eternal.Exceptions
         /// The name of the parameter that failed validation.
         /// </summary>
         public string ParameterName { get; set; }
-        
+
         /// <summary>
         /// The value that failed validation.
         /// </summary>
         public object InvalidValue { get; set; }
-        
+
         /// <summary>
         /// The expected value or range for the parameter.
         /// </summary>
         public string ExpectedValue { get; set; }
-        
+
         /// <summary>
         /// Collection of validation errors, if multiple validations failed.
         /// </summary>
         public List<string> ValidationErrors { get; }
-        
+
         /// <summary>
         /// Initializes a new instance of EternalValidationException class.
         /// </summary>
@@ -43,7 +42,7 @@ namespace Eternal.Exceptions
         {
             ValidationErrors = new List<string>();
         }
-        
+
         /// <summary>
         /// Initializes a new instance of EternalValidationException class with a specified error message.
         /// </summary>
@@ -52,7 +51,7 @@ namespace Eternal.Exceptions
         {
             ValidationErrors = new List<string>();
         }
-        
+
         /// <summary>
         /// Initializes a new instance of EternalValidationException class with a specified error message and operation.
         /// </summary>
@@ -62,7 +61,7 @@ namespace Eternal.Exceptions
         {
             ValidationErrors = new List<string>();
         }
-        
+
         /// <summary>
         /// Initializes a new instance of EternalValidationException class with a specified error message, parameter name, and invalid value.
         /// </summary>
@@ -75,7 +74,7 @@ namespace Eternal.Exceptions
             InvalidValue = invalidValue;
             ValidationErrors = new List<string>();
         }
-        
+
         /// <summary>
         /// Initializes a new instance of EternalValidationException class with a specified error message, parameter name, invalid value, and operation.
         /// </summary>
@@ -89,7 +88,7 @@ namespace Eternal.Exceptions
             InvalidValue = invalidValue;
             ValidationErrors = new List<string>();
         }
-        
+
         /// <summary>
         /// Initializes a new instance of EternalValidationException class with a specified error message, parameter name, invalid value, expected value, and operation.
         /// </summary>
@@ -105,7 +104,7 @@ namespace Eternal.Exceptions
             ExpectedValue = expectedValue;
             ValidationErrors = new List<string>();
         }
-        
+
         /// <summary>
         /// Initializes a new instance of EternalValidationException class with a specified error message and collection of validation errors.
         /// </summary>
@@ -115,7 +114,7 @@ namespace Eternal.Exceptions
         {
             ValidationErrors = validationErrors ?? new List<string>();
         }
-        
+
         /// <summary>
         /// Initializes a new instance of EternalValidationException class with a specified error message, collection of validation errors, and operation.
         /// </summary>
@@ -126,7 +125,7 @@ namespace Eternal.Exceptions
         {
             ValidationErrors = validationErrors ?? new List<string>();
         }
-        
+
         /// <summary>
         /// Initializes a new instance of EternalValidationException class with a specified error message and inner exception.
         /// </summary>
@@ -136,7 +135,7 @@ namespace Eternal.Exceptions
         {
             ValidationErrors = new List<string>();
         }
-        
+
         /// <summary>
         /// Initializes a new instance of EternalValidationException class with a specified error message, inner exception, and operation.
         /// </summary>
@@ -147,7 +146,7 @@ namespace Eternal.Exceptions
         {
             ValidationErrors = new List<string>();
         }
-        
+
         /// <summary>
         /// Gets a formatted message that includes validation-specific context information.
         /// </summary>
@@ -156,34 +155,37 @@ namespace Eternal.Exceptions
         {
             string baseMessage = base.GetFormattedMessage();
             string validationContext = "";
-            
+
             if (!string.IsNullOrEmpty(ParameterName))
             {
                 validationContext += $"Parameter: {ParameterName}";
-                
+
                 if (InvalidValue != null)
                 {
                     validationContext += $", Invalid Value: {InvalidValue}";
                 }
-                
+
                 if (!string.IsNullOrEmpty(ExpectedValue))
                 {
                     validationContext += $", Expected: {ExpectedValue}";
                 }
             }
-            
+
             if (ValidationErrors != null && ValidationErrors.Count > 0)
             {
                 if (!string.IsNullOrEmpty(validationContext))
+                {
                     validationContext += ", ";
+                }
+
                 validationContext += $"Errors: [{string.Join(", ", ValidationErrors)}]";
             }
-            
+
             if (!string.IsNullOrEmpty(validationContext))
             {
                 return $"{baseMessage} (Validation Context: {validationContext})";
             }
-            
+
             return baseMessage;
         }
     }

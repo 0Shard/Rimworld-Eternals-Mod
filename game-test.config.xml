@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Author: 0Shard. Operational defaults for disposable synthetic game tests. -->
+<gameTest>
+  <!-- Keep periodic disk I/O outside CPU trials; persistence fixtures exercise actual saves explicitly. -->
+  <automation autosaveIntervalDays="1000" planetCoverage="0.3" />
+  <performance seed="170017" warmupFrames="24" batchFrames="48" batches="5" samples="4"
+               eventEveryBatches="1" deathValidationTicks="100000" resurrectionValidationTicks="100000"
+               frameSteps="0,1,1,4,0,8,1,60,0,250,1,1" outputDirectory="outputs/game-tests/performance">
+    <profile name="isolated-10" population="10" mapSize="75" emptyControl="false" />
+    <profile name="isolated-50" population="50" mapSize="75" emptyControl="false" />
+    <profile name="isolated-100" population="100" mapSize="75" emptyControl="false" />
+    <profile name="fullsize-1" population="1" mapSize="250" samples="20" emptyControl="false" />
+    <profile name="fullsize-5" population="5" mapSize="250" samples="5" emptyControl="false" />
+    <profile name="fullsize-10" population="10" mapSize="250" emptyControl="false" />
+    <profile name="empty-10" population="10" mapSize="75" emptyControl="true" />
+    <profile name="empty-50" population="50" mapSize="75" emptyControl="true" />
+    <profile name="empty-100" population="100" mapSize="75" emptyControl="true" />
+    <profile name="empty-fullsize-1" population="1" mapSize="250" emptyControl="true" />
+    <profile name="empty-fullsize-5" population="5" mapSize="250" emptyControl="true" />
+    <profile name="empty-fullsize-10" population="10" mapSize="250" emptyControl="true" />
+  </performance>
+  <persistence mapSize="75" continuationTicks="1000" moodBuffValue="7" />
+</gameTest>

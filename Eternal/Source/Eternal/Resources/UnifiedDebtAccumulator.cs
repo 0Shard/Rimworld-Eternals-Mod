@@ -35,7 +35,9 @@ namespace Eternal.Resources
         public bool AddDebt(Pawn pawn, float amount)
         {
             if (pawn == null || amount <= 0f)
+            {
                 return false;
+            }
 
             // Uses the system's internal max capacity check
             return _debtSystem.AddDebt(pawn, amount);
@@ -45,7 +47,9 @@ namespace Eternal.Resources
         public bool AddResurrectionDebt(Pawn pawn, float amount)
         {
             if (pawn == null || amount <= 0f)
+            {
                 return false;
+            }
 
             return _debtSystem.AddResurrectionDebt(pawn, amount);
         }

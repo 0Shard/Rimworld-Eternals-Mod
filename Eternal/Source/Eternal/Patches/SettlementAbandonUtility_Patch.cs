@@ -13,7 +13,6 @@ using HarmonyLib;
 using RimWorld;
 using RimWorld.Planet;
 using Verse;
-using Eternal;
 using Eternal.Exceptions;
 using Eternal.Extensions;
 using Eternal.Map;
@@ -43,7 +42,9 @@ namespace Eternal.Patches
             {
                 // SAFE-09: when mod is disabled, do not block abandonment flow.
                 if (EternalModState.IsDisabled)
+                {
                     return true; // run original method
+                }
 
                 // If no map, allow normal flow
                 if (settlement == null || !settlement.HasMap)

@@ -37,7 +37,9 @@ namespace Eternal.Elixir
         public override AcceptanceReport CanBeUsedBy(Pawn pawn)
         {
             if (EternalModState.IsDisabled)
+            {
                 return "Eternal_Elixir_RejectModDisabled".Translate();
+            }
 
             return true;
         }

@@ -55,7 +55,9 @@ namespace Eternal.Compat
             get
             {
                 if (_ebfAvailable.HasValue)
+                {
                     return _ebfAvailable.Value;
+                }
 
                 // Debug logging to help identify EBF's actual PackageId/Assembly name
                 if (Eternal_Mod.settings?.debugMode == true && !_detectionLogged)
@@ -107,14 +109,20 @@ namespace Eternal.Compat
         private static void LogDetection(string method)
         {
             if (_detectionLogged)
+            {
                 return;
+            }
 
             _detectionLogged = true;
 
             if (method != null)
+            {
                 Log.Message($"[Eternal] EBF detected via {method}");
+            }
             else
+            {
                 Log.Message("[Eternal] EBF not detected (checked PackageId and assemblies)");
+            }
         }
 
         /// <summary>
@@ -126,11 +134,15 @@ namespace Eternal.Compat
         public static float GetMaxHealth(BodyPartRecord part, Pawn pawn)
         {
             if (part == null || pawn == null)
+            {
                 return 1f;
+            }
 
             // Fast path: EBF not available
             if (!IsEBFAvailable)
+            {
                 return part.def.GetMaxHealth(pawn);
+            }
 
             // Lazy lookup of EBF methods (one-time cost)
             if (!_methodLookedUp)
@@ -140,9 +152,13 @@ namespace Eternal.Compat
                 _ebfSuppressWarning = AccessTools.Method("EBF.Patches.PostFix_BodyPart_GetMaxHealth:SuppressNextWarning");
 
                 if (_ebfGetMaxHealth != null)
+                {
                     Log.Message("[Eternal] EBF integration: GetMaxHealthWithEBF method found");
+                }
                 else
+                {
                     Log.Warning("[Eternal] EBF integration: GetMaxHealthWithEBF method not found, using vanilla fallback");
+                }
             }
 
             // Try EBF method via reflection

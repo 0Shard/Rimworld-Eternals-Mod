@@ -8,7 +8,6 @@
 
 #if DEBUG
 
-using System;
 using System.Collections.Generic;
 using Verse;
 using Eternal.DI;
@@ -23,13 +22,11 @@ namespace Eternal.InGameTests.TestSuites
     {
         public static TestSuiteResult RunAll(Verse.Map map)
         {
-            int passed = 0;
-            int failed = 0;
-            var failures = new List<string>();
+            var result = new TestSuiteResult(0, 0, new List<string>());
 
-            RunTest("FullResurrectionCycle", () => FullResurrectionCycle(map), ref passed, ref failed, failures);
+            result.RunTest("ResurrectionCycle", "FullResurrectionCycle", () => FullResurrectionCycle(map));
 
-            return new TestSuiteResult(passed, failed, failures);
+            return result;
         }
 
         private static void FullResurrectionCycle(Verse.Map map)
@@ -88,28 +85,7 @@ namespace Eternal.InGameTests.TestSuites
             TestAssert.IsTrue(pawn.Spawned, "Pawn should be spawned on map after resurrection");
         }
 
-        private static void RunTest(string name, Action test, ref int passed, ref int failed, List<string> failures)
-        {
-            Log.Message($"[EternalTests] Running: {name}");
-            try
-            {
-                test();
-                passed++;
-                Log.Message($"[EternalTests] PASSED: {name}");
-            }
-            catch (TestFailedException ex)
-            {
-                failed++;
-                failures.Add($"[ResurrectionCycle] {name}: {ex.Message}");
-                Log.Error($"[EternalTests] FAILED: {name} -- {ex.Message}");
-            }
-            catch (Exception ex)
-            {
-                failed++;
-                failures.Add($"[ResurrectionCycle] {name}: {ex.Message}");
-                Log.Error($"[EternalTests] ERROR: {name} -- {ex}");
-            }
-        }
+
     }
 }
 

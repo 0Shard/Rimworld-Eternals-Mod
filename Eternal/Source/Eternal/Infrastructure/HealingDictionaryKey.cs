@@ -21,7 +21,7 @@ namespace Eternal.Infrastructure
     /// <summary>
     /// Composite struct key for healing dictionaries.
     /// Replaces string keys to eliminate per-tick allocation in healing hot paths.
-    /// Global uniqueness is achieved via (PawnThingIDNumber, HediffDefName, BodyPartLabel).
+    /// Instance identity includes the pawn, def, part label and persisted hediff load ID.
     /// </summary>
     public readonly struct HealingDictionaryKey : System.IEquatable<HealingDictionaryKey>
     {

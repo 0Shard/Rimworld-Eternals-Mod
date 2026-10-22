@@ -35,6 +35,9 @@ namespace Eternal.Interfaces
         /// <returns>True if debt was added successfully, false if capacity exceeded.</returns>
         bool AddDebt(Pawn pawn, float amount);
 
+        /// <summary>Returns the authoritative nutrition added, without subtracting rounded debt views.</summary>
+        float AddDebtAndGetAccepted(Pawn pawn, float amount);
+
         /// <summary>
         /// Adds uncapped resurrection debt for a pawn during corpse healing.
         /// Raises the pawn's resurrection debt baseline to the new total, so the alive-time
@@ -52,6 +55,9 @@ namespace Eternal.Interfaces
         /// <param name="amount">The amount to repay.</param>
         /// <returns>Actual amount repaid (may be less if debt is smaller).</returns>
         float RepayDebt(Pawn pawn, float amount);
+
+        /// <summary>Closes only proven unpayable exact terminal dust, without reporting a food payment.</summary>
+        bool TryCloseUnpayableTerminalDust(Pawn pawn);
 
         /// <summary>
         /// Clears all debt for a pawn.

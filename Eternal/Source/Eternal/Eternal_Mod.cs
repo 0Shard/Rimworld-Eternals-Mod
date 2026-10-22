@@ -5,10 +5,8 @@
 // Description: Main mod class for Eternal mod, handles initialization and component registration with enhanced hediff healing system.
 //              GetSettings() provides the single guaranteed-non-null entry point for settings access (SAFE-08).
 
-using System;
 using UnityEngine;
 using Verse;
-using RimWorld;
 using Eternal.Utils;
 
 namespace Eternal
@@ -32,7 +30,12 @@ namespace Eternal
         /// </summary>
         public static Eternal_Settings GetSettings()
         {
-            return settings ?? (settings = new Eternal_Settings());
+            if (settings == null)
+            {
+                settings = new Eternal_Settings();
+                settings.ScheduleHediffSettingsInitialization();
+            }
+            return settings;
         }
 
         /// <summary>
@@ -49,6 +52,7 @@ namespace Eternal
             {
                 settings.hediffManager = new EternalHediffManager();
             }
+            settings.ScheduleHediffSettingsInitialization();
 
             // Log initialization
             EternalLogger.Info("Eternal mod initialized with enhanced hediff healing system v2.0");
@@ -70,22 +74,6 @@ namespace Eternal
         public override string SettingsCategory()
         {
             return "Eternal";
-        }
-
-        /// <summary>
-        /// Called when settings are loaded from disk.
-        /// </summary>
-        public void Notify_SettingsLoaded()
-        {
-            // Base class doesn't have this method in this version
-
-            // Ensure hediff manager is initialized
-            if (settings.hediffManager == null)
-            {
-                settings.hediffManager = new EternalHediffManager();
-            }
-
-            EternalLogger.Info("Eternal mod settings loaded successfully");
         }
 
         /// <summary>

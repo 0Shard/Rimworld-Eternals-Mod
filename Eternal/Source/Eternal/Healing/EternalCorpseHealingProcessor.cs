@@ -1,7 +1,7 @@
 /*
  * Relative Path: Eternal/Source/Eternal/Healing/EternalCorpseHealingProcessor.cs
  * Creation Date: 09-11-2025
- * Last Edit: 16-07-2026
+ * Last Edit: 13-10-2026
  * Author: 0Shard
  * Description: Processes healing and regrowth on Eternal corpses, accumulating debt and managing resurrection completion.
  *              Integrates with EternalRegrowthState for proper 4-phase body part regrowth.
@@ -42,24 +42,25 @@
  *              14-07: Both TryResurrect calls wrapped with Mark/UnmarkExpectedDestruction so the
  *                     Corpse_Destroy_Patch anti-vaporize guard lets resurrection consume the
  *                     still-tracked corpse (UnregisterCorpse runs AFTER TryResurrect).
+ *              13-10: Shared healed/immediate resurrection lifecycle; arm swap rollback before assignments.
  *              Gate 1: Persisted corpse queues are hydrated after service rewiring, indexed active
  *                     iteration waits for hydration, and completed queues compact in linear time.
  */
 
 using System;
+using Eternal.Extensions;
 using System.Collections.Generic;
 using System.Linq;
 using Verse;
+using Eternal.Compatibility;
 using RimWorld;
 using Eternal.Corpse;
 using Eternal.DI;
 using Eternal.Exceptions;
 using Eternal.Interfaces;
-using Eternal.Resources;
-using Eternal.Models;
 using Eternal.Utils;
-using Eternal.Utilities;
 using RimWorld.Planet;
+using Eternal.World;
 
 // Type alias for backwards compatibility
 using EternalCorpseData = Eternal.Models.CorpseTrackingEntry;
@@ -80,12 +81,12 @@ namespace Eternal.Healing
         // PERF-01: Pre-allocated buffers — reused every call, zero allocation after construction.
         // Sized conservatively for typical Eternal counts; List<T> auto-grows if exceeded (rare).
         // RimWorld game logic is single-threaded — no locks required.
-        private readonly List<EternalCorpseData> _corpseBuffer      = new List<EternalCorpseData>(4);
-        private readonly List<Pawn>              _toRemoveBuffer    = new List<Pawn>(4);
-        private readonly List<HealingItem>       _nonRegrowthBuffer = new List<HealingItem>(16);
-        private readonly List<HealingItem>       _regrowthBuffer    = new List<HealingItem>(8);
-        private readonly HashSet<HealingItem>    _completedBuffer   = new HashSet<HealingItem>();
-        private readonly List<Pawn>              _cleanupBuffer     = new List<Pawn>(4);
+        private readonly List<EternalCorpseData> _corpseBuffer = new List<EternalCorpseData>(4);
+        private readonly List<Pawn> _toRemoveBuffer = new List<Pawn>(4);
+        private readonly List<HealingItem> _nonRegrowthBuffer = new List<HealingItem>(16);
+        private readonly List<HealingItem> _regrowthBuffer = new List<HealingItem>(8);
+        private readonly HashSet<HealingItem> _completedBuffer = new HashSet<HealingItem>();
+        private readonly List<Pawn> _cleanupBuffer = new List<Pawn>(4);
 
         // Unified services (injected via service container)
         private IHealingRateCalculator RateCalculator => EternalServiceContainer.Instance.RateCalculator;
@@ -93,7 +94,6 @@ namespace Eternal.Healing
         private IPartRestorer PartRestorer => EternalServiceContainer.Instance.PartRestorer;
         private IFoodDebtSystem DebtSystem => EternalServiceContainer.Instance.FoodDebtSystem;
         private EternalCorpseManager CorpseManager => EternalServiceContainer.Instance.CorpseManager;
-        private IFoodCostProcessor FoodCostProcessor => EternalServiceContainer.Instance.FoodCostProcessor;
 
         public EternalCorpseHealingProcessor()
         {
@@ -122,7 +122,9 @@ namespace Eternal.Healing
             activeHealingCorpsesHydrated = false;
 
             if (CorpseManager == null)
+            {
                 return;
+            }
 
             bool allQueuesHydrated = true;
             try
@@ -130,9 +132,14 @@ namespace Eternal.Healing
                 foreach (var corpseData in GetManagerScanActiveHealingCorpses())
                 {
                     if (corpseData?.OriginalPawn == null)
+                    {
                         continue;
+                    }
 
                     activeHealingCorpses.Add(corpseData.OriginalPawn);
+                    // Exact manager saves have finished loading. Import a legacy corpse-only
+                    // record before any resumed healing pass can refresh its float display.
+                    DebtSystem.RegisterPawn(corpseData.OriginalPawn);
                     if (!EnsureHealingQueueHydrated(corpseData))
                     {
                         allQueuesHydrated = false;
@@ -153,18 +160,26 @@ namespace Eternal.Healing
         private bool EnsureHealingQueueHydrated(EternalCorpseData corpseData)
         {
             if (corpseData == null || corpseData.OriginalPawn == null)
+            {
                 return false;
+            }
 
             if (corpseData.HealingQueueHydrated && corpseData.HealingQueue != null)
             {
                 corpseData.RebindHealingQueueReferences();
+                ExcludeProtectedQueueItems(corpseData.HealingQueue);
                 return true;
             }
 
             try
             {
-                return corpseData.TryHydrateHealingQueue(() =>
+                bool hydrated = corpseData.TryHydrateHealingQueue(() =>
                     resurrectionCalculator.CalculateHealingQueue(corpseData.OriginalPawn));
+                if (hydrated)
+                {
+                    ExcludeProtectedQueueItems(corpseData.HealingQueue);
+                }
+                return hydrated;
             }
             catch (Exception ex)
             {
@@ -172,6 +187,49 @@ namespace Eternal.Healing
                     "HydrateHealingQueue", corpseData.OriginalPawn, ex);
                 return false;
             }
+        }
+
+        internal void ReconcileCrashRegrowth(Pawn pawn, List<HealingItem> freshQueue)
+        {
+            var entry = CorpseManager?.GetCorpseData(pawn);
+            if (entry?.IsHealingActive != true || !EnsureHealingQueueHydrated(entry)) { return; }
+            foreach (var item in freshQueue.Where(item => item.Type == HealingType.Regrowth))
+            {
+                if (!entry.HealingQueue.Any(existing => existing.Type == HealingType.Regrowth
+                    && (ReferenceEquals(existing.Hediff?.Part, item.Hediff?.Part)
+                        || (existing.HediffLoadId >= 0 && existing.HediffLoadId == item.HediffLoadId))))
+                { entry.HealingQueue.Add(item); }
+            }
+            // StartRegrowth preserves existing per-part hediff progress and starts only new
+            // eligible parts. Old queue entries, paid debt and assignments remain authoritative.
+            Eternal_Component.Current?.RegrowthManager?.StartRegrowth(pawn);
+            entry.TotalHealingCost = resurrectionCalculator.CalculateTotalCost(entry.HealingQueue);
+            activeHealingCorpses.Add(pawn);
+        }
+
+        // Discard policy-excluded work without touching the live hediff. This runs after
+        // rebinding and before cost, completion, or execution checks, including old saves.
+        internal static void ExcludeProtectedQueueItems(List<HealingItem> queue)
+        {
+            queue?.RemoveAll(IsPolicyExcludedQueueItem);
+        }
+
+        private static bool IsPolicyExcludedQueueItem(HealingItem item)
+        {
+            if (item == null)
+            {
+                return false;
+            }
+
+            var def = item.Hediff?.def;
+            if (def == null && !string.IsNullOrEmpty(item.HediffDefName))
+            {
+                def = DefDatabase<HediffDef>.GetNamedSilentFail(item.HediffDefName);
+            }
+
+            // An old scalar-only entry without a def cannot be identified reliably.
+            // Preserve its original fallback rather than guessing from severity or part.
+            return RjwHealthPolicy.GetCorpseHealingDecision(def) == false;
         }
 
         /// <summary>
@@ -213,8 +271,8 @@ namespace Eternal.Healing
                         // Check if healing is complete (no more items to heal)
                         if (IsHealingComplete(corpseData))
                         {
-                            CompleteResurrection(corpseData);
-                            _toRemoveBuffer.Add(corpseData.OriginalPawn);
+                            if (IsCompleted(CompleteResurrection(corpseData)))
+                            { _toRemoveBuffer.Add(corpseData.OriginalPawn); }
                         }
                     }
                     catch (Exception ex)
@@ -269,8 +327,8 @@ namespace Eternal.Healing
                         // Check if healing is complete (no more items to heal)
                         if (IsHealingComplete(corpseData))
                         {
-                            CompleteResurrection(corpseData);
-                            _toRemoveBuffer.Add(corpseData.OriginalPawn);
+                            if (IsCompleted(CompleteResurrection(corpseData)))
+                            { _toRemoveBuffer.Add(corpseData.OriginalPawn); }
                         }
                     }
                     catch (Exception ex)
@@ -304,7 +362,8 @@ namespace Eternal.Healing
         {
             try
             {
-                if (corpseData == null || corpseData.OriginalPawn == null)
+                if (EternalModState.IsDisabled || corpseData == null || corpseData.OriginalPawn == null
+                    || !corpseData.OriginalPawn.Dead || !SupportsResurrection(corpseData.Corpse))
                 {
                     Log.Warning("[Eternal] Cannot start healing - corpse data or pawn is null");
                     return false;
@@ -318,7 +377,7 @@ namespace Eternal.Healing
 
                 // Calculate or restore the queue before marking the entry active. An empty queue
                 // is valid only after hydration has completed; an unhydrated old save must wait.
-                if (corpseData.HealingQueue == null || corpseData.HealingQueue.Count == 0)
+                if (corpseData.HealingQueue == null)
                 {
                     corpseData.HealingQueueHydrated = false;
                 }
@@ -335,8 +394,7 @@ namespace Eternal.Healing
                 if (corpseData.HealingQueue.Count == 0)
                 {
                     // Nothing to heal - resurrect immediately
-                    ResurrectImmediately(corpseData);
-                    return true;
+                    return IsCompleted(ResurrectImmediately(corpseData));
                 }
 
                 // Start healing
@@ -423,17 +481,22 @@ namespace Eternal.Healing
             // Collect non-regrowth items only (injuries, diseases, scars)
             foreach (var item in corpseData.HealingQueue)
             {
-                if (item == null) continue;
+                if (item == null)
+                {
+                    continue;
+                }
 
                 float itemSeverity = item.Hediff?.Severity ?? item.Severity;
-                if (item.Type != HealingType.Regrowth && itemSeverity > 0.01f)
+                if (item.Type != HealingType.Regrowth && itemSeverity > 0f)
                 {
                     _nonRegrowthBuffer.Add(item);
                 }
             }
 
             if (_nonRegrowthBuffer.Count == 0)
+            {
                 return;
+            }
 
             // Parallel model (parity with living pawns): every queue item heals at the full
             // per-pass rate simultaneously — no shared-pool division across the queue.
@@ -441,29 +504,37 @@ namespace Eternal.Healing
 
             foreach (var item in _nonRegrowthBuffer)
             {
+                if (IsPolicyExcludedQueueItem(item))
+                {
+                    _completedBuffer.Add(item);
+                    continue;
+                }
                 // Read current severity from hediff if available, else from local copy (save/load fallback)
                 float currentSeverity = item.Hediff?.Severity ?? item.Severity;
                 if (item.Hediff == null && Eternal_Mod.settings?.debugMode == true)
+                {
                     Log.Warning($"[Eternal] Stale hediff reference in healing queue for {corpseData.OriginalPawn?.Name} — using local severity fallback");
+                }
 
-                float healAmount = Math.Min(perItemHeal, currentSeverity);
-                if (healAmount <= 0f)
+                var profile = HealingCostProfiles.ForItem(item, Eternal_Mod.GetSettings().nutritionCostMultiplier, corpseData.OriginalPawn.HasFoodNeedDisabled());
+                var step = CorpseHealingCostCalculator.CalculateProfileStep(currentSeverity, perItemHeal, profile);
+                if (!step.IsValid)
+                {
                     continue;
-
-                float newSeverity = currentSeverity - healAmount;
+                }
 
                 // Write to real hediff (health tab sees the update) and local copy (save/load persistence)
                 if (item.Hediff != null)
-                    item.Hediff.Severity = newSeverity;
-                item.Severity = newSeverity;
+                {
+                    item.Hediff.Severity = step.RemainingSeverity;
+                }
+
+                item.Severity = step.RemainingSeverity;
 
                 // Debt accumulation proportional to healing performed (uncapped resurrection debt)
-                float fraction = currentSeverity > 0f ? (healAmount / currentSeverity) : 1f;
-                float debtCost = fraction * item.EnergyCost;
-                DebtAccumulator?.AddResurrectionDebt(corpseData.OriginalPawn, debtCost);
+                DebtAccumulator?.AddResurrectionDebt(corpseData.OriginalPawn, step.NutritionCharge);
 
-                float finalSeverity = item.Hediff?.Severity ?? item.Severity;
-                if (finalSeverity <= 0.01f)
+                if (step.IsComplete)
                 {
                     _completedBuffer.Add(item);
                     ApplyHealingEffect(corpseData, item);
@@ -510,7 +581,9 @@ namespace Eternal.Healing
             }
 
             if (_regrowthBuffer.Count == 0)
+            {
                 return;
+            }
 
             var regrowthManager = Eternal_Component.Current?.RegrowthManager;
             var regrowthState = regrowthManager?.GetRegrowthState(corpseData.OriginalPawn);
@@ -525,19 +598,12 @@ namespace Eternal.Healing
                 // HVIS-02 VERIFIED: ApplyHealing delegates to EternalRegrowthManager.ProgressRegrowth()
                 // which writes hediff.Severity += severityIncrease directly — health tab shows progress.
                 // Path: regrowthState.ApplyHealing → ProgressRegrowth → EternalRegrowing_Hediff.Severity
-                regrowthState.ApplyHealing(regrowthHeal);
-
-                // Effort-based debt, identical to the living-pawn regrowth path:
-                // each regrowing part consumes the full healAmount of effort per pass.
-                int regrowingPartCount = regrowthManager.GetRegrowingHediffs(corpseData.OriginalPawn).Count();
-                float severityToNutritionRatio = SettingsDefaults.SeverityToNutritionRatio;
-                float nutritionCostMultiplier = Eternal_Mod.GetSettings().nutritionCostMultiplier;
-                float regrowthDebtPerTick = regrowingPartCount * regrowthHeal
-                    * severityToNutritionRatio * nutritionCostMultiplier;
-                DebtAccumulator?.AddResurrectionDebt(corpseData.OriginalPawn, regrowthDebtPerTick);
+                var result = regrowthState.ApplyHealing(regrowthHeal);
+                DebtAccumulator?.AddResurrectionDebt(corpseData.OriginalPawn, result.NutritionCharge);
 
                 // Check if regrowth is complete (all body parts restored)
-                if (regrowthState.IsRegrowthComplete())
+                if (regrowthState.IsRegrowthComplete() && !regrowthManager.IsPawnInRegrowth(corpseData.OriginalPawn) &&
+                    !corpseData.OriginalPawn.health.hediffSet.GetMissingPartsCommonAncestors().Any())
                 {
                     foreach (var item in _regrowthBuffer)
                     {
@@ -595,23 +661,7 @@ namespace Eternal.Healing
         /// </summary>
         internal static void CompactCompletedQueue(List<HealingItem> healingQueue, ISet<HealingItem> completedItems)
         {
-            if (healingQueue == null || healingQueue.Count == 0)
-                return;
-
-            int writeIndex = 0;
-            for (int readIndex = 0; readIndex < healingQueue.Count; readIndex++)
-            {
-                HealingItem healingItem = healingQueue[readIndex];
-                if (healingItem == null || (completedItems != null && completedItems.Contains(healingItem)))
-                    continue;
-
-                healingQueue[writeIndex++] = healingItem;
-            }
-
-            if (writeIndex < healingQueue.Count)
-            {
-                healingQueue.RemoveRange(writeIndex, healingQueue.Count - writeIndex);
-            }
+            Eternal.UI.HealingQueueSelector.Compact(healingQueue, completedItems);
         }
 
         /// <summary>
@@ -635,6 +685,11 @@ namespace Eternal.Healing
         {
             try
             {
+                if (IsPolicyExcludedQueueItem(healingItem))
+                {
+                    return;
+                }
+
                 if (healingItem.Type == HealingType.Regrowth && healingItem.Hediff is Hediff_MissingPart missingPart)
                 {
                     // Regrowth: missing parts restored during resurrection, not here
@@ -684,7 +739,9 @@ namespace Eternal.Healing
             try
             {
                 if (corpseData.HealingQueue == null)
+                {
                     return;
+                }
 
                 // Calculate progress based on remaining items
                 int totalItems = corpseData.HealingQueue.Count + (corpseData.TotalHealingCost > 0 ? 1 : 0); // Account for completed items
@@ -725,15 +782,21 @@ namespace Eternal.Healing
             // An unhydrated queue is not evidence that healing finished. This guard prevents
             // old saves from resurrecting immediately or waiting on a permanently empty queue.
             if (corpseData == null || !EnsureHealingQueueHydrated(corpseData))
+            {
                 return false;
+            }
 
             if (corpseData.HealingQueue == null || corpseData.HealingQueue.Count > 0)
+            {
                 return false;
+            }
 
             // Verify pawn state
             var pawn = corpseData.OriginalPawn;
             if (pawn?.health?.hediffSet == null)
+            {
                 return false;
+            }
 
             // Verify no missing body parts remain
             var missingParts = pawn.health.hediffSet.GetMissingPartsCommonAncestors();
@@ -805,8 +868,10 @@ namespace Eternal.Healing
         /// </summary>
         private RimWorld.Planet.Caravan FindCaravanContainingCorpse(Verse.Corpse corpse)
         {
-            if (corpse == null || corpse.Tile < 0)
+            if (corpse == null)
+            {
                 return null;
+            }
 
             // SAFE-04: Fast path via persisted CaravanId — avoids AllThings.Contains per caravan.
             // GetCorpseData lookup is O(1); Caravans list is typically tiny (<10 entries).
@@ -817,8 +882,10 @@ namespace Eternal.Healing
                 if (corpseData != null && corpseData.CaravanId != -1)
                 {
                     var found = Find.WorldObjects.Caravans.FirstOrDefault(c => c.ID == corpseData.CaravanId);
-                    if (found != null)
+                    if (found != null && found.AllThings.Contains(corpse))
+                    {
                         return found;
+                    }
                     // CaravanId set but caravan dissolved — fall through to linear scan below.
                 }
             }
@@ -828,39 +895,88 @@ namespace Eternal.Healing
             {
                 if (worldObject is RimWorld.Planet.Caravan caravan && caravan.AllThings.Contains(corpse))
                 {
+                    var entry = CorpseManager?.GetCorpseData(corpse.InnerPawn);
+                    if (entry != null) { entry.CaravanId = caravan.ID; }
                     return caravan;
                 }
             }
+            var stale = CorpseManager?.GetCorpseData(corpse.InnerPawn);
+            if (stale != null) { stale.CaravanId = -1; }
             return null;
         }
 
-        /// <summary>
-        /// Completes the resurrection process for a fully healed corpse.
-        /// Body parts should already be restored by the 4-phase regrowth system.
-        /// Uses HediffSet swap pattern from Immortals mod to preserve custom hediffs.
-        /// SAFE-03: Atomic swap via try/finally + swapActive flag — HediffSet is always restored
-        /// even when third-party Harmony postfixes throw during TryResurrect.
-        /// </summary>
-        /// <param name="corpseData">The corpse data to resurrect</param>
-        private void CompleteResurrection(EternalCorpseData corpseData)
+        internal static bool SupportsResurrection(Verse.Corpse corpse)
+            => corpse?.InnerPawn != null && !corpse.Destroyed && !corpse.InnerPawn.Discarded
+                && !(ModsConfig.AnomalyActive && corpse is UnnaturalCorpse);
+
+        private enum ResurrectionOutcome { Retry, Rejected, Completed, Recovered }
+        private static bool IsCompleted(ResurrectionOutcome outcome)
+            => outcome == ResurrectionOutcome.Completed || outcome == ResurrectionOutcome.Recovered;
+
+        private enum ResurrectionMode
         {
+            Healed,
+            Immediate
+        }
+
+        /// <summary>Completes resurrection after the healing and regrowth passes finish.</summary>
+        private ResurrectionOutcome CompleteResurrection(EternalCorpseData corpseData)
+        {
+            return Resurrect(corpseData, ResurrectionMode.Healed);
+        }
+
+        /// <summary>Resurrects immediately when the death-time queue has no healing work.</summary>
+        private ResurrectionOutcome ResurrectImmediately(EternalCorpseData corpseData)
+        {
+            return Resurrect(corpseData, ResurrectionMode.Immediate);
+        }
+
+        /// <summary>
+        /// Preserves saved health through resurrection, then restores caravan membership,
+        /// assignments and debt. The mode retains each entry point's registration history.
+        /// </summary>
+        private ResurrectionOutcome Resurrect(EternalCorpseData corpseData, ResurrectionMode mode)
+        {
+            bool immediate = mode == ResurrectionMode.Immediate;
+            string operation = immediate ? "ResurrectImmediately" : "CompleteResurrection";
+
             if (corpseData?.OriginalPawn == null || corpseData.Corpse == null)
             {
-                Log.Error("[Eternal] Cannot complete resurrection - corpse data or corpse is null");
-                return;
+                Log.Error(immediate
+                    ? "[Eternal] Cannot resurrect immediately - corpse data or corpse is null"
+                    : "[Eternal] Cannot complete resurrection - corpse data or corpse is null");
+                return ResurrectionOutcome.Rejected;
             }
 
             var pawn = corpseData.OriginalPawn;
 
+            // Recover any legacy-only episode while its corpse entry still exists. The same
+            // owner must retain it even if validation cleans up or resurrection/post-work fails.
+            DebtSystem.RegisterPawn(pawn);
+
             // Pre-resurrection validation
             if (!ValidatePreResurrection(pawn, corpseData))
-                return;
+            {
+                return ResurrectionOutcome.Rejected;
+            }
 
-            // === SAFE-05: Capture healing debt BEFORE UnregisterPawn (which zeroes the tracker) ===
-            // corpseData.FoodDebt is synced by SyncCorpseData() on every AddDebt/RepayDebt call —
-            // it is current even after save/load (persisted via Scribe_Values).
-            // Resurrection debt is uncapped: the full amount always transfers, never permanent death.
-            float healingDebt = corpseData.FoodDebt;
+            if (!SupportsResurrection(corpseData.Corpse))
+            {
+                corpseData.IsHealingActive = false;
+                activeHealingCorpses.Remove(pawn);
+                return ResurrectionOutcome.Rejected;
+            }
+            var sourceCorpse = corpseData.Corpse;
+            var sourceMap = sourceCorpse.MapHeld;
+            var sourcePosition = sourceCorpse.PositionHeld;
+            var sourceSite = Find.WorldObjects.AllWorldObjects.OfType<WorldObject_EternalCrashSite>()
+                .FirstOrDefault(site => site.HasPendingCorpse(sourceCorpse));
+            // Reserve the existing recovery-site owner before the native call can consume its
+            // corpse. A later placement failure must have somewhere real to deep-save the pawn.
+            var recoverySite = sourceSite ?? SpaceCrashRescueService.CreateOrGetCrashSite(
+                SpaceCrashRescueService.ResolveGroundTile(sourceCorpse.Tile));
+            if (recoverySite == null) { return ResurrectionOutcome.Retry; }
+            bool partial = false;
 
             // === Save HediffSet and ImmunityHandler (Immortals pattern) ===
             // Captured before the try block so the finally block can always access them.
@@ -884,44 +1000,44 @@ namespace Eternal.Healing
                     pawnCaravan = FindCaravanContainingCorpse(corpseData.Corpse);
                     if (Eternal_Mod.settings?.debugMode == true && pawnCaravan != null)
                     {
-                        Log.Message($"[Eternal] Detected corpse in caravan: {pawnCaravan.Label}");
+                        Log.Message(immediate
+                            ? $"[Eternal] Detected corpse in caravan for immediate resurrection: {pawnCaravan.Label}"
+                            : $"[Eternal] Detected corpse in caravan: {pawnCaravan.Label}");
                     }
                 }
 
                 // === Create clean slate for resurrection ===
                 // RimWorld's TryResurrect expects a clean health state.
+                // Arm rollback before either assignment: constructing the second tracker may throw.
+                swapActive = true;
                 pawn.health.hediffSet = new HediffSet(pawn);
                 pawn.health.immunity = new ImmunityHandler(pawn);
-                swapActive = true; // HediffSet is now swapped out — finally must restore it on any throw
-
-                // Apply healing effects (remove harmful hediffs like injuries and diseases)
-                ApplyCompleteHealingEffects(corpseData);
 
                 // Resurrect the pawn.
                 // Third-party Harmony transpilers/postfixes (e.g. WorkTab) may throw inside
                 // TryResurrect. Critically, Pawn_HealthTracker.Notify_Resurrected sets healthState
                 // to Mobile BEFORE EnableAndInitialize is called — so if WorkTab crashes during
-                // EnableAndInitialize, the pawn is already alive. We treat that as a soft failure:
-                // log a warning, clear swapActive, and continue post-work normally.
+                // EnableAndInitialize, the pawn is already alive. Recover its physical/deep
+                // ownership before sanitizing saved health or committing completion.
                 // If the pawn is still dead after the exception, it is a hard failure — let the
                 // outer catch and finally handle it (AttemptHediffRestore).
                 // TryResurrect destroys the still-tracked corpse (Vanish, unspawned for caravan
                 // corpses) — mark it expected so Corpse_Destroy_Patch lets the destroy through.
                 CorpseManager?.MarkExpectedDestruction(corpseData.Corpse);
+                bool resurrected;
                 try
                 {
-                    ResurrectionUtility.TryResurrect(pawn, null);
+                    resurrected = ResurrectionUtility.TryResurrect(pawn, null);
                 }
                 catch (Exception tryResurrectEx)
                 {
                     if (!pawn.Dead)
                     {
-                        // Resurrection succeeded (pawn is alive) despite the exception.
-                        // WorkTab or another mod threw in a Harmony postfix/transpiler inside
-                        // TryResurrect after Notify_Resurrected already set healthState=Mobile.
-                        // This is safe — log warning and continue post-work normally.
-                        Log.Warning($"[Eternal:CompleteResurrection] TryResurrect threw but pawn {pawn.Name} " +
-                            $"is alive — treating as success (third-party Harmony exception swallowed). " +
+                        // Becoming alive is only a partial transition; placement below must
+                        // establish a persistent owner before this can count as completed.
+                        partial = true;
+                        resurrected = true;
+                        Log.Warning($"[Eternal:{operation}] TryResurrect threw after {pawn.Name} became alive; recovering ownership. " +
                             $"Exception: {tryResurrectEx.GetType().Name}: {tryResurrectEx.Message}");
                     }
                     else
@@ -935,6 +1051,10 @@ namespace Eternal.Healing
                 {
                     CorpseManager?.UnmarkExpectedDestruction(corpseData.Corpse);
                 }
+                if (!resurrected || pawn.Dead) { return ResurrectionOutcome.Retry; }
+                if (!EnsureResurrectedOwner(pawn, pawnCaravan, sourceMap, sourcePosition, recoverySite))
+                { return ResurrectionOutcome.Retry; }
+                sourceSite?.ForgetPendingCorpse(sourceCorpse);
 
                 // === Sanitize saved HediffSet BEFORE swap-back (RSRV-01/02/03) ===
                 // The savedHediffSet is detached from the pawn during the swap window.
@@ -954,6 +1074,16 @@ namespace Eternal.Healing
                 // Reconcile immediately after the saved HediffSet is attached. This reads and
                 // prunes scalar state only; healing remains owned by the scheduled passes.
                 Eternal_Component.Instance?.ReconcileLiveHealth(pawn);
+                if (partial)
+                {
+                    // Finish idempotent native state work only after the real saved hediffs
+                    // return, so their need waivers and capacities participate in the refresh.
+                    pawn.needs?.AddOrRemoveNeedsAsAppropriate();
+                    if (pawn.relations != null) { pawn.relations.hidePawnRelations = false; }
+                    if (pawn.guest?.IsInteractionEnabled(PrisonerInteractionModeDefOf.Execution) == true)
+                    { pawn.guest.SetNoInteraction(); }
+                    pawn.Drawer?.renderer?.SetAllGraphicsDirty();
+                }
 
                 // === Post-resurrection work ===
                 // swapActive is false here: hediffs are restored, so exceptions below are
@@ -981,22 +1111,6 @@ namespace Eternal.Healing
                     }
                 }
 
-                // === Re-add to caravan if was in one ===
-                if (pawnCaravan != null)
-                {
-                    // Remove corpse from carrier's inventory first
-                    var carrier = CaravanInventoryUtility.GetOwnerOf(pawnCaravan, corpseData.Corpse);
-                    carrier?.inventory?.innerContainer?.Remove(corpseData.Corpse);
-
-                    // Add pawn back to caravan
-                    pawnCaravan.AddPawn(pawn, false);
-
-                    if (Eternal_Mod.settings?.debugMode == true)
-                    {
-                        Log.Message($"[Eternal] Re-added {pawn.Name} to caravan {pawnCaravan.Label}");
-                    }
-                }
-
                 // Restore work priorities, policies, and schedule AFTER resurrection.
                 // ResurrectionUtility.TryResurrect calls pawn.workSettings.EnableAndInitialize()
                 // which RESETS all work priorities, so we must restore after.
@@ -1006,50 +1120,39 @@ namespace Eternal.Healing
 
                     if (Eternal_Mod.settings?.debugMode == true)
                     {
-                        Log.Message($"[Eternal] Restored work assignments for resurrected pawn {pawn.Name}");
+                        Log.Message(immediate
+                            ? $"[Eternal] Restored work assignments for immediately resurrected pawn {pawn.Name}"
+                            : $"[Eternal] Restored work assignments for resurrected pawn {pawn.Name}");
                     }
                 }
 
-                // Note: Body parts are restored progressively by the 4-phase regrowth system
-                // (ProcessCorpseInjuryHealing / ProcessCorpseRegrowth), not instantly here.
-                // Only do fallback restoration if regrowth system was unavailable.
-                var regrowthManager = Eternal_Component.Current?.RegrowthManager;
-                if (regrowthManager == null || !regrowthManager.IsPawnInRegrowth(pawn))
+                if (!immediate)
                 {
-                    // Fallback: restore any remaining missing parts if regrowth system wasn't used
-                    RestoreMissingBodyParts(pawn, corpseData);
+                    // Healed resurrection alone performs the regrowth fallback and cleanup.
+                    var regrowthManager = Eternal_Component.Current?.RegrowthManager;
+                    if (regrowthManager == null || !regrowthManager.IsPawnInRegrowth(pawn))
+                    {
+                        RestoreMissingBodyParts(pawn, corpseData);
+                    }
+                    regrowthManager?.RemoveCompletedRegrowth(pawn);
                 }
 
-                // Clean up regrowth state if it still exists
-                regrowthManager?.RemoveCompletedRegrowth(pawn);
+                // The same pawn keeps its exact episode; this float is only a notification.
+                float healingDebt = DebtSystem.GetDebt(pawn);
+                ReleaseResurrectionTracking(corpseData);
 
-                // Unregister from corpse tracking
-                CorpseManager?.UnregisterCorpse(pawn);
+                Log.Message(immediate
+                    ? $"[Eternal] Immediately resurrected {pawn.Name}. Retained debt: {healingDebt:F2}"
+                    : $"[Eternal] Resurrection completed for {pawn.Name}. Retained debt: {healingDebt:F2}");
 
-                // Unregister from debt monitoring (pawn is now alive).
-                // IMPORTANT: UnregisterPawn zeroes the tracker — healingDebt was captured above,
-                // before this call, so the transfer below uses the correct pre-unregister value.
-                DebtSystem.UnregisterPawn(pawn);
-
-                // Re-register for debt monitoring as living pawn
-                DebtSystem.RegisterPawn(pawn);
-
-                // === SAFE-05: Transfer accumulated healing debt to the now-living pawn ===
-                // Additive transfer — old unpaid debt (from prior deaths) + new healing debt.
-                if (healingDebt > 0f)
-                {
-                    DebtSystem.AddResurrectionDebt(pawn, healingDebt);
-                }
-
-                // Log completion with transferred debt amount
-                Log.Message($"[Eternal] Resurrection completed for {pawn.Name}. Transferred debt: {healingDebt:F2}");
-
-                // Show notification
                 Find.LetterStack.ReceiveLetter(
                     "EternalResurrectionComplete".Translate(),
-                    "EternalResurrectionCompleteDesc".Translate(pawn.Named("PAWN"), healingDebt.Named("DEBT")),
+                    immediate
+                        ? "EternalResurrectionImmediateDesc".Translate(pawn.Named("PAWN"))
+                        : "EternalResurrectionCompleteDesc".Translate(pawn.Named("PAWN"), healingDebt.Named("DEBT")),
                     LetterDefOf.PositiveEvent,
                     pawn);
+                return partial ? ResurrectionOutcome.Recovered : ResurrectionOutcome.Completed;
             }
             catch (Exception ex)
             {
@@ -1057,9 +1160,10 @@ namespace Eternal.Healing
                 {
                     // Hediffs already restored — exception occurred in post-work. Log and continue.
                     EternalLogger.HandleException(EternalExceptionCategory.Resurrection,
-                        "CompleteResurrection.PostWork", pawn, ex);
+                        operation + ".PostWork", pawn, ex);
                 }
                 // If swapActive is still true, the finally block below calls AttemptHediffRestore.
+                return ResurrectionOutcome.Retry;
             }
             finally
             {
@@ -1068,7 +1172,73 @@ namespace Eternal.Healing
                     // Swap was active when the exception escaped — restore hediffs atomically.
                     AttemptHediffRestore(pawn, savedHediffSet, savedImmunity, corpseData);
                 }
+                if (!pawn.Dead)
+                {
+                    bool owned = EnsureResurrectedOwner(pawn, pawnCaravan, sourceMap, sourcePosition, recoverySite);
+                    if (owned) { sourceSite?.ForgetPendingCorpse(sourceCorpse); }
+                    // A consumed corpse cannot retain a dead-only retry index. Its pawn is now
+                    // persisted by the verified map/caravan/site and controlled through that owner.
+                    if (owned) { ReleaseResurrectionTracking(corpseData); }
+                }
+                if (!recoverySite.HasRecoveryContents && !recoverySite.HasMap)
+                { Find.WorldObjects.Remove(recoverySite); }
             }
+        }
+
+        private void ReleaseResurrectionTracking(EternalCorpseData entry)
+        {
+            entry.IsHealingActive = false;
+            activeHealingCorpses.Remove(entry.OriginalPawn);
+            if (CorpseManager?.IsTracked(entry.OriginalPawn) == true)
+            { CorpseManager.UnregisterCorpse(entry.OriginalPawn); }
+        }
+
+        private static bool EnsureResurrectedOwner(Pawn pawn, RimWorld.Planet.Caravan caravan,
+            Verse.Map map, IntVec3 position, WorldObject_EternalCrashSite recoverySite)
+        {
+            if (pawn.Dead) { return false; }
+            // Site retention completes placement. Retrying a former destination would
+            // leave its separate deep-save list owning a pawn also saved by that destination.
+            if (recoverySite.Spawned && !recoverySite.Destroyed && recoverySite.HasPendingPawn(pawn)) { return true; }
+            if (pawn.Spawned && pawn.Map != null)
+            {
+                if (pawn.IsWorldPawn()) { Find.WorldPawns.RemovePawn(pawn); }
+                return true;
+            }
+            if (caravan != null && caravan.Spawned)
+            {
+                try
+                {
+                    if (!caravan.ContainsPawn(pawn)) { caravan.AddPawn(pawn, false); }
+                }
+                catch (Exception ex) { Log.Warning("[Eternal] Resurrection caravan placement failed: " + ex.Message); }
+                if (caravan.ContainsPawn(pawn))
+                {
+                    try
+                    {
+                        // Caravan's pawn ThingOwner uses LookMode.Reference. WorldPawns is
+                        // its native deep owner; membership alone cannot make a safe save.
+                        if (!pawn.IsWorldPawn()) { Find.WorldPawns.PassToWorld(pawn); }
+                    }
+                    catch (Exception ex) { Log.Warning("[Eternal] Resurrection world ownership failed: " + ex.Message); }
+                    if (pawn.IsWorldPawn()) { return true; }
+                    // Failed persistence must release the reference-only membership before
+                    // the already-reserved site can adopt this living pawn as its deep owner.
+                    caravan.RemovePawn(pawn);
+                }
+            }
+            if (map != null && Find.Maps.Contains(map) && position.IsValid && position.InBounds(map))
+            {
+                try
+                {
+                    if (pawn.IsWorldPawn()) { Find.WorldPawns.RemovePawn(pawn); }
+                    GenSpawn.Spawn(pawn, position, map);
+                    if (pawn.Spawned && pawn.Map == map) { return true; }
+                }
+                catch (Exception ex) { Log.Warning("[Eternal] Resurrection map placement failed: " + ex.Message); }
+                if (pawn.Spawned && pawn.Map == map) { return true; }
+            }
+            return recoverySite.TryRetainUnownedPawn(pawn);
         }
 
         /// <summary>
@@ -1150,7 +1320,9 @@ namespace Eternal.Healing
         private void SanitizeHediffSetBeforeRestore(HediffSet hediffSet, Pawn pawn)
         {
             if (hediffSet == null)
+            {
                 return;
+            }
 
             // Pass 1: Remove stale EternalRegrowing_Hediff instances (RSRV-01).
             // Under normal flow these are all removed before resurrection completes.
@@ -1182,7 +1354,9 @@ namespace Eternal.Healing
             foreach (var hediff in hediffSet.hediffs)
             {
                 if (hediff is Hediff_Injury)
+                {
                     totalInjurySeverity += hediff.Severity;
+                }
             }
             if (totalInjurySeverity > 0f)
             {
@@ -1194,252 +1368,6 @@ namespace Eternal.Healing
             // Direct list manipulation bypasses RimWorld's normal cache-dirty path, so we
             // must call DirtyCache() explicitly before the hediffSet becomes the pawn's active set.
             hediffSet.DirtyCache();
-        }
-
-        /// <summary>
-        /// Resurrects a pawn immediately when no healing is needed.
-        /// Uses HediffSet swap pattern from Immortals mod to preserve custom hediffs.
-        /// SAFE-03: Atomic swap via try/finally + swapActive flag — HediffSet is always restored
-        /// even when third-party Harmony postfixes throw during TryResurrect.
-        /// </summary>
-        /// <param name="corpseData">The corpse data to resurrect</param>
-        private void ResurrectImmediately(EternalCorpseData corpseData)
-        {
-            if (corpseData?.OriginalPawn == null || corpseData.Corpse == null)
-            {
-                Log.Error("[Eternal] Cannot resurrect immediately - corpse data or corpse is null");
-                return;
-            }
-
-            var pawn = corpseData.OriginalPawn;
-
-            // Pre-resurrection validation
-            if (!ValidatePreResurrection(pawn, corpseData))
-                return;
-
-            // === SAFE-05: Capture healing debt BEFORE any unregister call that zeroes the tracker ===
-            // Even in the immediate-resurrection path (no prior healing), corpseData.FoodDebt may
-            // be non-zero if the pawn carried debt from a previous death cycle.
-            // Resurrection debt is uncapped: the full amount always transfers, never permanent death.
-            float healingDebt = corpseData.FoodDebt;
-
-            // === Save HediffSet and ImmunityHandler (Immortals pattern) ===
-            // Captured before the try block so the finally block can always access them.
-            var savedHediffSet = pawn.health.hediffSet;
-            var savedImmunity = pawn.health.immunity;
-
-            // swapActive is true between swap-out and swap-in.
-            // If any exception escapes while swapActive, the finally block calls
-            // AttemptHediffRestore to guarantee the pawn never stays alive without Eternal hediffs.
-            bool swapActive = false;
-
-            RimWorld.Planet.Caravan pawnCaravan = null;
-
-            try
-            {
-                // === Detect caravan/storage corpses ===
-                if (!corpseData.Corpse.Spawned)
-                {
-                    pawnCaravan = FindCaravanContainingCorpse(corpseData.Corpse);
-                    if (Eternal_Mod.settings?.debugMode == true && pawnCaravan != null)
-                    {
-                        Log.Message($"[Eternal] Detected corpse in caravan for immediate resurrection: {pawnCaravan.Label}");
-                    }
-                }
-
-                // === Create clean slate for resurrection ===
-                // RimWorld's TryResurrect expects a clean health state.
-                pawn.health.hediffSet = new HediffSet(pawn);
-                pawn.health.immunity = new ImmunityHandler(pawn);
-                swapActive = true; // HediffSet is now swapped out — finally must restore it on any throw
-
-                // Resurrect the pawn.
-                // Same WorkTab-compatibility guard as CompleteResurrection:
-                // Notify_Resurrected sets healthState=Mobile BEFORE EnableAndInitialize is called,
-                // so if WorkTab crashes during EnableAndInitialize the pawn is already alive.
-                // Treat that as a soft failure: log warning, clear swapActive, continue post-work.
-                // Same expected-destroy mark as CompleteResurrection — TryResurrect destroys the
-                // still-tracked corpse and Corpse_Destroy_Patch must not block it.
-                CorpseManager?.MarkExpectedDestruction(corpseData.Corpse);
-                try
-                {
-                    ResurrectionUtility.TryResurrect(pawn, null);
-                }
-                catch (Exception tryResurrectEx)
-                {
-                    if (!pawn.Dead)
-                    {
-                        // Resurrection succeeded (pawn is alive) despite the exception.
-                        Log.Warning($"[Eternal:ResurrectImmediately] TryResurrect threw but pawn {pawn.Name} " +
-                            $"is alive — treating as success (third-party Harmony exception swallowed). " +
-                            $"Exception: {tryResurrectEx.GetType().Name}: {tryResurrectEx.Message}");
-                    }
-                    else
-                    {
-                        // Pawn is still dead — hard failure.
-                        throw;
-                    }
-                }
-                finally
-                {
-                    CorpseManager?.UnmarkExpectedDestruction(corpseData.Corpse);
-                }
-
-                // === Sanitize saved HediffSet BEFORE swap-back (RSRV-01/02/03) ===
-                // Same pattern as CompleteResurrection — detached hediffset is safe to
-                // manipulate directly without triggering CheckForStateChange.
-                SanitizeHediffSetBeforeRestore(savedHediffSet, pawn);
-
-                // === Restore HediffSet and Immunity ===
-                // This preserves Eternal_Essence, food debt tracking, and other custom hediffs.
-                pawn.health.hediffSet = savedHediffSet;
-                pawn.health.immunity = savedImmunity;
-                swapActive = false; // Swap complete — post-work exceptions no longer need atomic rollback
-
-                // Keep the immediate-resurrection path symmetrical with the active-healing path.
-                // Reconciliation does not apply severity changes or retain Hediff references.
-                Eternal_Component.Instance?.ReconcileLiveHealth(pawn);
-
-                // === Post-resurrection work ===
-                // swapActive is false here: hediffs are restored, so exceptions below are
-                // caught by the catch block and logged without triggering AttemptHediffRestore.
-
-                // === Sync Part property on regrowing hediffs (Immortals pattern) ===
-                // After resurrection, the Part property must be synced with forPart.
-                var regrowingHediffsToSync = pawn.health?.hediffSet?.hediffs
-                    .OfType<EternalRegrowing_Hediff>()
-                    .ToList();
-
-                if (regrowingHediffsToSync != null)
-                {
-                    foreach (var regrowthHediff in regrowingHediffsToSync)
-                    {
-                        if (regrowthHediff.forPart != null && regrowthHediff.Part == null)
-                        {
-                            regrowthHediff.Part = regrowthHediff.forPart;
-
-                            if (Eternal_Mod.settings?.debugMode == true)
-                            {
-                                Log.Message($"[Eternal] Synced Part property for regrowing hediff on {regrowthHediff.forPart.Label}");
-                            }
-                        }
-                    }
-                }
-
-                // === Re-add to caravan if was in one ===
-                if (pawnCaravan != null)
-                {
-                    // Remove corpse from carrier's inventory first
-                    var carrier = CaravanInventoryUtility.GetOwnerOf(pawnCaravan, corpseData.Corpse);
-                    carrier?.inventory?.innerContainer?.Remove(corpseData.Corpse);
-
-                    // Add pawn back to caravan
-                    pawnCaravan.AddPawn(pawn, false);
-
-                    if (Eternal_Mod.settings?.debugMode == true)
-                    {
-                        Log.Message($"[Eternal] Re-added {pawn.Name} to caravan {pawnCaravan.Label}");
-                    }
-                }
-
-                // Restore work priorities, policies, and schedule AFTER resurrection.
-                // ResurrectionUtility.TryResurrect calls pawn.workSettings.EnableAndInitialize()
-                // which RESETS all work priorities, so we must restore after.
-                if (corpseData.AssignmentSnapshot != null)
-                {
-                    corpseData.AssignmentSnapshot.ApplyTo(pawn);
-
-                    if (Eternal_Mod.settings?.debugMode == true)
-                    {
-                        Log.Message($"[Eternal] Restored work assignments for immediately resurrected pawn {pawn.Name}");
-                    }
-                }
-
-                // Unregister from corpse tracking
-                CorpseManager?.UnregisterCorpse(pawn);
-
-                // Register for debt monitoring as living pawn.
-                // Note: UnregisterPawn is NOT called here because ResurrectImmediately runs when there was
-                // nothing to heal — the pawn was never registered as a corpse debtor in StartCorpseHealing.
-                DebtSystem.RegisterPawn(pawn);
-
-                // === SAFE-05: Transfer any accumulated healing debt to the now-living pawn ===
-                if (healingDebt > 0f)
-                {
-                    DebtSystem.AddResurrectionDebt(pawn, healingDebt);
-                }
-
-                Log.Message($"[Eternal] Immediately resurrected {pawn.Name}. Transferred debt: {healingDebt:F2}");
-
-                // Show notification
-                Find.LetterStack.ReceiveLetter(
-                    "EternalResurrectionComplete".Translate(),
-                    "EternalResurrectionImmediateDesc".Translate(pawn.Named("PAWN")),
-                    LetterDefOf.PositiveEvent,
-                    pawn);
-            }
-            catch (Exception ex)
-            {
-                if (!swapActive)
-                {
-                    // Hediffs already restored — exception occurred in post-work. Log and continue.
-                    EternalLogger.HandleException(EternalExceptionCategory.Resurrection,
-                        "ResurrectImmediately.PostWork", pawn, ex);
-                }
-                // If swapActive is still true, the finally block below calls AttemptHediffRestore.
-            }
-            finally
-            {
-                if (swapActive)
-                {
-                    // Swap was active when the exception escaped — restore hediffs atomically.
-                    AttemptHediffRestore(pawn, savedHediffSet, savedImmunity, corpseData);
-                }
-            }
-        }
-
-        /// <summary>
-        /// Applies complete healing effects to a pawn before resurrection.
-        /// </summary>
-        /// <param name="corpseData">The corpse data with healing information</param>
-        private void ApplyCompleteHealingEffects(EternalCorpseData corpseData)
-        {
-            try
-            {
-                var pawn = corpseData.OriginalPawn;
-                if (pawn?.health == null)
-                    return;
-
-                // Remove all harmful hediffs that were being healed
-                var hediffsToRemove = new List<Hediff>();
-
-                foreach (var hediff in pawn.health.hediffSet.hediffs)
-                {
-                    if (hediff == null || hediff.def == EternalDefOf.Eternal_Essence)
-                        continue;
-
-                    if (EternalHealingPriority.IsHarmfulHediff(hediff))
-                    {
-                        hediffsToRemove.Add(hediff);
-                    }
-                }
-
-                // Remove the harmful hediffs
-                foreach (var hediff in hediffsToRemove)
-                {
-                    pawn.health.RemoveHediff(hediff);
-                }
-
-                if (Eternal_Mod.settings?.debugMode == true)
-                {
-                    Log.Message($"[Eternal] Removed {hediffsToRemove.Count} harmful hediffs from {pawn.Name}");
-                }
-            }
-            catch (Exception ex)
-            {
-                EternalLogger.HandleException(EternalExceptionCategory.Resurrection,
-                    "ApplyCompleteHealingEffects", corpseData?.OriginalPawn, ex);
-            }
         }
 
         /// <summary>
@@ -1455,7 +1383,9 @@ namespace Eternal.Healing
             try
             {
                 if (pawn?.health == null)
+                {
                     return;
+                }
 
                 // Use unified part restorer if available
                 if (PartRestorer != null)
@@ -1520,7 +1450,9 @@ namespace Eternal.Healing
         {
             var trackedCorpses = CorpseManager?.GetAllCorpses();
             if (trackedCorpses == null)
+            {
                 yield break;
+            }
 
             foreach (var corpseData in trackedCorpses)
             {

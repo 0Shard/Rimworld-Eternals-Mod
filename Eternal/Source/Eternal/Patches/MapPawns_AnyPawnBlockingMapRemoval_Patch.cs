@@ -17,7 +17,6 @@ using HarmonyLib;
 using RimWorld.Planet;
 using Verse;
 using Eternal.Compatibility;
-using Eternal.Corpse;
 using Eternal.DI;
 using Eternal.Exceptions;
 using Eternal.Map;
@@ -51,7 +50,9 @@ namespace Eternal.Patches
         private static void EnsureFieldCacheInitialized()
         {
             if (_fieldCacheInitialized)
+            {
                 return;
+            }
 
             _fieldCacheInitialized = true;
 
@@ -78,7 +79,9 @@ namespace Eternal.Patches
             EnsureFieldCacheInitialized();
 
             if (_mapField == null || mapPawns == null)
+            {
                 return null;
+            }
 
             try
             {

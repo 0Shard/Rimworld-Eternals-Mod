@@ -23,28 +23,30 @@ namespace Eternal.UI.Settings
         public static void ValidateSettings(Eternal_Settings settings)
         {
             if (settings == null)
+            {
                 return;
+            }
 
-            settings.baseHealingRate = Mathf.Clamp(
-                settings.baseHealingRate,
+            settings.baseHealingRate = SettingsDefaults.NormalizeGlobalFloat(
+                settings.baseHealingRate, SettingsDefaults.BaseHealingRate,
                 SettingsDefaults.BaseHealingRateMin,
                 SettingsDefaults.BaseHealingRateMax);
 
-            settings.nutritionCostMultiplier = Mathf.Clamp(
-                settings.nutritionCostMultiplier,
+            settings.nutritionCostMultiplier = SettingsDefaults.NormalizeGlobalFloat(
+                settings.nutritionCostMultiplier, SettingsDefaults.NutritionCostMultiplier,
                 SettingsDefaults.NutritionCostMultiplierMin,
                 SettingsDefaults.NutritionCostMultiplierMax);
 
-            settings.maxDebtMultiplier = Mathf.Clamp(
-                settings.maxDebtMultiplier,
+            settings.maxDebtMultiplier = SettingsDefaults.NormalizeGlobalFloat(
+                settings.maxDebtMultiplier, SettingsDefaults.MaxDebtMultiplier,
                 SettingsDefaults.MaxDebtMultiplierMin,
                 SettingsDefaults.MaxDebtMultiplierMax);
-            settings.foodDrainThreshold = Mathf.Clamp(
-                settings.foodDrainThreshold,
+            settings.foodDrainThreshold = SettingsDefaults.NormalizeGlobalFloat(
+                settings.foodDrainThreshold, SettingsDefaults.FoodDrainThreshold,
                 SettingsDefaults.FoodDrainThresholdMin,
                 SettingsDefaults.FoodDrainThresholdMax);
-            settings.debtRepaymentDays = Mathf.Clamp(
-                settings.debtRepaymentDays,
+            settings.debtRepaymentDays = SettingsDefaults.NormalizeGlobalFloat(
+                settings.debtRepaymentDays, SettingsDefaults.DebtRepaymentDays,
                 SettingsDefaults.DebtRepaymentDaysMin,
                 SettingsDefaults.DebtRepaymentDaysMax);
 
@@ -83,8 +85,8 @@ namespace Eternal.UI.Settings
                 SettingsDefaults.LoggingLevelMin,
                 SettingsDefaults.LoggingLevelMax);
 
-            settings.consciousnessMultiplier = Mathf.Clamp(
-                settings.consciousnessMultiplier,
+            settings.consciousnessMultiplier = SettingsDefaults.NormalizeGlobalFloat(
+                settings.consciousnessMultiplier, SettingsDefaults.ConsciousnessMultiplier,
                 SettingsDefaults.ConsciousnessMultiplierMin,
                 SettingsDefaults.ConsciousnessMultiplierMax);
             settings.moodBuffValue = Mathf.Clamp(
@@ -121,41 +123,6 @@ namespace Eternal.UI.Settings
         }
 
         #region Individual Validation Methods
-
-        /// <summary>
-        /// Validates a healing rate using the same bounds as the global healing control.
-        /// </summary>
-        public static float ValidateHealAmount(float value)
-        {
-            return Mathf.Clamp(value, SettingsDefaults.BaseHealingRateMin, SettingsDefaults.BaseHealingRateMax);
-        }
-
-        /// <summary>
-        /// Validates the single global nutrition cost multiplier.
-        /// </summary>
-        public static float ValidateNutritionCostMultiplier(float value)
-        {
-            return Mathf.Clamp(
-                value,
-                SettingsDefaults.NutritionCostMultiplierMin,
-                SettingsDefaults.NutritionCostMultiplierMax);
-        }
-
-        /// <summary>
-        /// Validates a tick rate against an explicit catalog range.
-        /// </summary>
-        public static int ValidateTickRate(int value, int min, int max)
-        {
-            return Mathf.Clamp(value, min, max);
-        }
-
-        /// <summary>
-        /// Validates logging level against the catalog choices.
-        /// </summary>
-        public static int ValidateLoggingLevel(int value)
-        {
-            return Mathf.Clamp(value, SettingsDefaults.LoggingLevelMin, SettingsDefaults.LoggingLevelMax);
-        }
 
         #endregion
     }

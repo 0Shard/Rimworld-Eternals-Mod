@@ -28,7 +28,6 @@ namespace Eternal.Infrastructure
         public ResourceSection Resource { get; init; }
         public FoodDebtSection FoodDebt { get; init; }
         public PerfSection Perf { get; init; }
-        public AdvancedHediffSection AdvancedHediff { get; init; }
         public MapSection Map { get; init; }
         public EffectsSection Effects { get; init; }
 
@@ -48,7 +47,6 @@ namespace Eternal.Infrastructure
         public readonly record struct HealingSection
         {
             public float BaseRate { get; init; }
-            public bool ShowEffects { get; init; }
             public bool ShowProgress { get; init; }
         }
 
@@ -56,9 +54,6 @@ namespace Eternal.Infrastructure
         public readonly record struct ResourceSection
         {
             public float NutritionCostMultiplier { get; init; }
-            public bool PauseOnResourceDepletion { get; init; }
-            public float MinimumNutritionThreshold { get; init; }
-            public bool AllowResourceBorrowing { get; init; }
         }
 
         /// <summary>Food debt settings section.</summary>
@@ -89,22 +84,9 @@ namespace Eternal.Infrastructure
             public int HealingHistorySweepInterval { get; init; }
         }
 
-        /// <summary>Advanced hediff settings section (scalar fields only; hediffManager excluded).</summary>
-        public readonly record struct AdvancedHediffSection
-        {
-            public bool AutoHealEnabled { get; init; }
-            public HealingOrder HealingOrder { get; init; }
-            public bool EnableIndividualHediffControl { get; init; }
-        }
-
         /// <summary>Map protection settings section.</summary>
         public readonly record struct MapSection
         {
-            /// <summary>
-            /// Map protection action string (e.g., "teleport").
-            /// Strings are immutable in .NET — safe to snapshot without copying.
-            /// </summary>
-            public string MapProtectionAction { get; init; }
             public bool EnableMapAnchors { get; init; }
             public int AnchorGracePeriodTicks { get; init; }
             public bool EnableRoofCollapseProtection { get; init; }

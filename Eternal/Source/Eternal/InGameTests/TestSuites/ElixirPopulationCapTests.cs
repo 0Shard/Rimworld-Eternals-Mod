@@ -12,7 +12,6 @@
 
 #if DEBUG
 
-using System;
 using System.Collections.Generic;
 using Verse;
 using RimWorld;
@@ -32,39 +31,30 @@ namespace Eternal.InGameTests.TestSuites
     {
         public static TestSuiteResult RunAll(Verse.Map map)
         {
-            int passed = 0;
-            int failed = 0;
-            var failures = new List<string>();
+            var result = new TestSuiteResult(0, 0, new List<string>());
 
-            try
-            {
-                RunTest("ElixirAcceptsNonEternalPawn",
-                    () => ElixirAcceptsNonEternalPawn(map), ref passed, ref failed, failures);
-                RunTest("ElixirRejectsAlreadyEternalPawn",
-                    () => ElixirRejectsAlreadyEternalPawn(map), ref passed, ref failed, failures);
-                RunTest("ElixirRejectsDeadPawn",
-                    () => ElixirRejectsDeadPawn(map), ref passed, ref failed, failures);
-                RunTest("ElixirGrantsTraitToTargetNotUser",
-                    () => ElixirGrantsTraitToTargetNotUser(map), ref passed, ref failed, failures);
-                RunTest("ElixirSelfUseGrantsTrait",
-                    () => ElixirSelfUseGrantsTrait(map), ref passed, ref failed, failures);
-                RunTest("ElixirDoEffectOnSkipsDeadTarget",
-                    () => ElixirDoEffectOnSkipsDeadTarget(map), ref passed, ref failed, failures);
-                RunTest("ElixirConfirmMessageNamesTarget",
-                    () => ElixirConfirmMessageNamesTarget(map), ref passed, ref failed, failures);
-                RunTest("ElixirKillSwitchRejectsUse",
-                    () => ElixirKillSwitchRejectsUse(map), ref passed, ref failed, failures);
-                RunTest("PopulationCapBlocksElixir",
-                    () => PopulationCapBlocksElixir(map), ref passed, ref failed, failures);
-                RunTest("PopulationCapDisabledAllowsUnlimited",
-                    () => PopulationCapDisabledAllowsUnlimited(map), ref passed, ref failed, failures);
-            }
-            finally
-            {
-                TestPawnFactory.CleanupAll();
-            }
+            result.RunTest("ElixirPopCap", "ElixirAcceptsNonEternalPawn",
+                () => ElixirAcceptsNonEternalPawn(map));
+            result.RunTest("ElixirPopCap", "ElixirRejectsAlreadyEternalPawn",
+                () => ElixirRejectsAlreadyEternalPawn(map));
+            result.RunTest("ElixirPopCap", "ElixirRejectsDeadPawn",
+                () => ElixirRejectsDeadPawn(map));
+            result.RunTest("ElixirPopCap", "ElixirGrantsTraitToTargetNotUser",
+                () => ElixirGrantsTraitToTargetNotUser(map));
+            result.RunTest("ElixirPopCap", "ElixirSelfUseGrantsTrait",
+                () => ElixirSelfUseGrantsTrait(map));
+            result.RunTest("ElixirPopCap", "ElixirDoEffectOnSkipsDeadTarget",
+                () => ElixirDoEffectOnSkipsDeadTarget(map));
+            result.RunTest("ElixirPopCap", "ElixirConfirmMessageNamesTarget",
+                () => ElixirConfirmMessageNamesTarget(map));
+            result.RunTest("ElixirPopCap", "ElixirKillSwitchRejectsUse",
+                () => ElixirKillSwitchRejectsUse(map));
+            result.RunTest("ElixirPopCap", "PopulationCapBlocksElixir",
+                () => PopulationCapBlocksElixir(map));
+            result.RunTest("ElixirPopCap", "PopulationCapDisabledAllowsUnlimited",
+                () => PopulationCapDisabledAllowsUnlimited(map));
 
-            return new TestSuiteResult(passed, failed, failures);
+            return result;
         }
 
         // ─── Helpers ────────────────────────────────────────────────────────
@@ -81,6 +71,7 @@ namespace Eternal.InGameTests.TestSuites
 
             var elixirThing = ThingMaker.MakeThing(elixirDef) as ThingWithComps;
             TestAssert.IsNotNull(elixirThing, "Elixir ThingDef must produce a ThingWithComps");
+            TestPawnFactory.OwnThing(elixirThing);
 
             TestAssert.IsNotNull(elixirThing.GetComp<CompTargetable_EternalElixir>(),
                 "Elixir must have CompTargetable_EternalElixir component");
@@ -168,17 +159,7 @@ namespace Eternal.InGameTests.TestSuites
                 TestAssert.IsFalse(userHasTrait, "USER should NOT have Eternal_GeneticMarker trait after DoEffectOn (this is the PR #1 bug)");
 
                 bool targetHasEssence = target.health?.hediffSet?.HasHediff(EternalDefOf.Eternal_Essence) ?? false;
-                if (!targetHasEssence)
-                {
-                    // Belt-and-suspenders: Harmony may not fire in test context — add manually
-                    var essenceHediff = HediffMaker.MakeHediff(EternalDefOf.Eternal_Essence, target);
-                    essenceHediff.Severity = 1.0f;
-                    target.health.AddHediff(essenceHediff);
-                    targetHasEssence = true;
-                    Log.Message("[EternalTests] ElixirGrantsTraitToTargetNotUser: Eternal_Essence added manually (Harmony patch may not fire in test context).");
-                }
-
-                TestAssert.IsTrue(targetHasEssence, "TARGET should have Eternal_Essence hediff after DoEffectOn (via TraitSet_Patch or manual add)");
+                TestAssert.IsTrue(targetHasEssence, "TARGET should have Eternal_Essence hediff after DoEffectOn (via actual TraitSet_Patch)");
             }
         }
 
@@ -241,30 +222,21 @@ namespace Eternal.InGameTests.TestSuites
                 var user = TestPawnFactory.SpawnNonEternalPawn(map);
                 var target = TestPawnFactory.SpawnNonEternalPawn(map);
 
-                string userName = user.Name?.ToStringShort ?? user.LabelShort;
-                string targetName = target.Name?.ToStringShort ?? target.LabelShort;
-
-                if (userName == targetName)
+                user.Name = new NameSingle("EternalTestUser");
+                target.Name = new NameSingle("EternalTestRecipient");
+                string userName = user.Name.ToStringShort;
+                string targetName = target.Name.ToStringShort;
+                TestAssert.IsFalse(userName == targetName, "Recipient and user names must differ");
+                CompTargetable_EternalElixir.SelectedTargetRef(targetable) = target;
+                try
                 {
-                    Log.Warning("[EternalTests] ElixirConfirmMessageNamesTarget: user and target names collided — skipping name-content assertion to avoid a false pass/fail.");
+                    string message = useEffect.ConfirmMessage(user).Resolve();
+                    TestAssert.IsTrue(message.Contains(targetName), "ConfirmMessage must name recipient");
+                    TestAssert.IsFalse(message.Contains(userName), "ConfirmMessage must not name user");
                 }
-                else
+                finally
                 {
-                    CompTargetable_EternalElixir.SelectedTargetRef(targetable) = target;
-                    try
-                    {
-                        string message = useEffect.ConfirmMessage(user).Resolve();
-                        Log.Message($"[EternalTests] ElixirConfirmMessageNamesTarget: message = {message}");
-
-                        TestAssert.IsTrue(message.Contains(targetName),
-                            $"ConfirmMessage should name the resolved target ({targetName})");
-                        TestAssert.IsFalse(message.Contains(userName),
-                            $"ConfirmMessage should NOT name the user ({userName}) when the target resolves");
-                    }
-                    finally
-                    {
-                        CompTargetable_EternalElixir.SelectedTargetRef(targetable) = null;
-                    }
+                    CompTargetable_EternalElixir.SelectedTargetRef(targetable) = null;
                 }
 
                 // Fallback path: no selection resolved -> target-agnostic message.
@@ -302,7 +274,9 @@ namespace Eternal.InGameTests.TestSuites
             finally
             {
                 if (!wasDisabled)
+                {
                     EternalModState.Reset();
+                }
             }
         }
 
@@ -311,9 +285,9 @@ namespace Eternal.InGameTests.TestSuites
             using (new SettingsScope())
             {
                 // Read the current Eternal count to avoid pre-existing save state interfering (Pitfall 5).
-                int livingCount  = PawnExtensions.GetAllLivingEternalPawnsCached()?.Count ?? 0;
+                int livingCount = PawnExtensions.GetAllLivingEternalPawnsCached()?.Count ?? 0;
                 int healingCount = EternalServiceContainer.Instance?.CorpseManager?.GetHealingCorpseCount() ?? 0;
-                int baseCount    = livingCount + healingCount;
+                int baseCount = livingCount + healingCount;
 
                 // Spawn one Eternal pawn (our test eternal) — this raises count by 1
                 var eternalPawn = TestPawnFactory.SpawnEternalPawn(map);
@@ -321,7 +295,7 @@ namespace Eternal.InGameTests.TestSuites
 
                 // Set cap = baseCount + 1 (exactly room for our test eternal, no room for another)
                 Eternal_Mod.settings.populationCapEnabled = true;
-                Eternal_Mod.settings.populationCap        = baseCount + 1;
+                Eternal_Mod.settings.populationCap = baseCount + 1;
 
                 // Tick once so GetAllLivingEternalPawnsCached cache refreshes
                 TickAdvancer.AdvanceTicks(60);
@@ -344,8 +318,8 @@ namespace Eternal.InGameTests.TestSuites
                 Eternal_Mod.settings.populationCapEnabled = false;
 
                 // Even with many Eternal pawns the cap must not block the elixir
-                var eternalPawn    = TestPawnFactory.SpawnEternalPawn(map);
-                var targetable     = MakeElixirThing().GetComp<CompTargetable_EternalElixir>();
+                var eternalPawn = TestPawnFactory.SpawnEternalPawn(map);
+                var targetable = MakeElixirThing().GetComp<CompTargetable_EternalElixir>();
                 var nonEternalPawn = TestPawnFactory.SpawnNonEternalPawn(map);
 
                 bool accepted = targetable.ValidateTarget(new LocalTargetInfo(nonEternalPawn), showMessages: false);
@@ -356,30 +330,8 @@ namespace Eternal.InGameTests.TestSuites
             }
         }
 
-        // ─── RunTest helper (copied from ResurrectionCycleTests — intentional, per design) ───
 
-        private static void RunTest(string name, Action test, ref int passed, ref int failed, List<string> failures)
-        {
-            Log.Message($"[EternalTests] Running: {name}");
-            try
-            {
-                test();
-                passed++;
-                Log.Message($"[EternalTests] PASSED: {name}");
-            }
-            catch (TestFailedException ex)
-            {
-                failed++;
-                failures.Add($"[ElixirPopCap] {name}: {ex.Message}");
-                Log.Error($"[EternalTests] FAILED: {name} -- {ex.Message}");
-            }
-            catch (Exception ex)
-            {
-                failed++;
-                failures.Add($"[ElixirPopCap] {name}: {ex.Message}");
-                Log.Error($"[EternalTests] ERROR: {name} -- {ex}");
-            }
-        }
+
     }
 }
 

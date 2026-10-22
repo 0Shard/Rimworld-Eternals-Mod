@@ -64,9 +64,13 @@ namespace Eternal.Tests.Elixir
                 capEnabled: true, totalEternals: totalEternals, cap: cap);
 
             if (expectRejected)
+            {
                 Assert.Equal(ElixirTargetValidator.RejectCapReachedKey, reason);
+            }
             else
+            {
                 Assert.Null(reason);
+            }
         }
 
         [Fact]

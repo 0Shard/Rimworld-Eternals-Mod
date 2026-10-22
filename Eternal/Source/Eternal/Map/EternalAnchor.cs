@@ -8,7 +8,7 @@ using System;
 using System.Collections.Generic;
 using UnityEngine;
 using Verse;
-using RimWorld;
+using Eternal.Extensions;
 
 namespace Eternal.Map
 {
@@ -22,12 +22,13 @@ namespace Eternal.Map
         private Pawn anchoredPawn;
         private int creationTick;
         private int resurrectionTick = -1;
-        
+        private bool disposed;
+
         /// <summary>
         /// Gets the resurrection grace period from settings, with a fallback default.
         /// </summary>
         private int ResurrectionGracePeriod => Eternal_Mod.GetSettings().anchorGracePeriodTicks;
-        
+
         /// <summary>
         /// Initializes a new instance of EternalAnchor class.
         /// </summary>
@@ -36,12 +37,12 @@ namespace Eternal.Map
             innerContainer = new ThingOwner<Thing>(this);
             creationTick = Find.TickManager.TicksGame;
         }
-        
+
         /// <summary>
         /// Gets the anchored pawn.
         /// </summary>
         public Pawn AnchoredPawn => anchoredPawn;
-        
+
         /// <summary>
         /// Sets the anchored pawn.
         /// </summary>
@@ -50,7 +51,7 @@ namespace Eternal.Map
         {
             anchoredPawn = pawn;
         }
-        
+
         /// <summary>
         /// Checks if the anchor should be removed.
         /// </summary>
@@ -58,27 +59,36 @@ namespace Eternal.Map
         public bool ShouldRemoveAnchor()
         {
             // Remove if anchored pawn is null or destroyed
-            if (anchoredPawn == null || anchoredPawn.Destroyed)
+            if (disposed || anchoredPawn == null || anchoredPawn.Discarded)
+            {
                 return true;
-                
+            }
+            if (anchoredPawn.Dead)
+            {
+                var corpse = anchoredPawn.Corpse;
+                return corpse == null || corpse.Destroyed || !anchoredPawn.IsValidEternalCorpse()
+                    || corpse.MapHeld != Map;
+            }
+            if (anchoredPawn.Destroyed || anchoredPawn.MapHeld != Map) { return true; }
+
             // Track when pawn resurrects (no longer dead)
             if (!anchoredPawn.Dead && resurrectionTick == -1)
             {
                 resurrectionTick = Find.TickManager.TicksGame;
-                
+
                 if (Eternal_Mod.settings?.debugMode == true)
                 {
                     Log.Message($"[Eternal] Anchor for {anchoredPawn.Name} detected resurrection at tick {resurrectionTick}");
                 }
             }
-            
+
             // Remove after grace period expires following resurrection
             if (resurrectionTick != -1)
             {
                 int currentTick = Find.TickManager.TicksGame;
                 int ticksSinceResurrection = currentTick - resurrectionTick;
                 int gracePeriod = ResurrectionGracePeriod;
-                
+
                 if (ticksSinceResurrection > gracePeriod)
                 {
                     if (Eternal_Mod.settings?.debugMode == true)
@@ -88,41 +98,47 @@ namespace Eternal.Map
                     return true;
                 }
             }
-            
+
             // Anchor persists indefinitely until pawn resurrects (no timeout)
             return false;
         }
-        
+
         /// <summary>
         /// Called every tick to update anchor state.
         /// </summary>
         protected override void Tick()
         {
             base.Tick();
-            
+
             // Check if anchor should be removed
             if (ShouldRemoveAnchor())
             {
                 RemoveAnchor();
             }
         }
-        
+
         /// <summary>
         /// Removes the anchor and cleans up.
         /// </summary>
-        private void RemoveAnchor()
+        private void RemoveAnchor() => DisposeAnchor();
+
+        internal void DisposeAnchor()
         {
+            if (disposed) { return; }
+            disposed = true;
             // Notify map manager that anchor is being removed
             if (Map != null)
             {
                 var mapManager = Map.GetComponent<EternalMapManager>();
                 mapManager?.RemoveAnchor(this);
             }
-            
-            // Destroy the anchor
-            Destroy();
+
+            // The non-destroyable def protects against damage. Native despawn deregisters
+            // grid and ticking; releasing the manager reference leaves this empty anchor
+            // collectible. Discard requires Destroyed state and would reject this object.
+            if (Spawned) { DeSpawn(); }
         }
-        
+
         /// <summary>
         /// Gets the thing holder for inner container.
         /// </summary>
@@ -130,12 +146,12 @@ namespace Eternal.Map
         {
             return innerContainer;
         }
-        
+
         /// <summary>
         /// Gets the parent thing holder.
         /// </summary>
         public new IThingHolder ParentHolder => null;
-        
+
         /// <summary>
         /// Gets child holders for thing holder interface.
         /// </summary>
@@ -144,7 +160,7 @@ namespace Eternal.Map
             // Add this holder to list
             outChildren.Add(this);
         }
-        
+
         /// <summary>
         /// Draws the anchor in the world.
         /// </summary>
@@ -156,11 +172,11 @@ namespace Eternal.Map
                 // Draw a faint glow around the anchored pawn's corpse
                 Vector3 drawPos = anchoredPawn.Corpse.DrawPos;
                 drawPos.y = AltitudeLayer.MetaOverlays.AltitudeFor();
-                
+
                 // Draw a pulsing effect
                 float pulse = (float)Math.Sin(Find.TickManager.TicksGame * 0.01f) * 0.1f + 0.9f;
                 Color glowColor = new Color(0.3f, 0.7f, 1.0f, 0.3f * pulse);
-                
+
                 // Draw glow effect
                 Material glowMat = SolidColorMaterials.SimpleSolidColorMaterial(glowColor);
                 Matrix4x4 matrix = default(Matrix4x4);
@@ -168,14 +184,14 @@ namespace Eternal.Map
                 Graphics.DrawMesh(MeshPool.plane10, matrix, glowMat, 0);
             }
         }
-        
+
         /// <summary>
         /// Exposes data for save/load functionality.
         /// </summary>
         public override void ExposeData()
         {
             base.ExposeData();
-            Scribe_References.Look(ref anchoredPawn, "anchoredPawn");
+            Scribe_References.Look(ref anchoredPawn, "anchoredPawn", saveDestroyedThings: true);
             Scribe_Values.Look(ref creationTick, "creationTick", 0);
             Scribe_Values.Look(ref resurrectionTick, "resurrectionTick", -1);
             Scribe_Deep.Look(ref innerContainer, "innerContainer");

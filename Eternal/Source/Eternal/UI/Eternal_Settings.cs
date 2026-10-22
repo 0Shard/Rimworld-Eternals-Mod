@@ -31,10 +31,20 @@ namespace Eternal
 
         private SettingsDrawer drawer;
         private bool hediffSettingsInitialized = false;
+        private bool hediffSettingsInitializationScheduled;
 
         public Eternal_Settings()
         {
             instance = this;
+        }
+
+        public void ScheduleHediffSettingsInitialization()
+        {
+            // ExecuteWhenFinished may run immediately. The mod constructor retries this
+            // after native ModSettings deserialization has closed its Scribe context.
+            if (Scribe.mode != LoadSaveMode.Inactive || hediffSettingsInitialized || hediffSettingsInitializationScheduled) { return; }
+            hediffSettingsInitializationScheduled = true;
+            LongEventHandler.ExecuteWhenFinished(InitializeHediffSettings);
         }
 
         /// <summary>
@@ -43,10 +53,13 @@ namespace Eternal
         /// </summary>
         public void InitializeHediffSettings()
         {
+            if (Scribe.mode != LoadSaveMode.Inactive) { hediffSettingsInitializationScheduled = false; return; }
             if (hediffSettingsInitialized)
+            {
                 return;
+            }
 
-            hediffSettingsInitialized = true;
+            if (hediffManager == null) { hediffManager = new EternalHediffManager(); }
 
             // Check if migration is needed (old ModSettings data exists but no XML file)
             if (HediffSettingsMigrator.NeedsMigration(hediffManager?.Store))
@@ -56,6 +69,7 @@ namespace Eternal
 
             // Load settings from XML file (applies any saved customizations)
             hediffManager?.Store?.LoadFromXml();
+            hediffSettingsInitialized = true;
         }
 
         /// <summary>
@@ -64,6 +78,13 @@ namespace Eternal
         /// </summary>
         public void SaveHediffSettings()
         {
+            if (!hediffSettingsInitialized)
+            {
+                ScheduleHediffSettingsInitialization();
+                // Initialization may still be queued behind definitions. An early write
+                // must not replace the separate XML with an uninitialized store.
+                if (!hediffSettingsInitialized) { return; }
+            }
             hediffManager?.Store?.SaveToXml();
         }
 
@@ -287,60 +308,49 @@ namespace Eternal
             {
                 General = new ImmutableSettingsSnapshot.GeneralSection
                 {
-                    ModEnabled  = SettingsDefaults.LegacySnapshotModEnabled,
-                    DebugMode   = DebugMode,
+                    ModEnabled = SettingsDefaults.LegacySnapshotModEnabled,
+                    DebugMode = DebugMode,
                     LoggingLevel = loggingLevel,
                 },
                 Healing = new ImmutableSettingsSnapshot.HealingSection
                 {
-                    BaseRate    = baseHealingRate,
-                    ShowEffects = SettingsDefaults.LegacySnapshotShowRegrowthEffects,
+                    BaseRate = baseHealingRate,
                     ShowProgress = showEternalPowerLabel,
                 },
                 Resource = new ImmutableSettingsSnapshot.ResourceSection
                 {
-                    NutritionCostMultiplier  = nutritionCostMultiplier,
-                    PauseOnResourceDepletion = SettingsDefaults.LegacySnapshotPauseOnResourceDepletion,
-                    MinimumNutritionThreshold = SettingsDefaults.LegacySnapshotMinimumNutritionThreshold,
-                    AllowResourceBorrowing   = SettingsDefaults.LegacySnapshotAllowResourceBorrowing,
+                    NutritionCostMultiplier = nutritionCostMultiplier,
                 },
                 FoodDebt = new ImmutableSettingsSnapshot.FoodDebtSection
                 {
-                    MaxDebtMultiplier       = maxDebtMultiplier,
-                    FoodDrainThreshold      = foodDrainThreshold,
-                    DebtRepaymentDays       = debtRepaymentDays,
+                    MaxDebtMultiplier = maxDebtMultiplier,
+                    FoodDrainThreshold = foodDrainThreshold,
+                    DebtRepaymentDays = debtRepaymentDays,
                     SeverityToNutritionRatio = SettingsDefaults.SeverityToNutritionRatio,
                 },
                 Perf = new ImmutableSettingsSnapshot.PerfSection
                 {
-                    NormalTickRate              = normalTickRate,
-                    RareTickRate                = rareTickRate,
-                    TraitCheckInterval          = traitCheckInterval,
-                    CorpseCheckInterval         = corpseCheckInterval,
-                    MapCheckInterval            = mapCheckInterval,
+                    NormalTickRate = normalTickRate,
+                    RareTickRate = rareTickRate,
+                    TraitCheckInterval = traitCheckInterval,
+                    CorpseCheckInterval = corpseCheckInterval,
+                    MapCheckInterval = mapCheckInterval,
                     HealingHistorySweepInterval = healingHistorySweepInterval,
-                },
-                AdvancedHediff = new ImmutableSettingsSnapshot.AdvancedHediffSection
-                {
-                    AutoHealEnabled              = SettingsDefaults.LegacySnapshotAutoHealEnabled,
-                    HealingOrder                 = SettingsDefaults.LegacySnapshotHealingOrder,
-                    EnableIndividualHediffControl = SettingsDefaults.LegacySnapshotIndividualHediffControl,
                 },
                 Map = new ImmutableSettingsSnapshot.MapSection
                 {
-                    MapProtectionAction        = SettingsDefaults.LegacySnapshotMapProtectionAction,
-                    EnableMapAnchors           = enableMapAnchors,
-                    AnchorGracePeriodTicks     = anchorGracePeriodTicks,
+                    EnableMapAnchors = enableMapAnchors,
+                    AnchorGracePeriodTicks = anchorGracePeriodTicks,
                     EnableRoofCollapseProtection = enableRoofCollapseProtection,
                 },
                 Effects = new ImmutableSettingsSnapshot.EffectsSection
                 {
                     ConsciousnessBuffEnabled = consciousnessBuffEnabled,
-                    ConsciousnessMultiplier  = consciousnessMultiplier,
-                    MoodBuffEnabled          = moodBuffEnabled,
-                    MoodBuffValue            = moodBuffValue,
-                    PopulationCapEnabled     = populationCapEnabled,
-                    PopulationCap            = populationCap,
+                    ConsciousnessMultiplier = consciousnessMultiplier,
+                    MoodBuffEnabled = moodBuffEnabled,
+                    MoodBuffValue = moodBuffValue,
+                    PopulationCapEnabled = populationCapEnabled,
+                    PopulationCap = populationCap,
                 },
             };
         }
@@ -434,7 +444,7 @@ namespace Eternal
                 SettingsValidator.ValidateSettings(this);
 
                 // Defer XML initialization until all game definitions are available.
-                LongEventHandler.ExecuteWhenFinished(InitializeHediffSettings);
+                ScheduleHediffSettingsInitialization();
             }
 
             // NOTE: Hediff settings are saved in Eternal_Mod.WriteSettings() AFTER base.WriteSettings()

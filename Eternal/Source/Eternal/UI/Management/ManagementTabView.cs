@@ -1,236 +1,179 @@
-// file path: Eternal/Source/Eternal/UI/Management/ManagementTabView.cs
-// Description: View layer for Eternal management tab. Pure UI rendering.
-
+// Relative Path: Eternal/Source/Eternal/UI/Management/ManagementTabView.cs
+// Creation Date: 12-10-2026
+// Author: 0Shard
+// Description: Shared Eternal inspect tab, rebound to the current selection with measured detail height.
+using System;
 using System.Linq;
 using UnityEngine;
 using Verse;
 using RimWorld;
+using Eternal.Extensions;
 
 namespace Eternal.UI.Management
 {
-    /// <summary>
-    /// View layer for Eternal management tab.
-    /// Handles pure UI rendering, delegates all data access to Presenter.
-    /// </summary>
     public class ManagementTabView : ITab
     {
-        private readonly ManagementTabPresenter presenter;
-        private const float TabWidth = 500f;
+        private Thing boundSelection;
+        private ManagementTabPresenter presenter;
+        private Vector2 scroll;
+        private float contentHeight = 500f;
+        private bool conditionsExpanded;
+        private bool partsExpanded;
 
-        protected virtual float TabHeight => 700f;
-
-        public ManagementTabView(Pawn pawn)
+        public ManagementTabView()
         {
-            var model = new ManagementTabModel(pawn);
-            presenter = new ManagementTabPresenter(model);
+            size = new Vector2(560f, 520f);
+            labelKey = "Eternal_TabManagement";
+        }
+
+        public static Pawn ResolvePawn(Thing selection) => selection as Pawn ?? (selection as Verse.Corpse)?.InnerPawn;
+        public static bool IsEligible(Thing selection)
+        {
+            if (EternalModState.IsDisabled || EternalDefOf.Eternal_GeneticMarker == null)
+            {
+                return false;
+            }
+
+            return ResolvePawn(selection)?.IsValidEternalCorpse() == true;
+        }
+        public override bool IsVisible => IsEligible(SelThing);
+
+        private void BindSelection(Thing selection)
+        {
+            if (ReferenceEquals(selection, boundSelection))
+            {
+                return;
+            }
+
+            boundSelection = selection;
+            var pawn = ResolvePawn(selection);
+            presenter = pawn == null ? null : new ManagementTabPresenter(new ManagementTabModel(pawn, selection as Verse.Corpse));
+            ResetSections();
+        }
+
+        private void ResetSections()
+        {
+            scroll = Vector2.zero;
+            conditionsExpanded = partsExpanded = false;
+            contentHeight = 500f;
         }
 
         protected override void FillTab()
         {
-            if (presenter.Pawn == null)
-                return;
-
-            Rect scrollRect = new Rect(0f, 0f, TabWidth, TabHeight);
-            Rect contentRect = new Rect(0f, 0f, TabWidth - 16f, TabHeight * 2f);
-
-            var scrollPos = presenter.ScrollPosition;
-            Widgets.BeginScrollView(scrollRect, ref scrollPos, contentRect);
-            presenter.ScrollPosition = scrollPos;
-
-            Listing_Standard listing = new Listing_Standard();
-            listing.Begin(contentRect);
-
-            DrawPawnInfo(listing);
-            DrawHealingStatusOverview(listing);
-            DrawRegrowthProgress(listing);
-            DrawHediffHealingProgress(listing);
-            DrawScarHealingProgress(listing);
-            DrawResourceConsumption(listing);
-            DrawPerformanceMetrics(listing);
-            DrawHealingConfiguration(listing);
-
-            listing.End();
-            Widgets.EndScrollView();
-        }
-
-        #region Section Drawing
-
-        private void DrawPawnInfo(Listing_Standard listing)
-        {
-            listing.Label("Pawn Information");
-            listing.Label($"Name: {presenter.PawnName}");
-            listing.Label($"Age: {presenter.AgeBiologicalYears}");
-            listing.Label($"Status: {presenter.PawnStatus}");
-            listing.GapLine();
-        }
-
-        private void DrawHealingStatusOverview(Listing_Standard listing)
-        {
-            listing.Label("Healing Status Overview");
-
-            if (presenter.HasHealingProcessor)
+            BindSelection(SelThing);
+            if (presenter == null)
             {
-                var healingStatus = presenter.GetHealingStatus();
-                if (healingStatus.Count > 0)
+                return;
+            }
+
+            var snapshot = presenter.Capture();
+            var outer = new Rect(Vector2.zero, size).ContractedBy(10f);
+            scroll.y = Mathf.Clamp(scroll.y, 0f, Math.Max(0f, contentHeight - outer.height));
+            var content = new Rect(0f, 0f, outer.width - 16f, contentHeight);
+            Widgets.BeginScrollView(outer, ref scroll, content);
+            try
+            {
+                var listing = new Listing_Standard { maxOneColumn = true };
+                listing.Begin(content);
+                try
                 {
-                    foreach (var kvp in healingStatus)
+                    DrawSnapshot(listing, snapshot);
+                    contentHeight = listing.CurHeight + 20f;
+                }
+                finally
+                {
+                    listing.End();
+                }
+            }
+            finally
+            {
+                Widgets.EndScrollView();
+            }
+            scroll.y = Mathf.Clamp(scroll.y, 0f, Math.Max(0f, contentHeight - outer.height));
+        }
+
+        private void DrawSnapshot(Listing_Standard listing, ManagementSnapshot snapshot)
+        {
+            listing.Label(snapshot.Name);
+            LabelWithTooltip(listing, snapshot.Status, snapshot.Technical);
+            listing.Label($"Conditions: {snapshot.Conditions.Count}    Regrowing parts: {snapshot.Parts.Count}");
+            LabelWithTooltip(listing, "Food debt: " + presenter.Debt(snapshot),
+                "Current debt: " + MenuValueCalculator.Nutrition(snapshot.Debt) + ". " + snapshot.CapacityDetails + "\n" + snapshot.RecoveryRate);
+            string rates = snapshot.ProcessingRate;
+            string rateTooltip = snapshot.ProcessingTooltip;
+            if (snapshot.Conditions.Any(condition => condition.IsScar))
+            {
+                rates += "  |  " + snapshot.ScarRate;
+                rateTooltip += "\n" + snapshot.ScarTooltip;
+            }
+            LabelWithTooltip(listing, rates, rateTooltip);
+            if (!snapshot.Waived)
+            {
+                LabelWithTooltip(listing, snapshot.Headroom, snapshot.CapacityDetails);
+            }
+            if (snapshot.Corpse != null)
+            {
+                string qualification = snapshot.Corpse.Qualification +
+                    $"\nQueued conditions: {snapshot.Corpse.ConditionCount}; queued part groups: {snapshot.Corpse.PartCount}";
+                LabelWithTooltip(listing, "Resurrection cost: " + (snapshot.Corpse.Source == HealingQueueSource.Unavailable ? "Unavailable" : snapshot.Waived ? "Waived" :
+                    (snapshot.Corpse.Qualified ? "Known estimate: " : "") + MenuValueCalculator.Nutrition(snapshot.Corpse.KnownNutrition)), qualification);
+                LabelWithTooltip(listing, "Remaining time: " + MenuValueCalculator.Time(snapshot.Corpse.EstimatedTicks), qualification);
+            }
+            listing.GapLine();
+            if (listing.ButtonText((conditionsExpanded ? "▼ " : "▶ ") + "Conditions and scars"))
+            {
+                conditionsExpanded = !conditionsExpanded;
+            }
+
+            if (conditionsExpanded)
+            {
+                if (snapshot.Conditions.Count == 0)
+                {
+                    listing.Label("No known conditions requiring healing");
+                }
+
+                foreach (var condition in snapshot.Conditions)
+                {
+                    LabelWithTooltip(listing, presenter.Condition(condition), presenter.ConditionTooltip(condition));
+                }
+            }
+            if (listing.ButtonText((partsExpanded ? "▼ " : "▶ ") + "Body part regrowth"))
+            {
+                partsExpanded = !partsExpanded;
+            }
+
+            if (partsExpanded)
+            {
+                if (snapshot.Parts.Count == 0)
+                {
+                    listing.Label("No tracked regrowth progress");
+                }
+
+                foreach (var part in snapshot.Parts)
+                {
+                    listing.Label(presenter.Part(part));
+                }
+
+                if (snapshot.Corpse != null && snapshot.Parts.Count == 0)
+                {
+                    foreach (var work in snapshot.Corpse.Work)
                     {
-                        listing.Label($"{kvp.Key}: {kvp.Value}");
+                        if (work.IsRegrowth)
+                        {
+                            listing.Label(work.Label + " — waiting to start; progress unavailable");
+                        }
                     }
                 }
-
-                listing.Label($"Can Heal: {(presenter.CanPawnHeal() ? "Yes" : "No")}");
-                listing.Label($"Food Debt: {presenter.FoodDebtDisplay}");
             }
-            else
-            {
-                listing.Label("Healing system not available");
-            }
-
-            listing.GapLine();
         }
 
-        private void DrawRegrowthProgress(Listing_Standard listing)
+        private static void LabelWithTooltip(Listing_Standard listing, string text, string tooltip)
         {
-            listing.Label("Regrowth Progress");
-
-            if (presenter.HasActiveRegrowth)
+            Rect rect = listing.Label(text);
+            if (!string.IsNullOrEmpty(tooltip))
             {
-                listing.Label($"Active Parts: {presenter.ActivePartCount}");
-
-                Rect progressRect = listing.GetRect(20f);
-                Widgets.FillableBar(progressRect, presenter.OverallProgress, BaseContent.WhiteTex, Texture2D.linearGrayTexture, true);
-                listing.Label($"Overall Progress: {presenter.OverallProgressDisplay}");
-
-                foreach (var partData in presenter.GetPartProgressData())
-                {
-                    Rect labelRect = listing.GetRect(22f);
-                    if (Mouse.IsOver(labelRect))
-                    {
-                        TooltipHandler.TipRegion(labelRect, partData.Tooltip);
-                    }
-                    Widgets.Label(labelRect, partData.DisplayText);
-                }
-            }
-            else
-            {
-                listing.Label("No active regrowth process");
-            }
-
-            listing.GapLine();
-        }
-
-        private void DrawHediffHealingProgress(Listing_Standard listing)
-        {
-            listing.Label("Hediff Healing Progress");
-
-            if (!presenter.HasBadHediffs)
-            {
-                listing.Label("No hediffs requiring healing");
-                listing.GapLine();
-                return;
-            }
-
-            foreach (var kvp in presenter.GetSortedHediffCategories())
-            {
-                listing.Label($"{kvp.Key} ({kvp.Value.Count}):");
-
-                foreach (var hediff in kvp.Value.Take(5))
-                {
-                    float severityPercent = hediff.Severity * 100;
-                    Rect hediffRect = listing.GetRect(16f);
-
-                    Widgets.FillableBar(hediffRect, hediff.Severity, BaseContent.WhiteTex, Texture2D.grayTexture, true);
-                    Widgets.Label(hediffRect, $"{hediff.def.LabelCap}: {severityPercent:F1}%");
-                }
-
-                if (kvp.Value.Count > 5)
-                {
-                    listing.Label($"... and {kvp.Value.Count - 5} more");
-                }
-
-                listing.Gap(6f);
-            }
-
-            listing.GapLine();
-        }
-
-        private void DrawScarHealingProgress(Listing_Standard listing)
-        {
-            listing.Label("Scar Healing Progress");
-
-            const int displayLimit = 8;
-            var records = presenter.GetScarHealingRecords(displayLimit).ToList();
-
-            if (records.Count == 0)
-            {
-                listing.Label("No scars currently healing");
-                listing.GapLine();
-                return;
-            }
-
-            foreach (var record in records)
-            {
-                string scarName = record.Scar?.def?.LabelCap ?? "Unknown Scar";
-                listing.Label($"{scarName}:");
-
-                Rect progressRect = listing.GetRect(16f);
-                Widgets.FillableBar(progressRect, record.HealingProgress, BaseContent.WhiteTex, Texture2D.linearGrayTexture, true);
-
-                string progressLabel = $"{record.HealingProgress:P0} complete";
-                if (record.EstimatedHealingTime > 0)
-                {
-                    double hoursRemaining = record.EstimatedHealingTime / 2500.0;
-                    progressLabel += $" (~{hoursRemaining:F1}h)";
-                }
-                Widgets.Label(progressRect, progressLabel);
-
-                listing.Label($"Severity: {record.InitialSeverity:F2}");
-                listing.Gap(6f);
-            }
-
-            int extraCount = presenter.ExtraScarCount(displayLimit);
-            if (extraCount > 0)
-            {
-                listing.Label($"... and {extraCount} more scars healing");
-            }
-
-            listing.GapLine();
-        }
-
-        private void DrawResourceConsumption(Listing_Standard listing)
-        {
-            listing.Label("Resource Consumption");
-
-            if (presenter.HasNutritionData)
-            {
-                Rect nutritionRect = listing.GetRect(20f);
-                Widgets.FillableBar(nutritionRect, presenter.NutritionPercent, BaseContent.WhiteTex, Texture2D.linearGrayTexture, true);
-                listing.Label($"Nutrition: {presenter.NutritionDisplay}");
-            }
-
-            listing.Label("Resource consumption handled by unified heal amount");
-            listing.GapLine();
-        }
-
-        private void DrawPerformanceMetrics(Listing_Standard listing)
-        {
-            listing.Label("Health Status");
-            listing.Label("Simple healing system - no complex monitoring");
-            listing.GapLine();
-        }
-
-        private void DrawHealingConfiguration(Listing_Standard listing)
-        {
-            listing.Label("Healing Configuration");
-            listing.Label("Healing priorities can be configured in mod settings");
-
-            if (listing.ButtonText("Open Mod Settings"))
-            {
-                presenter.OnOpenSettings();
+                TooltipHandler.TipRegion(rect, tooltip);
             }
         }
-
-        #endregion
     }
 }

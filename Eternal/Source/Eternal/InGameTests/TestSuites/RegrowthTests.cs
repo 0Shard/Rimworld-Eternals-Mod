@@ -8,12 +8,10 @@
 
 #if DEBUG
 
-using System;
 using System.Collections.Generic;
 using System.Linq;
 using Verse;
 using RimWorld;
-using Eternal.DI;
 using Eternal.InGameTests.Helpers;
 
 namespace Eternal.InGameTests.TestSuites
@@ -25,14 +23,11 @@ namespace Eternal.InGameTests.TestSuites
     {
         public static TestSuiteResult RunAll(Verse.Map map)
         {
-            int passed = 0;
-            int failed = 0;
-            var failures = new List<string>();
+            var result = new TestSuiteResult(0, 0, new List<string>());
 
-            RunTest("MissingPartTriggersRegrowth", () => MissingPartTriggersRegrowth(map),
-                ref passed, ref failed, failures);
+            result.RunTest("Regrowth", "MissingPartTriggersRegrowth", () => MissingPartTriggersRegrowth(map));
 
-            return new TestSuiteResult(passed, failed, failures);
+            return result;
         }
 
         private static void MissingPartTriggersRegrowth(Verse.Map map)
@@ -53,12 +48,7 @@ namespace Eternal.InGameTests.TestSuites
                     .FirstOrDefault(p => p.def.defName == "Toe");
             }
 
-            if (finger == null)
-            {
-                Log.Warning("[EternalTests] Could not find a Finger or Toe part to remove. Skipping regrowth test detail.");
-                // Still pass if we can't find the part — the pawn generation might vary
-                return;
-            }
+            TestAssert.Available(finger, "Finger or Toe required for regrowth");
 
             string partLabel = finger.Label;
             Log.Message($"[EternalTests] Removing body part: {partLabel}");
@@ -83,51 +73,15 @@ namespace Eternal.InGameTests.TestSuites
             // Note: For living pawns, the regrowth manager handles this during UpdateAllRegrowth
             Log.Message($"[EternalTests] Has Eternal_Regrowing hediff: {hasRegrowingHediff}");
 
-            // Advance more ticks to allow regrowth to complete
-            try
-            {
-                TickAdvancer.AdvanceUntil(
-                    () => pawn.health.hediffSet.GetNotMissingParts().Any(p => p.Label == partLabel),
-                    maxTicks: 50000,
-                    timeoutMessage: $"Part {partLabel} did not regrow within 50000 ticks");
-
-                Log.Message($"[EternalTests] Part {partLabel} successfully regrown");
-            }
-            catch (TestFailedException)
-            {
-                // Regrowth might take longer than our tick budget — log but don't hard-fail
-                // The important thing is that the system started processing
-                Log.Warning($"[EternalTests] Part {partLabel} did not fully regrow in tick budget. " +
-                           $"Regrowing hediff present: {hasRegrowingHediff}");
-
-                // At minimum, verify the regrowth system engaged
-                TestAssert.IsTrue(hasRegrowingHediff,
-                    "Eternal_Regrowing hediff should be applied for missing part on Eternal pawn");
-            }
+            TickAdvancer.AdvanceUntil(
+                () => pawn.health.hediffSet.GetNotMissingParts().Any(p => p == finger),
+                maxTicks: 50000,
+                timeoutMessage: $"Part {partLabel} did not regrow within 50000 ticks");
+            TestAssert.IsTrue(pawn.health.hediffSet.GetNotMissingParts().Any(p => p == finger),
+                "The exact removed body part must be restored");
         }
 
-        private static void RunTest(string name, Action test, ref int passed, ref int failed, List<string> failures)
-        {
-            Log.Message($"[EternalTests] Running: {name}");
-            try
-            {
-                test();
-                passed++;
-                Log.Message($"[EternalTests] PASSED: {name}");
-            }
-            catch (TestFailedException ex)
-            {
-                failed++;
-                failures.Add($"[Regrowth] {name}: {ex.Message}");
-                Log.Error($"[EternalTests] FAILED: {name} -- {ex.Message}");
-            }
-            catch (Exception ex)
-            {
-                failed++;
-                failures.Add($"[Regrowth] {name}: {ex.Message}");
-                Log.Error($"[EternalTests] ERROR: {name} -- {ex}");
-            }
-        }
+
     }
 }
 

@@ -9,7 +9,6 @@
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
-using Verse;
 
 namespace Eternal.UI.HediffSettings
 {
@@ -30,8 +29,7 @@ namespace Eternal.UI.HediffSettings
 
         /// <summary>
         /// Persisted filter state owned by the long-lived manager.
-        /// The presenter rehydrates from this on construction so a reopened
-        /// settings window reflects filters chosen earlier in the session.
+        /// Presenter properties read this directly so all views reflect the same filters.
         /// </summary>
         public Eternal.Settings.HediffFilterState FilterState => manager.FilterState;
 
@@ -46,7 +44,7 @@ namespace Eternal.UI.HediffSettings
 
         /// <summary>
         /// Gets cached filtered results for render-loop use.
-        /// Delegates to manager's debounced cache.
+        /// Delegates to the manager's cache, rebuilt immediately when dirty.
         /// </summary>
         public IReadOnlyList<KeyValuePair<string, EternalHediffSetting>> GetFilteredHediffsCached()
             => manager.GetFilteredHediffsCached();
@@ -199,7 +197,12 @@ namespace Eternal.UI.HediffSettings
         /// </summary>
         public void ApplySettingsToGroup(IEnumerable<string> hediffNames, EternalHediffSetting template)
         {
-            manager.ApplySettingsToGroup(hediffNames.ToList(), template);
+            ApplySettingsToGroupWithCount(hediffNames, template);
+        }
+
+        internal int ApplySettingsToGroupWithCount(IEnumerable<string> hediffNames, EternalHediffSetting template)
+        {
+            return manager.ApplySettingsToGroupWithCount(hediffNames.ToList(), template);
         }
 
         /// <summary>
@@ -227,10 +230,26 @@ namespace Eternal.UI.HediffSettings
         /// </summary>
         public Color GetHediffTypeColor(EternalHediffSetting setting)
         {
-            if (setting.isBeneficial) return new Color(0.5f, 1f, 0.5f); // Light green for beneficial
-            if (setting.isInjuryFilter) return new Color(1f, 0.8f, 0.3f); // Orange for injuries
-            if (setting.isDiseaseFilter) return new Color(1f, 0.3f, 0.3f); // Red for diseases
-            if (setting.isConditionFilter) return new Color(0.3f, 0.7f, 1f); // Blue for conditions
+            if (setting.isBeneficial)
+            {
+                return new Color(0.5f, 1f, 0.5f); // Light green for beneficial
+            }
+
+            if (setting.isInjuryFilter)
+            {
+                return new Color(1f, 0.8f, 0.3f); // Orange for injuries
+            }
+
+            if (setting.isDiseaseFilter)
+            {
+                return new Color(1f, 0.3f, 0.3f); // Red for diseases
+            }
+
+            if (setting.isConditionFilter)
+            {
+                return new Color(0.3f, 0.7f, 1f); // Blue for conditions
+            }
+
             return Color.white; // Default
         }
 

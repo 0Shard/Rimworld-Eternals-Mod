@@ -30,7 +30,9 @@ namespace Eternal.UI.HediffSettings
             float scrollY, float viewportHeight, float rowStride, int itemCount, int bufferRows)
         {
             if (itemCount <= 0 || rowStride <= 0f)
+            {
                 return (0, -1);
+            }
 
             int firstVisible = (int)(Math.Max(0f, scrollY) / rowStride);
             int lastVisible = (int)((Math.Max(0f, scrollY) + viewportHeight) / rowStride);

@@ -19,94 +19,78 @@ using Eternal.Utils;
 
 namespace Eternal.Patches.ItsSorcery
 {
-	/// <summary>
-	/// Patches ItsSorceryFramework.CompUseEffect_Schema.DoEffect to immediately force-level
-	/// Eternal pawns' newly learned sorcery schemas to their class cap.
-	///
-	/// Mechanism: whenever an Eternal pawn uses a schema item (e.g. technique manual from
-	/// Cultivator of the Rim), the postfix extracts the schema definition from the component
-	/// properties, finds the pawn's progress tracker for that schema, and force-levels it if
-	/// it exists. If the progress tracker is not yet initialized, MaxOutSchema safely no-ops
-	/// and the AddExperience postfix will max it on the first exp gain.
-	/// </summary>
-	[HarmonyPatch]
-	public static class ISF_SchemaUse_Patch
-	{
-		/// <summary>
-		/// Guard: only apply this patch when It's Sorcery is active.
-		/// Returning false skips the patch entirely (Harmony will not call TargetMethod).
-		/// </summary>
-		public static bool Prepare()
-		{
-			bool isActive = ItsSorceryDetection.ItsSorceryActive;
+    /// <summary>
+    /// Patches ItsSorceryFramework.CompUseEffect_Schema.DoEffect to immediately force-level
+    /// Eternal pawns' newly learned sorcery schemas to their class cap.
+    ///
+    /// Mechanism: whenever an Eternal pawn uses a schema item (e.g. technique manual from
+    /// Cultivator of the Rim), the postfix extracts the schema definition from the component
+    /// properties, finds the pawn's progress tracker for that schema, and force-levels it if
+    /// it exists. If the progress tracker is not yet initialized, MaxOutSchema safely no-ops
+    /// and the AddExperience postfix will max it on the first exp gain.
+    /// </summary>
+    [HarmonyPatch]
+    public static class ISF_SchemaUse_Patch
+    {
+        /// <summary>
+        /// Guard: only apply this patch when It's Sorcery is active.
+        /// Returning false skips the patch entirely (Harmony will not call TargetMethod).
+        /// </summary>
+        public static bool Prepare() => CompatibilityBinding.Prepare(ItsSorceryDetection.ItsSorceryActive,
+            "[Eternal] Skipping It's Sorcery SchemaUse patch — mod not active",
+            "[Eternal] It's Sorcery detected - enabling schema insta-max on learning");
 
-			if (!isActive)
-			{
-				// Only log at debug level — absence of the mod is the normal case
-				if (Eternal_Mod.settings?.debugMode == true)
-				{
-					Log.Message("[Eternal] Skipping It's Sorcery SchemaUse patch — mod not active");
-				}
-				return false;
-			}
+        /// <summary>
+        /// Resolve the target method via inline reflection. This method is not cached in
+        /// ItsSorceryDetection, so we resolve it here. Returns null to skip patching if
+        /// the method cannot be found (API change).
+        /// </summary>
+        public static MethodBase TargetMethod()
+        {
+            var compType = AccessTools.TypeByName("ItsSorceryFramework.CompUseEffect_Schema");
+            var method = compType != null ? AccessTools.Method(compType, "DoEffect") : null;
 
-			if (Eternal_Mod.settings?.debugMode == true)
-			{
-				Log.Message("[Eternal] It's Sorcery detected - enabling schema insta-max on learning");
-			}
+            return CompatibilityBinding.WarnMissing(method,
+                "[Eternal] Skipping It's Sorcery SchemaUse patch — CompUseEffect_Schema.DoEffect not found (mod absent or API changed)");
+        }
 
-			return true;
-		}
+        /// <summary>
+        /// Postfix: for Eternal pawns, force-level newly learned schemas to their cap.
+        /// </summary>
+        [HarmonyPostfix]
+        public static void Postfix(ThingComp __instance, Pawn usedBy)
+        {
+            try
+            {
+                if (usedBy == null || !usedBy.IsValidEternal())
+                {
+                    return;
+                }
 
-		/// <summary>
-		/// Resolve the target method via inline reflection. This method is not cached in
-		/// ItsSorceryDetection, so we resolve it here. Returns null to skip patching if
-		/// the method cannot be found (API change).
-		/// </summary>
-		public static MethodBase TargetMethod()
-		{
-			var compType = AccessTools.TypeByName("ItsSorceryFramework.CompUseEffect_Schema");
-			var method = compType != null ? AccessTools.Method(compType, "DoEffect") : null;
+                object schemaDef = ItsSorceryDetection.SchemaDefField?.GetValue(__instance?.props);
+                if (schemaDef == null)
+                {
+                    return;
+                }
 
-			if (method == null)
-			{
-				Log.Warning("[Eternal] Skipping It's Sorcery SchemaUse patch — CompUseEffect_Schema.DoEffect not found (mod absent or API changed)");
-			}
+                object progressTracker = ItsSorceryDetection.FindSchemaProgressTracker(usedBy, schemaDef);
+                if (progressTracker == null)
+                {
+                    return;
+                }
 
-			return method;
-		}
+                ItsSorceryDetection.MaxOutSchema(progressTracker);
 
-		/// <summary>
-		/// Postfix: for Eternal pawns, force-level newly learned schemas to their cap.
-		/// </summary>
-		[HarmonyPostfix]
-		public static void Postfix(ThingComp __instance, Pawn usedBy)
-		{
-			try
-			{
-				if (usedBy == null || !usedBy.IsValidEternal())
-					return;
-
-				object schemaDef = ItsSorceryDetection.SchemaDefField?.GetValue(__instance?.props);
-				if (schemaDef == null)
-					return;
-
-				object progressTracker = ItsSorceryDetection.FindSchemaProgressTracker(usedBy, schemaDef);
-				if (progressTracker == null)
-					return;
-
-				ItsSorceryDetection.MaxOutSchema(progressTracker);
-
-				if (Eternal_Mod.settings?.debugMode == true)
-				{
-					Log.Message($"[Eternal] ISF: maxed newly learned schema for {usedBy.Name?.ToStringShort ?? "Pawn"}");
-				}
-			}
-			catch (Exception ex)
-			{
-				EternalLogger.HandleException(EternalExceptionCategory.CompatibilityFailure,
-					"ISF_SchemaUse_Patch.Postfix", null, ex);
-			}
-		}
-	}
+                if (Eternal_Mod.settings?.debugMode == true)
+                {
+                    Log.Message($"[Eternal] ISF: maxed newly learned schema for {usedBy.Name?.ToStringShort ?? "Pawn"}");
+                }
+            }
+            catch (Exception ex)
+            {
+                EternalLogger.HandleException(EternalExceptionCategory.CompatibilityFailure,
+                    "ISF_SchemaUse_Patch.Postfix", null, ex);
+            }
+        }
+    }
 }

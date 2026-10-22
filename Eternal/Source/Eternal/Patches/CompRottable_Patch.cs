@@ -9,12 +9,8 @@
 using System;
 using HarmonyLib;
 using RimWorld;
-using Verse;
-using Eternal;
-using Eternal.Corpse;
 using Eternal.DI;
 using Eternal.Exceptions;
-using Eternal.Extensions;
 using Eternal.Utils;
 
 namespace Eternal.Patches
@@ -40,7 +36,9 @@ namespace Eternal.Patches
             {
                 // SAFE-09: when mod is disabled, do not interfere with rot processing.
                 if (EternalModState.IsDisabled)
+                {
                     return true; // run original method
+                }
 
                 // Only apply to corpses
                 if (!(__instance.parent is Verse.Corpse corpse))
@@ -108,7 +106,9 @@ namespace Eternal.Patches
             {
                 // SAFE-09: when mod is disabled, do not block rot progress.
                 if (EternalModState.IsDisabled)
+                {
                     return true; // run original setter
+                }
 
                 // Allow setting to zero - that's what we want
                 if (value <= 0f)

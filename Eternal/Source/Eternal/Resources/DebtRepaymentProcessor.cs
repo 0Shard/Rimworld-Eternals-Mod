@@ -13,6 +13,7 @@ using System;
 using System.Linq;
 using Verse;
 using Eternal.Interfaces;
+using Eternal.Extensions;
 
 namespace Eternal.Resources
 {
@@ -34,7 +35,7 @@ namespace Eternal.Resources
         // tiny "episode") drains at a rate sized for that crumb and takes the FULL
         // repayment window — the hediff sits at "0% debt" for a day. ~1 nutrition/day is
         // below natural hunger, so the floor is imperceptible on the food bar.
-        public const float MinDrainNutritionPerDay = 1.0f;
+        public const float MinDrainNutritionPerDay = FoodDebtPolicy.MinDrainNutritionPerDay;
 
         private readonly ISettingsProvider _settings;
         private readonly IFoodDebtSystem _debtSystem;
@@ -72,35 +73,56 @@ namespace Eternal.Resources
         /// <param name="pawn">The pawn to process</param>
         private void ProcessPawnDebtRepayment(Pawn pawn)
         {
+            // Native casket suspension freezes metabolism without disabling the food need.
+            // Return before either the waiver or any episode mutation can run.
+            if (pawn.Suspended)
+            {
+                return;
+            }
+            if (pawn.HasFoodNeedDisabled())
+            {
+                _debtSystem.ClearDebt(pawn);
+                return;
+            }
+            if (_debtSystem.TryCloseUnpayableTerminalDust(pawn))
+            {
+                return;
+            }
             float debt = _debtSystem.GetDebt(pawn);
             if (debt <= 0f)
+            {
                 return;
+            }
 
             var food = pawn.needs?.food;
             if (food == null)
+            {
                 return;
+            }
 
             // Check if food is above threshold
             float threshold = food.MaxLevel * _settings.FoodDrainThreshold;
             if (food.CurLevel <= threshold)
+            {
                 return;
+            }
 
             // Calculate drain rate based on debt level
             float drainRate = CalculateDrainRate(pawn, debt);
 
             // Scale drain rate by rare tick interval
             // (drainRate is per-tick, but we're called every rareTickRate ticks)
-            float scaledDrainRate = drainRate * _settings.RareTickRate;
-
-            // Calculate amount to drain this tick
-            float drainable = food.CurLevel - threshold;
-            float toDrain = Math.Min(scaledDrainRate, drainable);
-            toDrain = Math.Min(toDrain, debt); // Don't drain more than debt
+            float toDrain = FoodDebtPolicy.Drain(debt, drainRate, _settings.RareTickRate,
+                food.CurLevel, food.MaxLevel, _settings.FoodDrainThreshold);
 
             if (toDrain > 0f)
             {
-                food.CurLevel -= toDrain;
+                float beforeFood = food.CurLevel;
+                food.CurLevel = FoodDebtPolicy.FoodAfterPayment(beforeFood, toDrain, debt, threshold);
+                toDrain = Math.Max(0f, beforeFood - food.CurLevel);
                 float repaid = _debtSystem.RepayDebt(pawn, toDrain);
+                food.CurLevel += Math.Max(0f, toDrain - repaid);
+                _debtSystem.TryCloseUnpayableTerminalDust(pawn);
 
                 if (_settings.DebugMode)
                 {
@@ -128,12 +150,7 @@ namespace Eternal.Resources
         private float CalculateDrainRate(Pawn pawn, float debt)
         {
             // Peak can lag behind debt if it was never recorded (e.g. pre-update save) — use max.
-            float peakDebt = Math.Max(_debtSystem.GetPeakDebt(pawn), debt);
-            float repaymentTicks = 60000f * Math.Max(_settings.DebtRepaymentDays, 0.01f);
-
-            // Floor so small episodes finish quickly; ProcessPawnDebtRepayment already clamps
-            // the drained amount to the remaining debt and the 15% food floor.
-            return Math.Max(peakDebt / repaymentTicks, MinDrainNutritionPerDay / 60000f);
+            return FoodDebtPolicy.DrainRate(debt, _debtSystem.GetPeakDebt(pawn), _settings.DebtRepaymentDays);
         }
     }
 }

@@ -7,7 +7,6 @@
 //              in-game ReactiveHealth suite because Assembly-CSharp virtual methods cannot
 //              execute in the net472 unit runner.
 
-using System;
 using System.Reflection;
 using Eternal.Infrastructure;
 using Xunit;

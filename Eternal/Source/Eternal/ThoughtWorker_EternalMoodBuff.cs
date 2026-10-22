@@ -51,22 +51,32 @@ namespace Eternal
         protected override ThoughtState CurrentStateInternal(Pawn p)
         {
             if (EternalModState.IsDisabled)
+            {
                 return ThoughtState.Inactive;
+            }
 
             if (p == null || p.Dead)
+            {
                 return ThoughtState.Inactive;
+            }
 
             bool moodEnabled = Eternal_Mod.settings?.moodBuffEnabled
                 ?? SettingsDefaults.MoodBuffEnabled;
 
             if (!moodEnabled)
+            {
                 return ThoughtState.Inactive;
+            }
 
             if (!p.HasTraitIgnoringSuppression(EternalDefOf.Eternal_GeneticMarker))
+            {
                 return ThoughtState.Inactive;
+            }
 
             if (!(p.health?.hediffSet?.HasHediff(EternalDefOf.Eternal_Essence) ?? false))
+            {
                 return ThoughtState.Inactive;
+            }
 
             return ThoughtState.ActiveAtStage(0);
         }

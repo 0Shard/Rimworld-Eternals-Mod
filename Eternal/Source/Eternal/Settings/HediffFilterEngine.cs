@@ -8,6 +8,7 @@
 //              PERF: Labels/descriptions come from HediffDefTextCache — no DefDatabase
 //              lookups or LabelCap translations during sort or search.
 
+using Eternal.Compatibility;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -29,7 +30,9 @@ namespace Eternal.Settings
             HediffFilterState filterState)
         {
             if (store == null)
+            {
                 yield break;
+            }
 
             var query = store.GetAllWithDefs();
 
@@ -64,30 +67,45 @@ namespace Eternal.Settings
             HediffFilterState filterState)
         {
             if (setting == null)
+            {
                 return false;
+            }
 
             // Search filter
             if (!PassesSearchFilter(defName, setting, filterState.SearchTerm))
+            {
                 return false;
+            }
 
             // Source filters
             if (!PassesSourceFilters(setting, filterState))
+            {
                 return false;
+            }
 
             // Property filters
             if (!PassesPropertyFilters(setting, filterState))
+            {
                 return false;
+            }
 
             // Category filter
             if (!PassesCategoryFilter(setting, filterState.CategoryFilter))
+            {
                 return false;
+            }
 
             // Toggle filters
-            if (filterState.ShowOnlyEnabled && !setting.canHeal)
+            if (filterState.ShowOnlyEnabled && !RjwHealthPolicy.EffectiveCanHeal(
+                DefDatabase<HediffDef>.GetNamedSilentFail(defName), setting))
+            {
                 return false;
+            }
 
             if (filterState.ShowOnlyCustom && !setting.HasCustomSettings())
+            {
                 return false;
+            }
 
             return true;
         }
@@ -101,7 +119,9 @@ namespace Eternal.Settings
             string searchTerm)
         {
             if (string.IsNullOrEmpty(searchTerm))
+            {
                 return true;
+            }
 
             // Cached label/description — search runs over every stored hediff per rebuild
             string label = HediffDefTextCache.GetLabel(defName);
@@ -128,7 +148,9 @@ namespace Eternal.Settings
             if (!string.IsNullOrEmpty(filterState.ModSourceFilter))
             {
                 if (setting.modSource.IndexOf(filterState.ModSourceFilter, StringComparison.OrdinalIgnoreCase) < 0)
+                {
                     return false;
+                }
             }
 
             // Source type filters (at least one must be active for these to apply)
@@ -137,14 +159,24 @@ namespace Eternal.Settings
                 bool matches = false;
 
                 if (filterState.FilterByBaseGame && setting.isFromBaseGame)
+                {
                     matches = true;
+                }
+
                 if (filterState.FilterByDLC && setting.isFromDLC)
+                {
                     matches = true;
+                }
+
                 if (filterState.FilterByMods && !setting.isFromBaseGame && !setting.isFromDLC)
+                {
                     matches = true;
+                }
 
                 if (!matches)
+                {
                     return false;
+                }
             }
 
             return true;
@@ -158,19 +190,29 @@ namespace Eternal.Settings
             HediffFilterState filterState)
         {
             if (filterState.FilterIsBad && !setting.isBad)
+            {
                 return false;
+            }
 
             if (filterState.FilterIsLethal && !setting.isLethal)
+            {
                 return false;
+            }
 
             if (filterState.FilterIsTendable && !setting.isTendable)
+            {
                 return false;
+            }
 
             if (filterState.FilterIsChronic && !setting.isChronic)
+            {
                 return false;
+            }
 
             if (filterState.FilterBeneficial && !setting.isBeneficial)
+            {
                 return false;
+            }
 
             return true;
         }
@@ -183,7 +225,9 @@ namespace Eternal.Settings
             HediffCategory category)
         {
             if (category == HediffCategory.All)
+            {
                 return true;
+            }
 
             return setting.allowedCategories == category ||
                    (category == HediffCategory.Injury && setting.isInjuryFilter) ||

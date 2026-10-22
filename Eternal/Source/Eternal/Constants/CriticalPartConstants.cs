@@ -91,7 +91,10 @@ namespace Eternal.Constants
         public static bool IsVitalPart(BodyPartRecord part)
         {
             if (part?.def?.defName == null)
+            {
                 return false;
+            }
+
             return VitalParts.Contains(part.def.defName);
         }
 
@@ -101,22 +104,11 @@ namespace Eternal.Constants
         public static bool IsSequencedPart(BodyPartRecord part)
         {
             if (part?.def?.defName == null)
+            {
                 return false;
+            }
+
             return SequencedParts.Contains(part.def.defName);
-        }
-
-        /// <summary>
-        /// Check if a body part is a sensory organ.
-        /// </summary>
-        public static bool IsSensoryPart(BodyPartRecord part)
-        {
-            if (part?.def?.defName == null)
-                return false;
-
-            string defName = part.def.defName;
-            return SensoryParts.Contains(defName) ||
-                   defName.Contains("Eye") ||
-                   defName.Contains("Ear");
         }
 
         /// <summary>
@@ -126,12 +118,16 @@ namespace Eternal.Constants
         public static int GetSequenceIndex(BodyPartRecord part)
         {
             if (part?.def?.defName == null)
+            {
                 return -1;
+            }
 
             for (int i = 0; i < RegrowthSequence.Count; i++)
             {
                 if (RegrowthSequence[i].Equals(part.def.defName, StringComparison.OrdinalIgnoreCase))
+                {
                     return i;
+                }
             }
             return -1;
         }
@@ -147,11 +143,19 @@ namespace Eternal.Constants
 
             // Non-sequenced parts have lower priority (regrow after critical parts)
             if (index1 < 0 && index2 < 0)
+            {
                 return 0; // Both non-sequenced, equal priority
+            }
+
             if (index1 < 0)
+            {
                 return 1; // part1 is non-sequenced, regrows after
+            }
+
             if (index2 < 0)
+            {
                 return -1; // part2 is non-sequenced, part1 regrows first
+            }
 
             return index1.CompareTo(index2);
         }
@@ -162,7 +166,9 @@ namespace Eternal.Constants
         public static string GetNextInSequence(string currentPart)
         {
             if (string.IsNullOrEmpty(currentPart))
+            {
                 return RegrowthSequence.FirstOrDefault();
+            }
 
             int currentIndex = -1;
             for (int i = 0; i < RegrowthSequence.Count; i++)
@@ -175,7 +181,9 @@ namespace Eternal.Constants
             }
 
             if (currentIndex >= 0 && currentIndex < RegrowthSequence.Count - 1)
+            {
                 return RegrowthSequence[currentIndex + 1];
+            }
 
             return null; // At end of sequence or not found
         }

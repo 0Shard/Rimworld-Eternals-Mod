@@ -33,7 +33,9 @@ namespace Eternal.Settings
             migrated = null;
 
             if (source?.Root == null || source.Root.Name.LocalName != RootElementName)
+            {
                 return false;
+            }
 
             XElement versionElement = source.Root.Element("version");
             if (versionElement != null
@@ -45,7 +47,9 @@ namespace Eternal.Settings
 
             XElement sourceSettings = source.Root.Element(SettingsElementName);
             if (sourceSettings == null)
+            {
                 return false;
+            }
 
             var targetSettings = new XElement(SettingsElementName);
             bool allEntriesValid = true;
@@ -61,7 +65,9 @@ namespace Eternal.Settings
             }
 
             if (!allEntriesValid)
+            {
                 return false;
+            }
 
             migrated = new XDocument(
                 new XElement(
@@ -75,11 +81,15 @@ namespace Eternal.Settings
         {
             targetEntry = null;
             if (sourceEntry == null)
+            {
                 return false;
+            }
 
             string defName = sourceEntry.Element("defName")?.Value?.Trim();
             if (string.IsNullOrEmpty(defName))
+            {
                 return false;
+            }
 
             bool canHeal = SettingsDefaults.HediffCanHeal;
             string canHealText = sourceEntry.Element("canHeal")?.Value?.Trim();

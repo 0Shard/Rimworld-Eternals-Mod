@@ -9,7 +9,6 @@ using System;
 using HarmonyLib;
 using RimWorld;
 using Verse;
-using Eternal;
 using Eternal.Exceptions;
 using Eternal.Utils;
 
@@ -67,7 +66,9 @@ namespace Eternal.Patches
             {
                 // SAFE-09: skip all processing when mod is disabled due to missing critical defs.
                 if (EternalModState.IsDisabled)
+                {
                     return;
+                }
 
                 // Early exit if not the Eternal trait
                 if (trait?.def != EternalDefOf.Eternal_GeneticMarker)

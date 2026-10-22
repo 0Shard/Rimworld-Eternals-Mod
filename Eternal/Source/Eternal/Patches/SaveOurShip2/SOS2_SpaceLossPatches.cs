@@ -313,7 +313,9 @@ namespace Eternal.Patches.SaveOurShip2
                         if (corpseManager != null && corpseManager.IsTracked(corpse.InnerPawn))
                         {
                             if (!corpseManager.TryRelocateCorpse(corpse.InnerPawn, __state.TargetMap, spawnPos))
+                            {
                                 continue;
+                            }
                         }
                         else
                         {
@@ -434,7 +436,7 @@ namespace Eternal.Patches.SaveOurShip2
                     foreach (var thing in heldThings.ToList())
                     {
                         if (thing is CorpseType corpse && corpse.InnerPawn != null &&
-                            corpse.InnerPawn.IsValidEternal())
+                            corpse.InnerPawn.IsValidEternalCorpse())
                         {
                             heldThings.Remove(corpse);
                             corpses.Add(corpse);

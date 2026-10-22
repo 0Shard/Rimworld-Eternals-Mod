@@ -36,6 +36,36 @@ namespace Eternal.World
     /// </summary>
     public static class SpaceCrashRescueService
     {
+        // Sources temporarily leave their deep-save lists during handoff. Native removal
+        // guards keep those sites alive until commit or rollback; nested deliveries share depth.
+        private static readonly Dictionary<WorldObject_EternalCrashSite, int> deliverySourceReservations
+            = new Dictionary<WorldObject_EternalCrashSite, int>();
+
+        internal static bool IsSourceSiteInDelivery(WorldObject_EternalCrashSite site)
+            => site != null && deliverySourceReservations.ContainsKey(site);
+
+        private static void ReserveDeliverySource(WorldObject_EternalCrashSite site)
+        {
+            deliverySourceReservations.TryGetValue(site, out int depth);
+            deliverySourceReservations[site] = depth + 1;
+        }
+
+        private static void ReleaseDeliverySource(WorldObject_EternalCrashSite site)
+        {
+            if (!deliverySourceReservations.TryGetValue(site, out int depth))
+            {
+                return;
+            }
+            if (depth > 1)
+            {
+                deliverySourceReservations[site] = depth - 1;
+            }
+            else
+            {
+                deliverySourceReservations.Remove(site);
+            }
+        }
+
         /// <summary>
         /// Organ tags stripped by terminal-velocity re-entry. Tag-based (not defName-based)
         /// so modded bodies (EBF etc.) with renamed organs are still covered.
@@ -99,35 +129,7 @@ namespace Eternal.World
 
                     if (crashSite != null)
                     {
-                        var corpseManager = EternalServiceContainer.Instance?.CorpseManager;
-                        bool ownershipTransferred;
-                        if (corpseManager != null && corpseManager.IsTracked(corpse.InnerPawn))
-                        {
-                            ownershipTransferred = corpseManager.TryReleaseCorpseToUnspawnedOwner(
-                                corpse.InnerPawn,
-                                () =>
-                                {
-                                    if (corpse.Spawned)
-                                    {
-                                        corpse.DeSpawn(DestroyMode.WillReplace);
-                                    }
-
-                                    crashSite.AddCorpse(corpse);
-                                    return crashSite.GetCrashedPawns().Contains(corpse.InnerPawn);
-                                });
-                        }
-                        else
-                        {
-                            if (corpse.Spawned)
-                            {
-                                corpse.DeSpawn(DestroyMode.WillReplace);
-                            }
-
-                            crashSite.AddCorpse(corpse);
-                            ownershipTransferred = crashSite.GetCrashedPawns().Contains(corpse.InnerPawn);
-                        }
-
-                        if (ownershipTransferred)
+                        if (TryDeliverCorpseToCrashSite(corpse, crashSite, detachContainerOwnership: true))
                         {
                             delivered++;
                         }
@@ -175,6 +177,22 @@ namespace Eternal.World
         /// <returns>Number of corpses delivered to the crash site</returns>
         public static int DeliverCorpsesToCrashSite(IEnumerable<CorpseType> corpses, PlanetTile spaceTile)
         {
+            return DeliverCorpsesToCrashSite(corpses, spaceTile, null);
+        }
+
+        /// <summary>
+        /// Ground-map removal excludes maps still inside a native destruction call. Existing
+        /// space/container callers retain their original delivery policy through the wrapper.
+        /// </summary>
+        public static int DeliverCorpsesToCrashSite(IEnumerable<CorpseType> corpses, PlanetTile spaceTile,
+            Func<MapType, bool> isMapUnavailable)
+        {
+            return DeliverCorpsesToCrashSite(corpses, spaceTile, isMapUnavailable, null);
+        }
+
+        public static int DeliverCorpsesToCrashSite(IEnumerable<CorpseType> corpses, PlanetTile spaceTile,
+            Func<MapType, bool> isMapUnavailable, Func<WorldObject_EternalCrashSite, bool> isSiteUnavailable)
+        {
             try
             {
                 var rescuedCorpses = (corpses ?? Enumerable.Empty<CorpseType>())
@@ -187,57 +205,29 @@ namespace Eternal.World
                 }
 
                 var groundTile = ResolveGroundTile(spaceTile);
-                var crashSite = groundTile.Valid ? CreateOrGetCrashSite(groundTile) : null;
+                var crashSite = groundTile.Valid
+                    ? CreateOrGetCrashSite(groundTile, site => (isSiteUnavailable?.Invoke(site) ?? false)
+                        || (isMapUnavailable != null && (site.Destroyed || (site.HasMap && isMapUnavailable(site.Map)))))
+                    : null;
 
                 int delivered = 0;
                 foreach (var corpse in rescuedCorpses)
                 {
                     if (crashSite != null)
                     {
-                        var corpseManager = EternalServiceContainer.Instance?.CorpseManager;
-                        bool ownershipTransferred;
-                        if (corpseManager != null && corpseManager.IsTracked(corpse.InnerPawn))
-                        {
-                            ownershipTransferred = corpseManager.TryReleaseCorpseToUnspawnedOwner(
-                                corpse.InnerPawn,
-                                () =>
-                                {
-                                    if (corpse.Spawned)
-                                    {
-                                        corpse.DeSpawn(DestroyMode.WillReplace);
-                                    }
-                                    else
-                                    {
-                                        corpse.holdingOwner?.Remove(corpse);
-                                    }
-
-                                    crashSite.AddCorpse(corpse);
-                                    return crashSite.GetCrashedPawns().Contains(corpse.InnerPawn);
-                                });
-                        }
-                        else
-                        {
-                            if (corpse.Spawned)
-                            {
-                                corpse.DeSpawn(DestroyMode.WillReplace);
-                            }
-                            else
-                            {
-                                corpse.holdingOwner?.Remove(corpse);
-                            }
-
-                            crashSite.AddCorpse(corpse);
-                            ownershipTransferred = crashSite.GetCrashedPawns().Contains(corpse.InnerPawn);
-                        }
-
-                        if (ownershipTransferred)
+                        if (TryDeliverCorpseToCrashSite(corpse, crashSite, detachContainerOwnership: true))
                         {
                             delivered++;
                         }
                     }
                     else
                     {
-                        SpawnCorpseAtHomeColony(corpse);
+                        if (SpawnCorpseAtHomeColony(corpse, isMapUnavailable) && isMapUnavailable != null)
+                        {
+                            // The legacy public delivery count was crash-site-only. The new
+                            // removal caller needs ownership success for either destination.
+                            delivered++;
+                        }
                     }
                 }
 
@@ -257,6 +247,92 @@ namespace Eternal.World
                 EternalLogger.HandleException(EternalExceptionCategory.CorpseTracking,
                     "DeliverCorpsesToCrashSite", null, ex);
                 return 0;
+            }
+        }
+
+        /// <summary>
+        /// Shares the physical handoff while leaving anatomy changes and notifications with callers.
+        /// Container rescues must detach their ThingOwner; falling victims retain the original
+        /// spawned-map handoff. The manager commits tracked ownership only after site acceptance.
+        /// </summary>
+        private static bool TryDeliverCorpseToCrashSite(CorpseType corpse,
+            WorldObject_EternalCrashSite crashSite, bool detachContainerOwnership)
+        {
+            bool alreadyOwned = crashSite.HasPendingCorpse(corpse);
+            bool committed = false;
+            var sourceSites = Find.WorldObjects.AllWorldObjects.OfType<WorldObject_EternalCrashSite>()
+                .Where(site => site != crashSite && site.HasPendingCorpse(corpse)).ToList();
+            bool TransferOwnership()
+            {
+                if (corpse.Spawned)
+                {
+                    corpse.DeSpawn(DestroyMode.WillReplace);
+                }
+                else if (detachContainerOwnership)
+                {
+                    corpse.holdingOwner?.Remove(corpse);
+                }
+
+                if (corpse.holdingOwner == null)
+                {
+                    // Deep-list storage needs explicit transactional release, rather than
+                    // ownership removal inside the public already-detached insertion API.
+                    foreach (var source in sourceSites)
+                    {
+                        source.ForgetPendingCorpse(corpse);
+                    }
+                }
+
+                crashSite.AddCorpse(corpse);
+                return crashSite.Spawned && !crashSite.Destroyed && crashSite.HasPendingCorpse(corpse)
+                    && !corpse.Destroyed && !corpse.Spawned
+                    && corpse.holdingOwner == null;
+            }
+
+            try
+            {
+                foreach (var source in sourceSites)
+                {
+                    ReserveDeliverySource(source);
+                }
+                var corpseManager = EternalServiceContainer.Instance?.CorpseManager;
+                committed = corpseManager != null && corpseManager.IsTracked(corpse.InnerPawn)
+                    ? corpseManager.TryReleaseCorpseToUnspawnedOwner(corpse.InnerPawn, TransferOwnership)
+                    : TransferOwnership();
+                committed = committed && crashSite.Spawned && !crashSite.Destroyed
+                    && crashSite.HasPendingCorpse(corpse) && !corpse.Destroyed && !corpse.Spawned
+                    && corpse.holdingOwner == null;
+                return committed;
+            }
+            finally
+            {
+                try
+                {
+                    // Destination callbacks can remove an apparently empty source and then
+                    // fail. Keep its reservation through compensation and deep-owner restore.
+                    if (!committed && !alreadyOwned)
+                    {
+                        crashSite.ForgetPendingCorpse(corpse);
+                    }
+                    if (!committed)
+                    {
+                        foreach (var source in sourceSites)
+                        {
+                            if (!source.HasPendingCorpse(corpse))
+                            {
+                                source.TryRetainUnownedCorpse(corpse);
+                            }
+                        }
+                    }
+                }
+                finally
+                {
+                    foreach (var source in sourceSites)
+                    {
+                        ReleaseDeliverySource(source);
+                    }
+                    if (committed) { crashSite.DeliverPendingContents(); }
+                }
             }
         }
 
@@ -285,12 +361,33 @@ namespace Eternal.World
             foreach (var thing in map.listerThings?.ThingsInGroup(ThingRequestGroup.Corpse)?.ToList() ?? new List<Thing>())
             {
                 if (thing is CorpseType corpse && corpse.InnerPawn != null &&
-                    corpse.InnerPawn.IsValidEternal() &&
-                    (cellFilter == null || cellFilter(corpse.Position)))
+                    corpse.InnerPawn.IsValidEternalCorpse() && !IsDepartingGravshipCargo(corpse) &&
+                    (cellFilter == null || cellFilter(corpse.PositionHeld)))
                 {
-                    corpses.Add(corpse);
+                    if (!corpses.Contains(corpse)) { corpses.Add(corpse); }
                 }
             }
+            foreach (var entry in EternalServiceContainer.Instance?.CorpseManager?.GetAllCorpses()
+                ?? Enumerable.Empty<Eternal.Models.CorpseTrackingEntry>())
+            {
+                var corpse = entry.Corpse;
+                if (corpse != null && !corpse.Destroyed && corpse.MapHeld == map
+                    && corpse.InnerPawn.IsValidEternalCorpse() && !IsDepartingGravshipCargo(corpse)
+                    && (cellFilter == null || cellFilter(corpse.PositionHeld)) && !corpses.Contains(corpse))
+                { corpses.Add(corpse); }
+            }
+        }
+
+        internal static bool IsDepartingGravshipCargo(Thing thing)
+        {
+            var ship = Current.Game?.Gravship;
+            if (ship == null || thing == null) { return false; }
+            if (ship.Things.Contains(thing)) { return true; }
+            for (var holder = thing.ParentHolder; holder != null; holder = holder.ParentHolder)
+            {
+                if (holder is Thing heldThing && ship.Things.Contains(heldThing)) { return true; }
+            }
+            return false;
         }
 
         /// <summary>
@@ -340,6 +437,7 @@ namespace Eternal.World
                 return;
             }
 
+            var paidRegrowth = deadPawn.health.hediffSet.hediffs.OfType<EternalRegrowing_Hediff>().ToList();
             try
             {
                 string neckDefName = Constants.CriticalPartConstants.RegrowthSequence[0];
@@ -384,6 +482,21 @@ namespace Eternal.World
                 EternalLogger.HandleException(EternalExceptionCategory.MapProtection,
                     "StripToTorso", deadPawn, ex);
             }
+            finally
+            {
+                // Native missing-part PostAdd restores the subtree before installing missing
+                // markers, removing in-progress regrowth on descendants. Reattach the exact
+                // saved progress using the manager's Part-null admission pattern; do not undo
+                // the new missing markers or grant completed work a second nutrition charge.
+                foreach (var growth in paidRegrowth.Where(growth => !deadPawn.health.hediffSet.hediffs.Contains(growth)))
+                {
+                    var part = growth.forPart ?? growth.Part;
+                    int age = growth.ageTicks;
+                    growth.Part = null;
+                    try { deadPawn.health.AddHediff(growth); }
+                    finally { growth.Part = part; growth.ageTicks = age; }
+                }
+            }
         }
 
         /// <summary>
@@ -410,6 +523,8 @@ namespace Eternal.World
 
                 trackingEntry.PreCalculatedHealingQueue =
                     new EternalResurrectionCalculator().CalculateHealingQueue(deadPawn);
+                EternalServiceContainer.Instance?.CorpseHealingProcessor?.ReconcileCrashRegrowth(
+                    deadPawn, trackingEntry.PreCalculatedHealingQueue);
             }
             catch (Exception ex)
             {
@@ -427,7 +542,7 @@ namespace Eternal.World
         {
             try
             {
-                if (spaceTile.Valid && spaceTile.Layer != null && spaceTile.Layer.IsRootSurface)
+                if (spaceTile.Valid && spaceTile.LayerDef == PlanetLayerDefOf.Surface)
                 {
                     return spaceTile;
                 }
@@ -472,6 +587,12 @@ namespace Eternal.World
         /// </summary>
         public static WorldObject_EternalCrashSite CreateOrGetCrashSite(PlanetTile worldTile)
         {
+            return CreateOrGetCrashSite(worldTile, null);
+        }
+
+        private static WorldObject_EternalCrashSite CreateOrGetCrashSite(PlanetTile worldTile,
+            Func<WorldObject_EternalCrashSite, bool> isUnavailable)
+        {
             if (!worldTile.Valid)
             {
                 Log.Error("[Eternal] Invalid world tile for crash site");
@@ -480,7 +601,7 @@ namespace Eternal.World
 
             var existing = Find.WorldObjects?.AllWorldObjects
                 ?.OfType<WorldObject_EternalCrashSite>()
-                .FirstOrDefault(x => x.Tile == worldTile);
+                .FirstOrDefault(x => x.Tile == worldTile && (isUnavailable == null || !isUnavailable(x)));
 
             if (existing != null)
             {
@@ -525,6 +646,7 @@ namespace Eternal.World
             {
                 pawn.TakeDamage(new DamageInfo(DamageDefOf.Blunt, amount: 80f, armorPenetration: 0f,
                     angle: -1f, instigator: null, hitPart: null, weapon: null));
+                if (pawn.Dead) { return; }
 
                 var limbParts = pawn.health.hediffSet?.GetNotMissingParts()
                     ?.Where(p => p.def?.tags != null && p.def.tags.Contains(BodyPartTagDefOf.MovingLimbCore))
@@ -546,6 +668,18 @@ namespace Eternal.World
             }
         }
 
+        internal static bool StageAfterFallDamage(Pawn pawn, WorldObject_EternalCrashSite site)
+        {
+            if (pawn == null || site == null) { return false; }
+            if (!pawn.Dead) { ApplyFallDamage(pawn); }
+            if (pawn.Dead)
+            {
+                return pawn.Corpse != null && TryDeliverCorpseToCrashSite(pawn.Corpse, site, true);
+            }
+            site.AddPawn(pawn);
+            return site.HasPendingPawn(pawn) || (pawn.Spawned && pawn.Map == site.Map);
+        }
+
         /// <summary>
         /// Emergency fallback when no crash site could be created: spawn living pawns
         /// (with fall damage) or corpses at the edge of the player's home map.
@@ -565,7 +699,7 @@ namespace Eternal.World
             {
                 foreach (var pawn in eternals ?? Enumerable.Empty<Pawn>())
                 {
-                    if (pawn == null || pawn.Destroyed)
+                    if (pawn == null || (pawn.Destroyed && !pawn.Dead))
                     {
                         continue;
                     }
@@ -602,11 +736,17 @@ namespace Eternal.World
         /// </summary>
         private static void SpawnCorpseAtHomeColony(CorpseType corpse)
         {
-            var homeMap = Find.AnyPlayerHomeMap;
+            SpawnCorpseAtHomeColony(corpse, null);
+        }
+
+        private static bool SpawnCorpseAtHomeColony(CorpseType corpse, Func<MapType, bool> isMapUnavailable)
+        {
+            var homeMap = isMapUnavailable == null ? Find.AnyPlayerHomeMap
+                : Find.Maps.FirstOrDefault(map => map.IsPlayerHome && !isMapUnavailable(map));
             if (homeMap == null || corpse == null || corpse.Destroyed)
             {
                 Log.Error("[Eternal] No crash site and no home map - Eternal corpse may be lost");
-                return;
+                return false;
             }
 
             var entryCell = CellFinder.RandomEdgeCell(homeMap);
@@ -616,13 +756,16 @@ namespace Eternal.World
                 if (corpseManager != null && corpseManager.IsTracked(corpse.InnerPawn))
                 {
                     if (!corpseManager.TryRelocateCorpse(corpse.InnerPawn, homeMap, entryCell))
-                        return;
+                    {
+                        return false;
+                    }
                 }
                 else
                 {
                     GenSpawn.Spawn(corpse, entryCell, homeMap);
                 }
             }
+            return corpse.Spawned && corpse.Map == homeMap;
         }
     }
 }

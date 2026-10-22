@@ -5,7 +5,6 @@
 // Description: Hediff for tracking body part regrowth using the Immortals pattern.
 //              Stores forPart and partMaxHp, severity progresses 0->1, uses partEfficiencyOffset stages.
 
-using System;
 using Verse;
 using Eternal.Compat;
 
@@ -41,13 +40,18 @@ namespace Eternal
             get
             {
                 if (pawn == null)
+                {
                     return base.SeverityLabel;
+                }
 
                 if (forPart != null)
                 {
                     float currentHp = severityInt * partMaxHp;
                     if (Part != null)
+                    {
                         return $"{currentHp:F1}/{partMaxHp:F0}";
+                    }
+
                     return $"{currentHp:F1}/{partMaxHp:F0} ({forPart.Label})";
                 }
                 return $"{severityInt:P0}";
@@ -62,9 +66,14 @@ namespace Eternal
             get
             {
                 if (pawn == null)
+                {
                     return false;
+                }
 
-                if (!pawn.Dead) return true;
+                if (!pawn.Dead)
+                {
+                    return true;
+                }
 
                 var essenceHediff = pawn.health?.hediffSet?.GetFirstHediffOfDef(EternalDefOf.Eternal_Essence);
                 return essenceHediff != null && essenceHediff.Severity > 0.5f;
@@ -81,7 +90,10 @@ namespace Eternal
         {
             forPart = part;
             partMaxHp = EBFCompat.GetMaxHealth(part, ownerPawn);
-            if (partMaxHp <= 0f) partMaxHp = 1f;
+            if (partMaxHp <= 0f)
+            {
+                partMaxHp = 1f;
+            }
         }
 
         /// <summary>

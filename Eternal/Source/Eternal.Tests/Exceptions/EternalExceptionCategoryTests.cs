@@ -54,15 +54,16 @@ namespace Eternal.Tests.Exceptions
         [InlineData(EternalExceptionCategory.HediffSwap)]
         [InlineData(EternalExceptionCategory.Resurrection)]
         [InlineData(EternalExceptionCategory.CorpseTracking)]
-        public void ErrorLevelCategories_AreInTestDataErrorList(EternalExceptionCategory category)
+        public void ErrorLevelCategories_UseProductionClassification(EternalExceptionCategory category)
         {
-            Assert.Contains(category, TestData.ErrorLevelCategories);
+            Assert.True(EternalExceptionSeverity.IsError(category));
         }
 
         [Fact]
         public void ErrorLevelCategories_ExactlySix()
         {
-            Assert.Equal(6, TestData.ErrorLevelCategories.Length);
+            Assert.Equal(6, Enum.GetValues(typeof(EternalExceptionCategory)).Cast<EternalExceptionCategory>()
+                .Count(EternalExceptionSeverity.IsError));
         }
 
         // -----------------------------------------------------------------
@@ -75,15 +76,16 @@ namespace Eternal.Tests.Exceptions
         [InlineData(EternalExceptionCategory.Regrowth)]
         [InlineData(EternalExceptionCategory.Snapshot)]
         [InlineData(EternalExceptionCategory.MapProtection)]
-        public void WarningLevelCategories_AreInTestDataWarningList(EternalExceptionCategory category)
+        public void WarningLevelCategories_UseProductionClassification(EternalExceptionCategory category)
         {
-            Assert.Contains(category, TestData.WarningLevelCategories);
+            Assert.False(EternalExceptionSeverity.IsError(category));
         }
 
         [Fact]
         public void WarningLevelCategories_ExactlyFive()
         {
-            Assert.Equal(5, TestData.WarningLevelCategories.Length);
+            Assert.Equal(5, Enum.GetValues(typeof(EternalExceptionCategory)).Cast<EternalExceptionCategory>()
+                .Count(c => !EternalExceptionSeverity.IsError(c)));
         }
 
         // -----------------------------------------------------------------
@@ -91,32 +93,21 @@ namespace Eternal.Tests.Exceptions
         // -----------------------------------------------------------------
 
         [Fact]
-        public void AllCategories_ClassifiedAsErrorOrWarning()
+        public void CorpseTracking_IsClassifiedAsError()
         {
-            var allValues = (EternalExceptionCategory[])Enum.GetValues(typeof(EternalExceptionCategory));
-            var classified = TestData.ErrorLevelCategories.Concat(TestData.WarningLevelCategories).ToArray();
-
-            foreach (var value in allValues)
-            {
-                Assert.Contains(value, classified);
-            }
+            Assert.True(EternalExceptionSeverity.IsError(EternalExceptionCategory.CorpseTracking));
         }
 
         [Fact]
-        public void ErrorAndWarning_NoOverlap()
+        public void UnknownCategory_PreservesWarningFallback()
         {
-            var overlap = TestData.ErrorLevelCategories
-                .Intersect(TestData.WarningLevelCategories)
-                .ToArray();
-
-            Assert.Empty(overlap);
+            Assert.False(EternalExceptionSeverity.IsError((EternalExceptionCategory)999));
         }
 
         [Fact]
-        public void ErrorAndWarning_CoverAllCategories()
+        public void CompatibilityFailure_IsClassifiedAsWarning()
         {
-            int totalClassified = TestData.ErrorLevelCategories.Length + TestData.WarningLevelCategories.Length;
-            Assert.Equal(TestData.ExceptionCategoryCount, totalClassified);
+            Assert.False(EternalExceptionSeverity.IsError(EternalExceptionCategory.CompatibilityFailure));
         }
     }
 }

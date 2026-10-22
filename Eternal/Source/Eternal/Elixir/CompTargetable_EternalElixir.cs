@@ -85,7 +85,9 @@ namespace Eternal.Elixir
             {
                 var snapshot = Eternal_Mod.settings?.CreateSnapshot();
                 if (snapshot == null)
+                {
                     return false;
+                }
 
                 capEnabled = snapshot.Value.Effects.PopulationCapEnabled;
                 cap = snapshot.Value.Effects.PopulationCap;
@@ -114,10 +116,14 @@ namespace Eternal.Elixir
         public override bool ValidateTarget(LocalTargetInfo target, bool showMessages = true)
         {
             if (!base.ValidateTarget(target, showMessages))
+            {
                 return false;
+            }
 
             if (!(target.Thing is Pawn pawn))
+            {
                 return false;
+            }
 
             TryGetPopulationState(out bool capEnabled, out int totalEternals, out int cap);
 
@@ -130,7 +136,9 @@ namespace Eternal.Elixir
                 cap);
 
             if (reasonKey == null)
+            {
                 return true;
+            }
 
             if (showMessages)
             {

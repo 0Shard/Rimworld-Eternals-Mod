@@ -17,6 +17,9 @@ namespace Eternal
     /// </summary>
     public static class SettingsDefaults
     {
+        internal static float NormalizeGlobalFloat(float value, float defaultValue, float min, float max)
+            => float.IsNaN(value) || float.IsInfinity(value) ? defaultValue : Math.Max(min, Math.Min(max, value));
+
         #region General
 
         public const int LoggingLevelError = 0;
@@ -66,13 +69,30 @@ namespace Eternal
         public const float HediffHealingRateUseGlobal = -1f;
         public const bool HediffCanHeal = true;
         public const bool HediffNoThreshold = false;
-        public const float HediffHealingRateMin = 0.001f;
-        public const float HediffHealingRateMax = 0.1f;
+        public const float HediffHealingRateCompatibilityMin = 0.001f;
+        public const float HediffHealingRateMin = BaseHealingRateMin;
+        public const float HediffHealingRateMax = BaseHealingRateMax;
+
+        internal static float NormalizePersistedHediffRate(float value)
+        {
+            if (value == HediffHealingRateUseGlobal)
+            {
+                return value;
+            }
+
+            if (float.IsNaN(value) || float.IsInfinity(value))
+            {
+                return HediffHealingRateUseGlobal;
+            }
+
+            return Math.Max(HediffHealingRateCompatibilityMin, Math.Min(HediffHealingRateMax, value));
+        }
 
         /// <summary>
         /// Severity-equivalent work required per body-part hit point during regrowth.
         /// </summary>
         public const float RegrowthWorkPerPartHP = 10f;
+        public const float RegrowthInitialProgress = 0.01f;
 
         /// <summary>
         /// Regrowth severity at which a part's children may start in parallel.
@@ -92,6 +112,22 @@ namespace Eternal
         public const float NutritionCostMultiplier = 1.0f;
         public const float NutritionCostMultiplierMin = 0.1f;
         public const float NutritionCostMultiplierMax = 5.0f;
+        public const float IllnessFullRangeNutrition = 1f;
+        public const float ChronicFullRangeNutrition = 3f;
+        public const float HediffNutritionCostMultiplier = 1f;
+        public const float HediffNutritionCostMultiplierMax = 100f;
+        public const float HediffNutritionSeverityRangeOverride = 0f;
+        public const float HediffNutritionSeverityRangeMax = 1000000f;
+        public const float CostStageIncrement = 0.25f;
+        public const float CostStageMaximum = 2f;
+
+        public static float NormalizeNutritionMultiplier(float value)
+            => float.IsNaN(value) || float.IsInfinity(value) ? HediffNutritionCostMultiplier :
+                Math.Max(0f, Math.Min(HediffNutritionCostMultiplierMax, value));
+
+        public static float NormalizeNutritionRange(float value)
+            => float.IsNaN(value) || float.IsInfinity(value) ? HediffNutritionSeverityRangeOverride :
+                Math.Max(0f, Math.Min(HediffNutritionSeverityRangeMax, value));
 
         public const float MaxDebtMultiplier = 5.0f;
         public const float MaxDebtMultiplierMin = 1.0f;
@@ -109,7 +145,9 @@ namespace Eternal
         /// Internal conversion from healed severity to nutrition before the single global
         /// nutritionCostMultiplier is applied. This is balance data, not a player control.
         /// </summary>
-        internal const float SeverityToNutritionRatio = 0.004f;
+        // Immortals Apex entry: 0.002 × 10 × 60000 = 1200 HP/day at size 1,
+        // default settings and no temporary buffs. This is a nominal benchmark.
+        internal const float SeverityToNutritionRatio = 1f / 1200f;
 
         public static string GetSeverityToNutritionRatioDisplay()
         {
@@ -180,17 +218,9 @@ namespace Eternal
 
         #region Legacy Snapshot Bridge
 
-        // ImmutableSettingsSnapshot is removed by Gate 4. These values keep its current
-        // factory compiling without reviving removed persisted controls in Gate 3.
+        // ProcessTick still consumes this compatibility guard. Other retired settings
+        // have no snapshot consumers and do not need constant bridge fields.
         internal const bool LegacySnapshotModEnabled = true;
-        internal const bool LegacySnapshotShowRegrowthEffects = true;
-        internal const bool LegacySnapshotPauseOnResourceDepletion = true;
-        internal const float LegacySnapshotMinimumNutritionThreshold = 0.1f;
-        internal const bool LegacySnapshotAllowResourceBorrowing = false;
-        internal const bool LegacySnapshotAutoHealEnabled = true;
-        internal const HealingOrder LegacySnapshotHealingOrder = HealingOrder.CheapestFirst;
-        internal const bool LegacySnapshotIndividualHediffControl = true;
-        internal const string LegacySnapshotMapProtectionAction = "teleport";
 
         #endregion
     }

@@ -9,7 +9,6 @@
  */
 
 using System;
-using System.Collections.Generic;
 using System.Linq;
 using Verse;
 using Eternal.DI;
@@ -19,7 +18,6 @@ using Eternal.Utils;
 using Eternal.Interfaces;
 using Eternal.Infrastructure;
 using Eternal.Healing;
-using Eternal.Resources;
 
 namespace Eternal
 {
@@ -62,7 +60,9 @@ namespace Eternal
         public void ReconcileLiveHealth(Pawn pawn)
         {
             if (pawn == null)
+            {
                 return;
+            }
 
             try
             {
@@ -86,9 +86,7 @@ namespace Eternal
                 }
 
                 var currentHediffs = hediffSet.hediffs;
-                var reconciliableHediffs = new List<Hediff>();
-                var currentKeys = new HashSet<HealingDictionaryKey>();
-                var eligibleThresholdKeys = new HashSet<HealingDictionaryKey>();
+                var snapshot = new LiveHealthReconciliationSnapshot();
                 bool canRegisterLiveThresholds = !pawn.Dead && pawn.IsValidEternal();
 
                 foreach (var hediff in currentHediffs)
@@ -96,19 +94,24 @@ namespace Eternal
                     try
                     {
                         if (hediff?.def == null)
+                        {
                             continue;
+                        }
 
                         var key = new HealingDictionaryKey(pawn, hediff);
-                        reconciliableHediffs.Add(hediff);
-                        currentKeys.Add(key);
+                        snapshot.Add(hediff, key);
 
                         if (!canRegisterLiveThresholds)
+                        {
                             continue;
+                        }
 
                         var setting = Eternal_Mod.GetSettings().hediffManager
                             ?.GetHediffSetting(hediff.def.defName);
                         if (HediffHealingConfig.IsThresholdGated(hediff, setting))
-                            eligibleThresholdKeys.Add(key);
+                        {
+                            snapshot.EligibleThresholdKeys.Add(key);
+                        }
                     }
                     catch (Exception ex)
                     {
@@ -120,11 +123,10 @@ namespace Eternal
                     }
                 }
 
-                EternalServiceContainer.Instance?.ThresholdTracker?.ReconcileLiveHealth(
+                EternalServiceContainer.Instance?.ThresholdTracker?.ReconcileValidatedHealth(
                     pawn,
-                    reconciliableHediffs,
-                    eligibleThresholdKeys);
-                hediffHealer?.ReconcileLiveHealth(pawn, reconciliableHediffs, currentKeys);
+                    snapshot);
+                hediffHealer?.ReconcileValidatedHealth(pawn, snapshot);
             }
             catch (Exception ex)
             {
@@ -155,13 +157,12 @@ namespace Eternal
 
                     // Check if pawn can heal (has food, not in critical state, etc.)
                     if (!CanHeal(pawn))
+                    {
                         continue;
+                    }
 
                     // Process current live hediff instances only after reconciliation.
                     hediffHealer.ProcessHediffHealing(pawn);
-
-                    // Process scar healing directly
-                    scarHealing.ProcessScarHealing();
 
                     // Check for excessive food debt and pause if needed
                     if (FoodDebtSystem.HasExcessiveDebt(pawn))
@@ -214,7 +215,10 @@ namespace Eternal
         /// </summary>
         private void ProcessPawnRareHealing(Pawn pawn)
         {
-            if (pawn == null) return;
+            if (pawn == null)
+            {
+                return;
+            }
 
             // Register for food debt tracking if not already registered
             if (pawn.Dead)
@@ -264,11 +268,15 @@ namespace Eternal
         private bool CanHeal(Pawn pawn)
         {
             if (pawn == null || pawn.health?.hediffSet == null)
+            {
                 return false;
+            }
 
             // Don't heal dead pawns
             if (pawn.Dead)
+            {
                 return false;
+            }
 
             // REMOVED: IsInCriticalState() check was blocking healing when pawns needed it most
             // Eternals SHOULD heal even in critical states - that's the entire point of immortality
@@ -281,7 +289,10 @@ namespace Eternal
         /// </summary>
         public void StartRegrowth(Pawn pawn)
         {
-            if (pawn == null) return;
+            if (pawn == null)
+            {
+                return;
+            }
 
             // Log regrowth start
             EternalLogger.Info($"Started regrowth process for {pawn.Name?.ToStringShort ?? "Unknown"}");
@@ -294,13 +305,24 @@ namespace Eternal
         /// <returns>Healing status message.</returns>
         public string GetPawnHealingStatus(Pawn pawn)
         {
-            if (pawn == null) return "Unknown";
-            if (pawn.Dead) return "Dead";
-            if (pawn.health?.hediffSet == null) return "No health data";
-            
+            if (pawn == null)
+            {
+                return "Unknown";
+            }
+
+            if (pawn.Dead)
+            {
+                return "Dead";
+            }
+
+            if (pawn.health?.hediffSet == null)
+            {
+                return "No health data";
+            }
+
             // Count harmful hediffs
             int harmfulCount = pawn.health.hediffSet.hediffs.Count(h => h.def.isBad);
-            
+
             return harmfulCount > 0 ? $"Healing ({harmfulCount} conditions)" : "Healthy";
         }
 

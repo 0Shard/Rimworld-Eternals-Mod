@@ -23,7 +23,6 @@ using Eternal.Exceptions;
 using Eternal.Utils;
 
 // Type aliases to resolve namespace shadowing (Eternal.Corpse/Eternal.Caravan shadow game types)
-using CorpseType = Verse.Corpse;
 using CaravanType = RimWorld.Planet.Caravan;
 
 namespace Eternal.Patches

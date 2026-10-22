@@ -10,10 +10,10 @@
 //              ("filters not taking effect"). With HediffDefTextCache the rebuild is cheap
 //              enough to run on the frame the filter changes.
 
+using Eternal.Compatibility;
 using System.Collections.Generic;
 using System.Linq;
 using Eternal.Settings;
-using UnityEngine;
 using Verse;
 
 namespace Eternal
@@ -82,27 +82,12 @@ namespace Eternal
         /// </summary>
         public EternalHediffSetting GetHediffSetting(HediffDef hediffDef)
         {
-            if (hediffDef == null) return null;
+            if (hediffDef == null)
+            {
+                return null;
+            }
+
             return Store.GetOrCreate(hediffDef);
-        }
-
-        /// <summary>
-        /// Sets the setting for a specific hediff.
-        /// </summary>
-        public void SetHediffSetting(string hediffDefName, EternalHediffSetting setting)
-        {
-            Store.Set(hediffDefName, setting);
-            MarkFilterDirty();
-        }
-
-        /// <summary>
-        /// Removes a hediff setting.
-        /// </summary>
-        public bool RemoveHediffSetting(string hediffDefName)
-        {
-            bool result = Store.Remove(hediffDefName);
-            MarkFilterDirty();
-            return result;
         }
 
         #endregion
@@ -129,17 +114,6 @@ namespace Eternal
         }
 
         /// <summary>
-        /// Resets selected hediffs to defaults.
-        /// </summary>
-        public int ResetSelected()
-        {
-            var selected = Selection.GetSelected().ToList();
-            int result = Store.ResetMany(selected);
-            MarkFilterDirty();
-            return result;
-        }
-
-        /// <summary>
         /// Resets hediffs matching current filters to defaults.
         /// </summary>
         public int ResetFiltered()
@@ -150,42 +124,6 @@ namespace Eternal
             int result = Store.ResetMany(filtered);
             MarkFilterDirty();
             return result;
-        }
-
-        /// <summary>
-        /// Resets hediffs by category to defaults.
-        /// </summary>
-        public int ResetByCategory(HediffCategory category)
-        {
-            var matching = Store.GetAll()
-                .Where(kvp =>
-                {
-                    bool matchesCategory = category == HediffCategory.All ||
-                        kvp.Value.allowedCategories == category ||
-                        (category == HediffCategory.Injury && kvp.Value.isInjuryFilter) ||
-                        (category == HediffCategory.Disease && kvp.Value.isDiseaseFilter) ||
-                        (category == HediffCategory.Condition && kvp.Value.isConditionFilter);
-                    return matchesCategory && kvp.Value.HasCustomSettings();
-                })
-                .Select(kvp => kvp.Key);
-
-            int result = Store.ResetMany(matching);
-            MarkFilterDirty();
-            return result;
-        }
-
-        /// <summary>
-        /// Resets hediffs from a specific mod source to defaults.
-        /// </summary>
-        public int ResetByModSource(string modSource)
-        {
-            var matching = Store.GetAll()
-                .Where(kvp =>
-                    kvp.Value.modSource.Equals(modSource, System.StringComparison.OrdinalIgnoreCase) &&
-                    kvp.Value.HasCustomSettings())
-                .Select(kvp => kvp.Key);
-
-            return Store.ResetMany(matching);
         }
 
         #endregion
@@ -206,9 +144,13 @@ namespace Eternal
         public void SetHediffSelected(string hediffDefName, bool selected)
         {
             if (selected)
+            {
                 Selection.Select(hediffDefName);
+            }
             else
+            {
                 Selection.Deselect(hediffDefName);
+            }
         }
 
         /// <summary>
@@ -225,9 +167,13 @@ namespace Eternal
         public void SelectAllHediffs(bool select)
         {
             if (select)
-                Selection.SelectAll(Store.Count);
+            {
+                Selection.SelectAll(GetFilteredHediffs().Select(kvp => kvp.Key).ToList());
+            }
             else
+            {
                 Selection.ClearAll();
+            }
         }
 
         /// <summary>
@@ -331,28 +277,37 @@ namespace Eternal
         /// </summary>
         public void ApplySettingsToGroup(IEnumerable<string> hediffNames, EternalHediffSetting template)
         {
-            if (template == null) return;
+            ApplySettingsToGroupWithCount(hediffNames, template);
+        }
 
+        internal int ApplySettingsToGroupWithCount(IEnumerable<string> hediffNames, EternalHediffSetting template)
+        {
+            if (template == null)
+            {
+                return 0;
+            }
+
+            int affected = 0;
             foreach (string name in hediffNames)
             {
                 var setting = GetHediffSetting(name);
-                if (setting != null)
+                if (setting != null && !RjwHealthPolicy.IsProtected(DefDatabase<HediffDef>.GetNamedSilentFail(name)))
                 {
-                    setting.enabled = template.isEnabled;
-                    setting.canHeal = template.canHeal;
-                    setting.requireCureToResurrect = template.requireCureToResurrect;
-                    setting.noThreshold = template.noThreshold;  // Copy instant healing setting
+                    affected++;
+                    if (!Eternal.Healing.HediffHealingConfig.IsRegrowthManaged(DefDatabase<HediffDef>.GetNamedSilentFail(name)))
+                    {
+                        setting.canHeal = template.canHeal;
+                        setting.noThreshold = template.noThreshold;
+                    }
+                    setting.nutritionCostMultiplier = SettingsDefaults.NormalizeNutritionMultiplier(template.nutritionCostMultiplier);
+                    setting.nutritionSeverityRangeOverride = SettingsDefaults.NormalizeNutritionRange(template.nutritionSeverityRangeOverride);
                     setting.healingRate = template.healingRate;  // Copy healing rate (may be custom or USE_GLOBAL_RATE)
-                    setting.maxSeverityThreshold = template.maxSeverityThreshold;
-                    setting.healPermanentInjuries = template.healPermanentInjuries;
-                    setting.healScars = template.healScars;
-                    setting.healMissingParts = template.healMissingParts;
                     setting.allowedCategories = template.allowedCategories;
-                    setting.consumeExtraResources = template.consumeExtraResources;
                 }
             }
 
             MarkFilterDirty();
+            return affected;
         }
 
         #endregion
@@ -369,7 +324,8 @@ namespace Eternal
             return new HediffStatistics
             {
                 TotalHediffs = allSettings.Count,
-                HealingHediffs = allSettings.Count(kvp => kvp.Value.canHeal),  // Count actual healing, not just enabled
+                HealingHediffs = allSettings.Count(kvp => RjwHealthPolicy.EffectiveCanHeal(
+                    DefDatabase<HediffDef>.GetNamedSilentFail(kvp.Key), kvp.Value)),  // Count actual healing, not just enabled
                 BeneficialHediffs = allSettings.Count(kvp => kvp.Value.isBeneficial),
                 CustomizedHediffs = allSettings.Count(kvp => kvp.Value.HasCustomSettings()),
                 Injuries = allSettings.Count(kvp => kvp.Value.isInjuryFilter),
@@ -423,9 +379,5 @@ namespace Eternal
         public int Conditions { get; set; }
 
         // Legacy property for backwards compatibility
-        public int EnabledHediffs => HealingHediffs;
-
-        public float HealingPercentage => TotalHediffs > 0 ? (float)HealingHediffs / TotalHediffs * 100f : 0f;
-        public float CustomizedPercentage => TotalHediffs > 0 ? (float)CustomizedHediffs / TotalHediffs * 100f : 0f;
     }
 }

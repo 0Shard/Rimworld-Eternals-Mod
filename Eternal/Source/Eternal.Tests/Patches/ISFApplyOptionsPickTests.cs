@@ -7,7 +7,6 @@
 //              Reflection/Harmony paths are deferred to the in-game harness (they need
 //              ItsSorceryFramework loaded).
 
-using System;
 using System.Collections.Generic;
 using Xunit;
 using Eternal.Patches.ItsSorcery;
@@ -150,6 +149,33 @@ namespace Eternal.Tests.Patches
 
             int result = ISF_ApplyOptions_Patch.PickBestOptionIndex(options);
             Assert.Equal(0, result);
+        }
+
+        [Fact]
+        public void NullOptionsAndMissingViews_DoNotHideLaterMatches()
+        {
+            var options = new List<ISF_ApplyOptions_Patch.OptionScoreEntry>
+            {
+                null,
+                new ISF_ApplyOptions_Patch.OptionScoreEntry { Label = null, StatEntries = null },
+                Entry("Recovery", ("CTR_QiEnergyRecovery", 0.5f))
+            };
+
+            Assert.Equal(2, ISF_ApplyOptions_Patch.PickBestOptionIndex(options));
+        }
+
+        [Fact]
+        public void MixedStatOrder_KeepsHighestTierAndFirstMatch()
+        {
+            var options = new List<ISF_ApplyOptions_Patch.OptionScoreEntry>
+            {
+                Entry("Mixed", ("TribulationChance", -0.01f), ("CultivationSpeed", 0.3f)),
+                Entry("Cultivation", ("CultivationSpeed", 0.3f)),
+                Entry("Mixed recovery", ("CultivationSpeed", 0.3f), ("CTR_QiEnergyRecovery", 0.5f)),
+                Entry("Later recovery", ("CTR_StaminaEnergyRecovery", 0.7f))
+            };
+
+            Assert.Equal(2, ISF_ApplyOptions_Patch.PickBestOptionIndex(options));
         }
     }
 }

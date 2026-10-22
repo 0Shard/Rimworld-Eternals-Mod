@@ -22,13 +22,5 @@ namespace Eternal.Extensions
         {
             return CriticalPartConstants.IsVitalPart(part);
         }
-
-        /// <summary>
-        /// Checks if a body part requires sequenced regrowth.
-        /// </summary>
-        public static bool RequiresSequencedRegrowth(this BodyPartRecord part)
-        {
-            return CriticalPartConstants.IsSequencedPart(part);
-        }
     }
 }

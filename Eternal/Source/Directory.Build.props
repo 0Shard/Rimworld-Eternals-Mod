@@ -1,0 +1,10 @@
+<!-- Author: 0Shard -->
+<Project>
+  <PropertyGroup>
+    <!-- net472 does not enable installed SDK analysis by default. -->
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <AnalysisLevel>latest</AnalysisLevel>
+    <AnalysisMode>None</AnalysisMode>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+  </PropertyGroup>
+</Project>

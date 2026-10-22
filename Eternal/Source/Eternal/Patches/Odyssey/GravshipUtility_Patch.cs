@@ -20,7 +20,6 @@ using RimWorld;
 using RimWorld.Planet;
 using Verse;
 using Eternal.Exceptions;
-using Eternal.Extensions;
 using Eternal.Utils;
 using Eternal.World;
 
@@ -39,7 +38,7 @@ namespace Eternal.Patches.Odyssey
     {
         public List<Pawn> EternalsToSave { get; } = new List<Pawn>();
         public List<CorpseType> CorpsesToSave { get; } = new List<CorpseType>();
-        public int SavedWorldTile { get; set; } = -1;
+        public PlanetTile SavedWorldTile { get; set; } = PlanetTile.Invalid;
         public bool WasSpaceMap { get; set; }
         public bool PrefixSucceeded { get; set; }
     }
@@ -120,6 +119,7 @@ namespace Eternal.Patches.Odyssey
                     {
                         corpse.DeSpawn(DestroyMode.WillReplace);
                     }
+                    corpse.holdingOwner?.Remove(corpse);
                     Log.Message($"[Eternal] Saving corpse of {corpse.InnerPawn?.Name} from gravship abandonment");
                 }
 
@@ -178,8 +178,7 @@ namespace Eternal.Patches.Odyssey
                     }
 
                     // Severe but non-lethal fall damage - Eternals regenerate
-                    SpaceCrashRescueService.ApplyFallDamage(eternal);
-                    crashSite.AddPawn(eternal);
+                    SpaceCrashRescueService.StageAfterFallDamage(eternal, crashSite);
                     Log.Message($"[Eternal] {eternal.Name} fell to the surface at crash site");
                 }
 
@@ -187,7 +186,7 @@ namespace Eternal.Patches.Odyssey
                 {
                     if (corpse != null && !corpse.Destroyed)
                     {
-                        crashSite.AddCorpse(corpse);
+                        SpaceCrashRescueService.DeliverCorpsesToCrashSite(new[] { corpse }, crashSite.Tile);
                     }
                 }
 
@@ -204,6 +203,25 @@ namespace Eternal.Patches.Odyssey
                     "SpawnEternalsAtCrashSite", null, ex);
                 SpaceCrashRescueService.SpawnAtHomeColony(
                     __state.EternalsToSave.Concat(__state.CorpsesToSave.Select(c => c.InnerPawn)));
+            }
+        }
+    }
+
+    [HarmonyPatch(typeof(GravshipUtility), nameof(GravshipUtility.GenerateGravship))]
+    public static class GravshipUtility_GenerateGravship_Patch
+    {
+        public static bool Prepare() => ModsConfig.OdysseyActive;
+
+        [HarmonyPostfix]
+        public static void ReconcileExtractedCorpses(Gravship __result)
+        {
+            if (__result == null) { return; }
+            var manager = Eternal.DI.EternalServiceContainer.Instance?.CorpseManager;
+            foreach (var entry in manager?.GetAllCorpses()?.ToList()
+                ?? new List<Eternal.Models.CorpseTrackingEntry>())
+            {
+                if (SpaceCrashRescueService.IsDepartingGravshipCargo(entry.Corpse))
+                { manager.UpdateCorpseLocation(entry.OriginalPawn, null, IntVec3.Invalid); }
             }
         }
     }

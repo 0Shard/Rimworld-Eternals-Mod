@@ -40,23 +40,33 @@ namespace Eternal.Patches
             try
             {
                 if (EternalModState.IsDisabled)
+                {
                     return;
+                }
 
                 var mapPawns = kidnapper?.Map?.mapPawns?.AllPawnsSpawned;
                 if (mapPawns == null)
+                {
                     return;
+                }
 
                 for (int i = 0; i < mapPawns.Count; i++)
                 {
                     Pawn candidate = mapPawns[i];
                     if (!candidate.IsValidEternal())
+                    {
                         continue;
+                    }
 
                     if (disallowed == null)
+                    {
                         disallowed = new List<Thing>();
+                    }
 
                     if (!disallowed.Contains(candidate))
+                    {
                         disallowed.Add(candidate);
+                    }
                 }
             }
             catch (Exception ex)

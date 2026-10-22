@@ -20,7 +20,6 @@ using Eternal.Utils;
 using Eternal.World;
 
 // Type aliases to resolve namespace shadowing (Eternal.Map/Corpse shadows Verse types)
-using MapType = Verse.Map;
 using CorpseType = Verse.Corpse;
 
 namespace Eternal.Patches.SaveOurShip2
@@ -47,7 +46,7 @@ namespace Eternal.Patches.SaveOurShip2
         /// Dynamically targets SOS2's WorldObjectOrbitingShip.ShouldRemoveMapNow method.
         /// Resolves the type via AccessTools.TypeByName directly: TargetMethod runs at startup
         /// patching, before EternalServiceContainer/SOS2ReflectionCache exist (FinalizeInit),
-        /// so SpaceModDetection.WorldObjectOrbitingShipType is always null here.
+        /// so this target must be resolved directly before the session cache is initialized.
         /// </summary>
         public static MethodBase TargetMethod()
         {

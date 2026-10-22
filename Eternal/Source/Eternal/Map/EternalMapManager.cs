@@ -10,7 +10,6 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using Verse;
-using RimWorld;
 using Eternal.DI;
 using Eternal.Exceptions;
 using Eternal.Extensions;
@@ -41,6 +40,22 @@ namespace Eternal.Map
         {
         }
 
+        public override void FinalizeInit()
+        {
+            base.FinalizeInit();
+            activeAnchors.RemoveAll(anchor => anchor == null);
+            foreach (var anchor in activeAnchors.ToArray())
+            {
+                // Mote anchors are deep-saved by this component, outside the map's
+                // ordinary things list. Restore grid/ticker ownership after map load.
+                if (!anchor.Destroyed && !anchor.Spawned)
+                {
+                    GenSpawn.Spawn(anchor, anchor.Position, map, anchor.Rotation, WipeMode.Vanish, respawningAfterLoad: true);
+                }
+                if (anchor.Destroyed || anchor.ShouldRemoveAnchor()) { RemoveAnchor(anchor); }
+            }
+        }
+
         /// <summary>
         /// Called every map tick to update anchor states.
         /// </summary>
@@ -66,7 +81,7 @@ namespace Eternal.Map
                 EnsureCorpseAnchors();
             }
         }
-        
+
         /// <summary>
         /// Called by RimWorld immediately before the map is destroyed/unloaded.
         /// Triggers event-driven corpse rescue rather than relying on the 5000-tick fallback poll.
@@ -96,8 +111,10 @@ namespace Eternal.Map
         public EternalAnchor CreateAnchor(Pawn pawn)
         {
             if (pawn == null || !pawn.Dead)
+            {
                 return null;
-                
+            }
+
             // Check if map anchors are enabled in settings
             if (!Eternal_Mod.GetSettings().enableMapAnchors)
             {
@@ -107,19 +124,23 @@ namespace Eternal.Map
                 }
                 return null;
             }
-                
+
             // Check if pawn has Eternal trait (ignoring gene suppression)
             if (!pawn.HasTraitIgnoringSuppression(EternalDefOf.Eternal_GeneticMarker))
+            {
                 return null;
-                
+            }
+
             // Check if this is a temporary map
             if (!IsTemporaryMap())
+            {
                 return null;
-                
+            }
+
             // Create anchor
             EternalAnchor anchor = (EternalAnchor)ThingMaker.MakeThing(EternalDefOf.EternalAnchor);
             anchor.SetAnchoredPawn(pawn);
-            
+
             // Place anchor at pawn's position
             IntVec3 position = pawn.Position;
             if (!position.IsValid)
@@ -127,18 +148,18 @@ namespace Eternal.Map
                 // Find a valid position near the pawn
                 position = CellFinder.RandomClosewalkCellNear(pawn.Position, map, 5);
             }
-            
+
             GenSpawn.Spawn(anchor, position, map);
-            
+
             // Add to active anchors
             activeAnchors.Add(anchor);
-            
+
             // Log anchor creation
             if (Eternal_Mod.settings?.debugMode == true)
             {
                 Log.Message($"EternalAnchor created for {pawn.Name} at {position} on map {map}");
             }
-            
+
             return anchor;
         }
 
@@ -152,11 +173,15 @@ namespace Eternal.Map
         public EternalAnchor CreateCorpseAnchor(CorpseType corpse)
         {
             if (corpse == null)
+            {
                 return null;
+            }
 
             Pawn innerPawn = corpse.InnerPawn;
             if (innerPawn == null)
+            {
                 return null;
+            }
 
             // Check if map anchors are enabled in settings
             if (!Eternal_Mod.GetSettings().enableMapAnchors)
@@ -170,11 +195,15 @@ namespace Eternal.Map
 
             // Check if pawn has Eternal trait (ignoring gene suppression)
             if (!innerPawn.HasTraitIgnoringSuppression(EternalDefOf.Eternal_GeneticMarker))
+            {
                 return null;
+            }
 
             // Check if this is a temporary map
             if (!IsTemporaryMap())
+            {
                 return null;
+            }
 
             // Check if anchor already exists for this pawn
             if (GetAnchorForPawn(innerPawn) != null)
@@ -219,25 +248,35 @@ namespace Eternal.Map
         public void EnsureCorpseAnchors()
         {
             if (!IsTemporaryMap())
+            {
                 return;
+            }
 
             if (!Eternal_Mod.GetSettings().enableMapAnchors)
+            {
                 return;
+            }
 
             // Get the corpse manager
             var corpseManager = EternalServiceContainer.Instance.CorpseManager;
             if (corpseManager == null || !corpseManager.HasEternalCorpses(map))
+            {
                 return;
+            }
 
             // Check each tracked corpse
             foreach (var entry in corpseManager.GetCorpsesOnMap(map))
             {
                 if (entry?.Corpse == null || entry.OriginalPawn == null)
+                {
                     continue;
+                }
 
                 // Check if anchor already exists
                 if (GetAnchorForPawn(entry.OriginalPawn) != null)
+                {
                     continue;
+                }
 
                 // Create anchor for unanchored corpse
                 if (entry.Corpse.Spawned)
@@ -254,21 +293,21 @@ namespace Eternal.Map
         public void RemoveAnchor(EternalAnchor anchor)
         {
             if (anchor == null)
-                return;
-                
-            // Remove from active anchors
-            if (activeAnchors.Contains(anchor))
             {
-                activeAnchors.Remove(anchor);
+                return;
             }
-            
+
+            // Remove from active anchors
+            bool removed = activeAnchors.Remove(anchor);
+            anchor.DisposeAnchor();
+
             // Log anchor removal
-            if (Eternal_Mod.settings?.debugMode == true)
+            if (removed && Eternal_Mod.settings?.debugMode == true)
             {
                 Log.Message($"EternalAnchor removed for {anchor.AnchoredPawn?.Name}");
             }
         }
-        
+
         /// <summary>
         /// Gets all active anchors on this map.
         /// </summary>
@@ -277,7 +316,7 @@ namespace Eternal.Map
         {
             return new List<EternalAnchor>(activeAnchors);
         }
-        
+
         /// <summary>
         /// Gets anchor for a specific pawn.
         /// </summary>
@@ -287,7 +326,7 @@ namespace Eternal.Map
         {
             return activeAnchors.FirstOrDefault(anchor => anchor.AnchoredPawn == pawn);
         }
-        
+
         /// <summary>
         /// Checks if the current map is a temporary map.
         /// </summary>
@@ -296,15 +335,17 @@ namespace Eternal.Map
         {
             // Check if map is a temporary map (not a home map)
             if (map == null)
+            {
                 return false;
-                
+            }
+
             // Temporary maps are typically not home maps and have specific properties
             return !map.IsPlayerHome &&
                    (map.Parent != null ||
                     map.Biome?.defName == "SeaIce" ||
                     map.Biome?.defName == "IceSheet");
         }
-        
+
         /// <summary>
         /// Checks if the map should be prevented from being removed.
         /// </summary>
@@ -313,7 +354,7 @@ namespace Eternal.Map
         {
             return activeAnchors.Count > 0;
         }
-        
+
         /// <summary>
         /// Exposes data for save/load functionality.
         /// </summary>

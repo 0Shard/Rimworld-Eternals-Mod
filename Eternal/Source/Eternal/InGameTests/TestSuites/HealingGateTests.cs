@@ -28,35 +28,26 @@ namespace Eternal.InGameTests.TestSuites
     {
         public static TestSuiteResult RunAll(Verse.Map map)
         {
-            int passed = 0;
-            int failed = 0;
-            var failures = new List<string>();
+            var result = new TestSuiteResult(0, 0, new List<string>());
 
-            try
-            {
-                RunTest("UserEnabledStagedDebuffHealsImmediately",
-                    () => UserEnabledStagedDebuffHealsImmediately(map), ref passed, ref failed, failures);
-                RunTest("DisabledStagedDebuffDoesNotHeal",
-                    () => DisabledStagedDebuffDoesNotHeal(map), ref passed, ref failed, failures);
-                RunTest("MinSeverityFlooredHediffIsRemoved",
-                    () => MinSeverityFlooredHediffIsRemoved(map), ref passed, ref failed, failures);
-                RunTest("RisingDebuffBelowThresholdDoesNotHeal",
-                    () => RisingDebuffBelowThresholdDoesNotHeal(map), ref passed, ref failed, failures);
-                RunTest("RisingDebuffAboveThresholdHeals",
-                    () => RisingDebuffAboveThresholdHeals(map), ref passed, ref failed, failures);
-                RunTest("ThresholdLatchKeepsHealingBelowThreshold",
-                    () => ThresholdLatchKeepsHealingBelowThreshold(map), ref passed, ref failed, failures);
-                RunTest("NoThresholdSettingBypassesThreshold",
-                    () => NoThresholdSettingBypassesThreshold(map), ref passed, ref failed, failures);
-                RunTest("DebuffHealAmountMatchesImmortalsParity",
-                    () => DebuffHealAmountMatchesImmortalsParity(map), ref passed, ref failed, failures);
-            }
-            finally
-            {
-                TestPawnFactory.CleanupAll();
-            }
+            result.RunTest("HealingGate", "UserEnabledStagedDebuffHealsImmediately",
+                () => UserEnabledStagedDebuffHealsImmediately(map));
+            result.RunTest("HealingGate", "DisabledStagedDebuffDoesNotHeal",
+                () => DisabledStagedDebuffDoesNotHeal(map));
+            result.RunTest("HealingGate", "MinSeverityFlooredHediffIsRemoved",
+                () => MinSeverityFlooredHediffIsRemoved(map));
+            result.RunTest("HealingGate", "RisingDebuffBelowThresholdDoesNotHeal",
+                () => RisingDebuffBelowThresholdDoesNotHeal(map));
+            result.RunTest("HealingGate", "RisingDebuffAboveThresholdHeals",
+                () => RisingDebuffAboveThresholdHeals(map));
+            result.RunTest("HealingGate", "ThresholdLatchKeepsHealingBelowThreshold",
+                () => ThresholdLatchKeepsHealingBelowThreshold(map));
+            result.RunTest("HealingGate", "NoThresholdSettingBypassesThreshold",
+                () => NoThresholdSettingBypassesThreshold(map));
+            result.RunTest("HealingGate", "DebuffHealAmountMatchesImmortalsParity",
+                () => DebuffHealAmountMatchesImmortalsParity(map));
 
-            return new TestSuiteResult(passed, failed, failures);
+            return result;
         }
 
         /// <summary>
@@ -233,11 +224,11 @@ namespace Eternal.InGameTests.TestSuites
                 // Expected from live values: the seam under test is the debuff rate factor
                 // replacing the old maxSeverity scaling + 0.1x auto multiplier (~10x larger).
                 var setting = Eternal_Mod.GetSettings().hediffManager.GetHediffSetting(hediff.def.defName);
-                var calculator = EternalServiceContainer.Instance.HediffHealingCalculator;
+                int stage = hediff.CurStageIndex;
+                float independentStage = stage <= 0 ? 1f : stage == 1 ? 0.8f
+                    : stage == 2 ? 0.6f : stage == 3 ? 0.4f : 0.2f;
                 float expectedPerPass = setting.GetEffectiveHealingRate()
-                    * calculator.GetStageMultiplier(hediff)
-                    * pawn.BodySize
-                    * Healing.UnifiedHediffHealingCalculator.DEBUFF_RATE_FACTOR;
+                    * independentStage * pawn.BodySize * 0.01f;
 
                 float severityBefore = hediff.Severity;
                 ProcessHealingOnce(pawn);
@@ -260,28 +251,29 @@ namespace Eternal.InGameTests.TestSuites
         private static void WithHediffAndCanHeal(Pawn pawn, string hediffDefName, float initialSeverity,
             bool canHeal, Action<Hediff> body)
         {
+            TestAssert.Available(Eternal_Mod.settings, "HealingGate settings");
             var hediffDef = DefDatabase<HediffDef>.GetNamedSilentFail(hediffDefName);
             TestAssert.IsNotNull(hediffDef, $"{hediffDefName} def should exist");
 
             var setting = Eternal_Mod.GetSettings().hediffManager.GetHediffSetting(hediffDefName);
             TestAssert.IsNotNull(setting, $"{hediffDefName} setting should exist");
             bool originalCanHeal = setting.canHeal;
-            setting.canHeal = canHeal;
-
-            var hediff = HediffMaker.MakeHediff(hediffDef, pawn);
-            hediff.Severity = initialSeverity;
-            pawn.health.AddHediff(hediff);
-
+            Hediff hediff = null;
             try
             {
+                setting.canHeal = canHeal;
+                hediff = HediffMaker.MakeHediff(hediffDef, pawn);
+                hediff.Severity = initialSeverity;
+                pawn.health.AddHediff(hediff);
                 body(hediff);
             }
             finally
             {
                 setting.canHeal = originalCanHeal;
-                var leftover = pawn.health.hediffSet.GetFirstHediffOfDef(hediffDef);
-                if (leftover != null)
-                    pawn.health.RemoveHediff(leftover);
+                if (hediff != null && pawn.health.hediffSet.hediffs.Contains(hediff))
+                {
+                    pawn.health.RemoveHediff(hediff);
+                }
             }
         }
 
@@ -294,6 +286,7 @@ namespace Eternal.InGameTests.TestSuites
         private static void WithThresholdedHediff(Pawn pawn, string hediffDefName, float initialSeverity,
             float threshold, bool noThreshold, Action<Hediff> body)
         {
+            TestAssert.Available(Eternal_Mod.settings, "HealingGate settings");
             var hediffDef = DefDatabase<HediffDef>.GetNamedSilentFail(hediffDefName);
             TestAssert.IsNotNull(hediffDef, $"{hediffDefName} def should exist");
 
@@ -301,32 +294,34 @@ namespace Eternal.InGameTests.TestSuites
             TestAssert.IsNotNull(setting, $"{hediffDefName} setting should exist");
             bool originalCanHeal = setting.canHeal;
             bool originalNoThreshold = setting.noThreshold;
-            setting.canHeal = false; // keep the AddHediff patch from rolling a random threshold
-            setting.noThreshold = false;
-
-            var hediff = HediffMaker.MakeHediff(hediffDef, pawn);
-            hediff.Severity = initialSeverity;
-            pawn.health.AddHediff(hediff);
-
+            Hediff hediff = null;
             var tracker = EternalServiceContainer.Instance?.ThresholdTracker;
-            TestAssert.IsNotNull(tracker, "ThresholdTracker should be available via the service container");
-            tracker.RegisterThreshold(pawn, hediff, threshold);
-
-            setting.canHeal = true;
-            setting.noThreshold = noThreshold;
-
+            TestAssert.IsNotNull(tracker, "ThresholdTracker should exist");
             try
             {
+                setting.canHeal = false;
+                setting.noThreshold = false;
+                hediff = HediffMaker.MakeHediff(hediffDef, pawn);
+                hediff.Severity = initialSeverity;
+                pawn.health.AddHediff(hediff);
+                tracker.RegisterThreshold(pawn, hediff, threshold);
+                setting.canHeal = true;
+                setting.noThreshold = noThreshold;
                 body(hediff);
             }
             finally
             {
                 setting.canHeal = originalCanHeal;
                 setting.noThreshold = originalNoThreshold;
-                tracker.RemoveThreshold(pawn, hediff);
-                var leftover = pawn.health.hediffSet.GetFirstHediffOfDef(hediffDef);
-                if (leftover != null)
-                    pawn.health.RemoveHediff(leftover);
+                if (hediff != null)
+                {
+                    tracker.RemoveThreshold(pawn, hediff);
+                }
+
+                if (hediff != null && pawn.health.hediffSet.hediffs.Contains(hediff))
+                {
+                    pawn.health.RemoveHediff(hediff);
+                }
             }
         }
 
@@ -337,28 +332,7 @@ namespace Eternal.InGameTests.TestSuites
             hediffHealer.ProcessHediffHealing(pawn);
         }
 
-        private static void RunTest(string name, Action test, ref int passed, ref int failed, List<string> failures)
-        {
-            Log.Message($"[EternalTests] Running: {name}");
-            try
-            {
-                test();
-                passed++;
-                Log.Message($"[EternalTests] PASSED: {name}");
-            }
-            catch (TestFailedException ex)
-            {
-                failed++;
-                failures.Add($"[HealingGate] {name}: {ex.Message}");
-                Log.Error($"[EternalTests] FAILED: {name} -- {ex.Message}");
-            }
-            catch (Exception ex)
-            {
-                failed++;
-                failures.Add($"[HealingGate] {name}: {ex.Message}");
-                Log.Error($"[EternalTests] ERROR: {name} -- {ex}");
-            }
-        }
+
     }
 }
 

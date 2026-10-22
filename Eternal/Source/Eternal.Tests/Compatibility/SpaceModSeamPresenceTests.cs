@@ -1,167 +1,76 @@
-// Relative Path: Eternal/Source/Eternal.Tests/Compatibility/SpaceModSeamPresenceTests.cs
-// Creation Date: 13-07-2026
-// Last Edit: 13-07-2026
 // Author: 0Shard
-// Description: Seam-drift detector for the reflection-targeted space-mod patches, which the
-//              attribute-based HarmonyPatchSignatureTests cannot cover. Reads the installed
-//              workshop DLLs (SOS2 ShipsHaveInsides.dll, VGE VanillaGravshipExpanded.dll) via
-//              PE metadata only - no CLR loading - and asserts every type/member the Eternal
-//              patches resolve by name still exists. Skips silently when a mod is not installed
-//              (the corresponding patches are Prepare()-gated off in that case too).
-
-using System;
-using System.Collections.Generic;
+// Description: Installed-mod metadata contracts with discovery-visible absence and strict policy.
 using System.IO;
-using System.Linq;
-using System.Reflection.Metadata;
-using System.Reflection.PortableExecutable;
+using Eternal.Tests.Infrastructure;
 using Xunit;
 
 namespace Eternal.Tests.Compatibility
 {
-    /// <summary>
-    /// Asserts the presence of every SOS2/VGE member that Eternal's space-loss patches
-    /// resolve via AccessTools at runtime. A failed assertion here means the workshop mod
-    /// updated and the named seam moved - fix the patch before shipping.
-    /// </summary>
+    internal sealed class OptionalModFactAttribute : FactAttribute
+    {
+        public OptionalModFactAttribute(string mod) : this(mod, CompiledBuildReferences.OptionalPath(mod), CompiledBuildReferences.RequireOptional) { }
+
+        internal OptionalModFactAttribute(string mod, string path, bool required)
+        {
+            if (!File.Exists(path) && !required)
+            {
+                Skip = mod + " unavailable: configured assembly absent at " + path + "; no integration verified";
+            }
+        }
+    }
+
     public class SpaceModSeamPresenceTests
     {
-        private static readonly string WorkshopRoot = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            ".local", "share", "Steam", "steamapps", "workshop", "content", "294100");
-
-        private static readonly string SOS2DllPath = Path.Combine(
-            WorkshopRoot, "1909914131", "1.6", "Assemblies", "ShipsHaveInsides.dll");
-
-        private static readonly string VGEDllPath = Path.Combine(
-            WorkshopRoot, "3609835606", "1.6", "Assemblies", "VanillaGravshipExpanded.dll");
-
-        /// <summary>(type full name, member name, isField) tuples the SOS2 patches resolve by name.</summary>
-        private static readonly (string type, string member, bool isField)[] SOS2Seams =
-        {
-            ("SaveOurShip2.WorldObjectOrbitingShip", "ShouldRemoveMapNow", false),
-            ("SaveOurShip2.WorldObjectOrbitingShip", "Destroy", false),
-            ("SaveOurShip2.ShipMapComp", "KillAllOffShip", false),
-            ("SaveOurShip2.ShipMapComp", "DeRegisterShuttleMission", false),
-            ("SaveOurShip2.ShipMapComp", "get_MapShipCells", false),
-            ("SaveOurShip2.ShipMapComp", "get_ShipsOnMap", false),
-            ("SaveOurShip2.ShipMapComp+ShuttleMissionData", "shuttle", true),
-            ("SaveOurShip2.ShipInteriorMod2", "RemoveShipOrArea", false),
-            ("SaveOurShip2.ShipInteriorMod2", "MoveShip", false),
-            ("SaveOurShip2.SpaceShipCache", "FloatAndDestroy", false),
-            ("SaveOurShip2.SpaceShipCache", "get_Map", false),
-            ("SaveOurShip2.SpaceShipCache", "Area", true),
-        };
-
-        /// <summary>Members the VGE landing patch resolves by name.</summary>
-        private static readonly (string type, string member, bool isField)[] VGESeams =
-        {
-            ("VanillaGravshipExpanded.GravshipMapGenUtility", "BlockingThings", true),
-        };
-
-        [Fact]
+        [OptionalModFact("SOS2")]
         public void SOS2Seams_AllPresent()
         {
-            AssertSeamsPresent(SOS2DllPath, SOS2Seams, "SOS2");
+            using var assembly = OpenRequired("SOS2");
+            foreach (var seam in new[]
+            {
+                ("SaveOurShip2.WorldObjectOrbitingShip", "ShouldRemoveMapNow"),
+                ("SaveOurShip2.WorldObjectOrbitingShip", "Destroy"),
+                ("SaveOurShip2.ShipMapComp", "KillAllOffShip"),
+                ("SaveOurShip2.ShipMapComp", "DeRegisterShuttleMission"),
+                ("SaveOurShip2.ShipMapComp", "get_MapShipCells"),
+                ("SaveOurShip2.ShipMapComp", "get_ShipsOnMap"),
+                ("SaveOurShip2.ShipInteriorMod2", "RemoveShipOrArea"),
+                ("SaveOurShip2.ShipInteriorMod2", "MoveShip"),
+                ("SaveOurShip2.SpaceShipCache", "FloatAndDestroy"),
+                ("SaveOurShip2.SpaceShipCache", "get_Map")
+            })
+            {
+                assembly.Method(seam.Item1, seam.Item2, inherited: true);
+            }
+
+            RequireField(assembly, "SaveOurShip2.ShipMapComp+ShuttleMissionData", "shuttle");
+            RequireField(assembly, "SaveOurShip2.SpaceShipCache", "Area");
         }
 
-        [Fact]
+        [OptionalModFact("VGE")]
         public void VGESeams_AllPresent()
         {
-            AssertSeamsPresent(VGEDllPath, VGESeams, "VGE");
+            using var assembly = OpenRequired("VGE");
+            RequireField(assembly, "VanillaGravshipExpanded.GravshipMapGenUtility", "BlockingThings");
+            // LandingEnded is resolved on the game's GravshipController, not in the VGE DLL.
+            using var game = new CompiledAssemblyContract(CompiledBuildReferences.GameReferencePath);
+            game.Method("Verse.WorldComponent_GravshipController", "LandingEnded", inherited: true);
         }
 
-        private static void AssertSeamsPresent(string dllPath,
-            (string type, string member, bool isField)[] seams, string modName)
+        private static CompiledAssemblyContract OpenRequired(string mod)
         {
-            if (!File.Exists(dllPath))
-            {
-                // Mod not installed - the patches are Prepare()-gated off, nothing to verify
-                return;
-            }
-
-            Dictionary<string, (HashSet<string> methods, HashSet<string> fields)> typeMembers =
-                ReadTypeMembers(dllPath, seams.Select(s => s.type).ToHashSet());
-
-            var missing = new List<string>();
-            foreach (var (type, member, isField) in seams)
-            {
-                if (!typeMembers.TryGetValue(type, out var members))
-                {
-                    missing.Add($"{modName}: type {type} not found");
-                    continue;
-                }
-
-                var pool = isField ? members.fields : members.methods;
-                if (!pool.Contains(member))
-                {
-                    missing.Add($"{modName}: {(isField ? "field" : "method")} {type}::{member} not found");
-                }
-            }
-
-            Assert.True(missing.Count == 0,
-                $"Space-mod seams moved ({modName} updated?) - fix the Eternal patches:\n" +
-                string.Join("\n", missing));
+            return OpenRequiredPath(mod, CompiledBuildReferences.OptionalPath(mod));
         }
 
-        /// <summary>
-        /// Reads method and field names for the requested types from PE metadata.
-        /// Nested types are keyed as "Namespace.Declaring+Nested".
-        /// </summary>
-        private static Dictionary<string, (HashSet<string> methods, HashSet<string> fields)> ReadTypeMembers(
-            string dllPath, HashSet<string> wantedTypes)
+        internal static CompiledAssemblyContract OpenRequiredPath(string mod, string path)
         {
-            var membersByType = new Dictionary<string, (HashSet<string>, HashSet<string>)>();
-
-            using (var stream = File.OpenRead(dllPath))
-            using (var peReader = new PEReader(stream))
-            {
-                MetadataReader metadata = peReader.GetMetadataReader();
-
-                foreach (TypeDefinitionHandle typeHandle in metadata.TypeDefinitions)
-                {
-                    TypeDefinition typeDef = metadata.GetTypeDefinition(typeHandle);
-                    string fullName = GetTypeFullName(metadata, typeDef);
-                    if (!wantedTypes.Contains(fullName))
-                    {
-                        continue;
-                    }
-
-                    var methods = new HashSet<string>();
-                    foreach (MethodDefinitionHandle methodHandle in typeDef.GetMethods())
-                    {
-                        methods.Add(metadata.GetString(metadata.GetMethodDefinition(methodHandle).Name));
-                    }
-
-                    var fields = new HashSet<string>();
-                    foreach (FieldDefinitionHandle fieldHandle in typeDef.GetFields())
-                    {
-                        fields.Add(metadata.GetString(metadata.GetFieldDefinition(fieldHandle).Name));
-                    }
-
-                    membersByType[fullName] = (methods, fields);
-                }
-            }
-
-            return membersByType;
+            Assert.True(File.Exists(path), mod + " required optional assembly missing: " + path);
+            return new CompiledAssemblyContract(path);
         }
 
-        private static string GetTypeFullName(MetadataReader metadata, TypeDefinition typeDef)
+        private static void RequireField(CompiledAssemblyContract assembly, string type, string name)
         {
-            string name = metadata.GetString(typeDef.Name);
-
-            if (typeDef.IsNested)
-            {
-                TypeDefinition declaring = metadata.GetTypeDefinition(typeDef.GetDeclaringType());
-                string declaringNamespace = metadata.GetString(declaring.Namespace);
-                string declaringName = metadata.GetString(declaring.Name);
-                return string.IsNullOrEmpty(declaringNamespace)
-                    ? $"{declaringName}+{name}"
-                    : $"{declaringNamespace}.{declaringName}+{name}";
-            }
-
-            string typeNamespace = metadata.GetString(typeDef.Namespace);
-            return string.IsNullOrEmpty(typeNamespace) ? name : $"{typeNamespace}.{name}";
+            var fields = assembly.Reader.GetTypeDefinition(assembly.Type(type)).GetFields();
+            Assert.Contains(fields, handle => assembly.Reader.GetString(assembly.Reader.GetFieldDefinition(handle).Name) == name);
         }
     }
 }

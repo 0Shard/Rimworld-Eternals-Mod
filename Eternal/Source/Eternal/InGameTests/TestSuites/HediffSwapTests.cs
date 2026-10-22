@@ -1,112 +1,224 @@
 // Relative Path: Eternal/Source/Eternal/InGameTests/TestSuites/HediffSwapTests.cs
-// Creation Date: 24-02-2026
-// Last Edit: 24-02-2026
 // Author: 0Shard
-// Description: HediffSet swap round-trip test (TEST-04). Verifies that Eternal_Essence hediff
-//              survives the ResurrectionUtility.TryResurrect() call via the Immortals pattern
-//              (save HediffSet before, restore after).
-
+// Description: Real healed/immediate lifecycle, tracker identity, debt history and failure windows.
 #if DEBUG
-
 using System;
 using System.Collections.Generic;
+using System.Linq;
+using System.Reflection;
+using HarmonyLib;
+using RimWorld;
 using Verse;
 using Eternal.DI;
+using Eternal.Extensions;
 using Eternal.InGameTests.Helpers;
 
 namespace Eternal.InGameTests.TestSuites
 {
-    /// <summary>
-    /// Validates that the HediffSet swap pattern preserves Eternal_Essence through resurrection.
-    /// This is the core TEST-04 requirement: the Immortals pattern must not lose custom hediffs.
-    /// </summary>
     public static class HediffSwapTests
     {
         public static TestSuiteResult RunAll(Verse.Map map)
         {
-            int passed = 0;
-            int failed = 0;
-            var failures = new List<string>();
-
-            RunTest("EternalEssenceSurvivesResurrection", () => EternalEssenceSurvivesResurrection(map),
-                ref passed, ref failed, failures);
-
-            return new TestSuiteResult(passed, failed, failures);
+            var result = new TestSuiteResult(0, 0, new List<string>());
+            foreach (bool immediate in new[] { false, true })
+            {
+                bool selectedMode = immediate;
+                string mode = immediate ? "Immediate" : "Healed";
+                result.RunTest("HediffSwap", mode + "PreservesTrackersAndDebtHistory",
+                    () => VerifyLifecycle(map, selectedMode, FailureWindow.None, false));
+                result.RunTest("HediffSwap", mode + "AlivePostfixExceptionCompletes",
+                    () => VerifyLifecycle(map, selectedMode, FailureWindow.AlivePostfix, false));
+                result.RunTest("HediffSwap", mode + "DeadPrefixExceptionRestores",
+                    () => VerifyLifecycle(map, selectedMode, FailureWindow.DeadPrefix, false));
+                result.RunTest("HediffSwap", mode + "SecondTrackerExceptionRestores",
+                    () => VerifyLifecycle(map, selectedMode, FailureWindow.SecondTracker, false));
+                result.RunTest("HediffSwap", mode + "StoredCorpseResurrects",
+                    () => VerifyLifecycle(map, selectedMode, FailureWindow.None, true));
+            }
+            return result;
         }
 
-        private static void EternalEssenceSurvivesResurrection(Verse.Map map)
+        private static void VerifyLifecycle(Verse.Map map, bool immediate, FailureWindow failure, bool stored)
         {
-            // 1. Spawn and verify initial state
             var pawn = TestPawnFactory.SpawnEternalPawn(map);
-            TestAssert.IsNotNull(pawn, "Pawn should be spawned");
-            TestAssert.IsTrue(HasEternalEssence(pawn), "Pawn should have Eternal_Essence before death");
-
-            // Record the hediff count for comparison
-            int hediffCountBeforeDeath = pawn.health?.hediffSet?.hediffs?.Count ?? 0;
-
-            // 2. Kill -> register -> heal -> resurrect
             TestPawnFactory.KillPawn(pawn);
-            TestAssert.IsTrue(pawn.Dead, "Pawn should be dead");
+            var services = EternalServiceContainer.Instance;
+            var corpseData = services.CorpseManager.GetCorpseData(pawn);
+            TestAssert.IsNotNull(corpseData, "Death hook must register the owned corpse");
+            var corpse = corpseData.Corpse;
+            var savedSet = pawn.health.hediffSet;
+            var savedImmunity = pawn.health.immunity;
+            var essence = savedSet.GetFirstHediffOfDef(EternalDefOf.Eternal_Essence);
+            TestAssert.IsNotNull(essence, "Owned pawn must have Essence before the swap");
 
-            var container = EternalServiceContainer.Instance;
-            var corpseData = container.CorpseManager?.GetCorpseData(pawn);
-            TestAssert.IsNotNull(corpseData, "Corpse should be registered");
+            // Prepare the completed-corpse state. We call the retained lifecycle entry points
+            // directly so tick timing and unrelated healing do not obscure their mode contract.
+            services.FoodDebtSystem.RegisterPawn(pawn);
+            bool waived = pawn.HasFoodNeedDisabled();
+            services.FoodDebtSystem.AddResurrectionDebt(pawn, 2f);
+            float priorDebt = services.FoodDebtSystem.GetDebt(pawn);
+            corpseData.FoodDebt = 3f;
+            var carrier = stored ? TestPawnFactory.SpawnNonEternalPawn(map) : null;
+            if (stored)
+            {
+                corpse.DeSpawn(DestroyMode.WillReplace);
+                TestAssert.IsTrue(carrier.inventory.innerContainer.TryAdd(corpse, false),
+                    "Owned carrier inventory must accept the corpse");
+                TestAssert.IsFalse(corpse.Spawned, "Stored fixture must enter the unspawned-corpse branch");
+            }
 
-            container.CorpseHealingProcessor?.StartCorpseHealing(corpseData);
+            using (var observation = new LifecycleObservation(pawn, savedSet, failure))
+            {
+                var entryPoint = services.CorpseHealingProcessor.GetType().GetMethod(
+                    immediate ? "ResurrectImmediately" : "CompleteResurrection",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+                TestAssert.IsNotNull(entryPoint, "Retained lifecycle entry point must exist");
+                entryPoint.Invoke(services.CorpseHealingProcessor, new object[] { corpseData });
 
-            // Advance until alive
-            TickAdvancer.AdvanceUntil(
-                () => !pawn.Dead,
-                maxTicks: 100000,
-                timeoutMessage: "Pawn did not resurrect for HediffSwap test");
+                bool hardFailure = failure == FailureWindow.DeadPrefix || failure == FailureWindow.SecondTracker;
+                TestAssert.AreEqual(hardFailure, pawn.Dead, "Only a pre-resurrection exception should leave pawn dead");
+                TestAssert.IsTrue(ReferenceEquals(savedSet, pawn.health.hediffSet), "Exact saved HediffSet must return");
+                TestAssert.IsTrue(ReferenceEquals(savedImmunity, pawn.health.immunity), "Exact saved immunity must return");
+                TestAssert.IsTrue(ReferenceEquals(essence, pawn.health.hediffSet.GetFirstHediffOfDef(EternalDefOf.Eternal_Essence)),
+                    "The original Essence instance must survive the swap");
+                TestAssert.IsNotNull(pawn.story.traits.GetTrait(EternalDefOf.Eternal_GeneticMarker),
+                    "Eternal trait must survive resurrection");
+                TestAssert.IsFalse(services.CorpseManager.IsExpectedDestruction(corpse),
+                    "Expected-destruction marker must clear on every outcome");
+                TestAssert.AreEqual(failure != FailureWindow.None, observation.Injected,
+                    "The requested exception window must actually execute");
 
-            // 3. THE KEY ASSERTION: Eternal_Essence must still be present
-            TestAssert.IsFalse(pawn.Dead, "Pawn should be alive");
-            TestAssert.IsTrue(HasEternalEssence(pawn),
-                "Eternal_Essence MUST survive resurrection (HediffSet swap pattern)");
-
-            // 4. Verify the pawn also has its trait still
-            TestAssert.IsNotNull(
-                pawn.story?.traits?.GetTrait(EternalDefOf.Eternal_GeneticMarker),
-                "Eternal_GeneticMarker trait should survive resurrection");
+                if (hardFailure)
+                {
+                    TestAssert.IsTrue(services.CorpseManager.IsTracked(pawn), "Failed resurrection must retain corpse tracking");
+                    TestAssert.AreEqual(0, observation.DebtCalls.Count, "Failed swap must not transfer or reset debt");
+                    TestAssert.AreEqual(priorDebt, services.FoodDebtSystem.GetDebt(pawn), "Failed swap preserves debt");
+                    TestAssert.IsFalse(corpse.Destroyed, "Failed resurrection must preserve corpse");
+                }
+                else
+                {
+                    TestAssert.IsFalse(services.CorpseManager.IsTracked(pawn), "Successful resurrection must untrack corpse");
+                    TestAssert.IsTrue(corpse.Destroyed, "Successful resurrection consumes corpse");
+                    string expected = immediate ? "RegisterPawn,AddResurrectionDebt" : "UnregisterPawn,RegisterPawn,AddResurrectionDebt";
+                    TestAssert.AreEqual(expected, string.Join(",", observation.DebtCalls), "Mode must retain actual debt-call history");
+                    TestAssert.AreEqual(waived ? 0f : (immediate ? priorDebt + 3f : 3f),
+                        services.FoodDebtSystem.GetDebt(pawn), "Captured debt must transfer exactly once");
+                    if (stored)
+                    {
+                        TestAssert.IsFalse(carrier.inventory.innerContainer.Contains(corpse), "Consumed corpse must leave its owner");
+                    }
+                }
+            }
         }
 
-        private static bool HasEternalEssence(Pawn pawn)
-        {
-            if (pawn?.health?.hediffSet == null)
-                return false;
+        private enum FailureWindow { None, DeadPrefix, AlivePostfix, SecondTracker }
 
-            foreach (var hediff in pawn.health.hediffSet.hediffs)
-            {
-                if (hediff.def == EternalDefOf.Eternal_Essence)
-                    return true;
-            }
-            return false;
-        }
-
-        private static void RunTest(string name, Action test, ref int passed, ref int failed, List<string> failures)
+        // Hooks observe real game and debt methods. They affect only this fixture pawn,
+        // never replace Verse behavior, and are removed even when an assertion fails.
+        private sealed class LifecycleObservation : IDisposable
         {
-            Log.Message($"[EternalTests] Running: {name}");
-            try
+            private const string Owner = "Eternal.Tests.ResurrectionLifecycle";
+            private static LifecycleObservation active;
+            private readonly Harmony harmony = new Harmony(Owner);
+            private readonly List<MethodBase> patched = new List<MethodBase>();
+            private readonly Pawn pawn;
+            private readonly HediffSet savedSet;
+            private readonly FailureWindow failure;
+            public readonly List<string> DebtCalls = new List<string>();
+            public bool Injected { get; private set; }
+
+            public LifecycleObservation(Pawn pawn, HediffSet savedSet, FailureWindow failure)
             {
-                test();
-                passed++;
-                Log.Message($"[EternalTests] PASSED: {name}");
+                TestAssert.IsNull(active, "Lifecycle instrumentation cannot nest");
+                this.pawn = pawn;
+                this.savedSet = savedSet;
+                this.failure = failure;
+                active = this;
+                try
+                {
+                    var resurrect = typeof(ResurrectionUtility).GetMethods(BindingFlags.Static | BindingFlags.Public)
+                        .Single(m => m.Name == "TryResurrect" && m.GetParameters().Length == 2 && m.GetParameters()[0].ParameterType == typeof(Pawn));
+                    Patch(resurrect, nameof(BeforeResurrection), nameof(AfterResurrection));
+                    Patch(typeof(ImmunityHandler).GetConstructor(new[] { typeof(Pawn) }), nameof(BeforeImmunity), null);
+                    var debtType = EternalServiceContainer.Instance.FoodDebtSystem.GetType();
+                    foreach (string method in new[] { "RegisterPawn", "UnregisterPawn", "AddResurrectionDebt" })
+                    {
+                        Patch(debtType.GetMethod(method), nameof(ObserveDebt), null);
+                    }
+                }
+                catch { Dispose(); throw; }
             }
-            catch (TestFailedException ex)
+
+            private void Patch(MethodBase method, string prefix, string postfix)
             {
-                failed++;
-                failures.Add($"[HediffSwap] {name}: {ex.Message}");
-                Log.Error($"[EternalTests] FAILED: {name} -- {ex.Message}");
+                TestAssert.IsNotNull(method, "Actual lifecycle method to instrument");
+                patched.Add(method);
+                harmony.Patch(method, prefix == null ? null : new HarmonyMethod(typeof(LifecycleObservation), prefix),
+                    postfix == null ? null : new HarmonyMethod(typeof(LifecycleObservation), postfix));
             }
-            catch (Exception ex)
+
+            private static void BeforeResurrection(Pawn __0)
             {
-                failed++;
-                failures.Add($"[HediffSwap] {name}: {ex.Message}");
-                Log.Error($"[EternalTests] ERROR: {name} -- {ex}");
+                var observation = active;
+                if (observation == null || !ReferenceEquals(observation.pawn, __0))
+                {
+                    return;
+                }
+
+                TestAssert.IsTrue(EternalServiceContainer.Instance.CorpseManager.IsExpectedDestruction(__0.Corpse),
+                    "Resurrection must enter game utility with expected destruction armed");
+                if (observation.failure == FailureWindow.DeadPrefix)
+                {
+                    observation.ThrowInjected();
+                }
+            }
+
+            private static void AfterResurrection(Pawn __0)
+            {
+                var observation = active;
+                if (observation != null && ReferenceEquals(observation.pawn, __0) && observation.failure == FailureWindow.AlivePostfix)
+                {
+                    TestAssert.IsFalse(__0.Dead, "Soft exception must happen after actual resurrection");
+                    observation.ThrowInjected();
+                }
+            }
+
+            private static void BeforeImmunity(Pawn __0)
+            {
+                var observation = active;
+                if (observation != null && ReferenceEquals(observation.pawn, __0) && observation.failure == FailureWindow.SecondTracker &&
+                    !ReferenceEquals(__0.health.hediffSet, observation.savedSet))
+                {
+                    observation.ThrowInjected();
+                }
+            }
+
+            private static void ObserveDebt(Pawn __0, MethodBase __originalMethod)
+            {
+                if (active != null && ReferenceEquals(active.pawn, __0))
+                {
+                    active.DebtCalls.Add(__originalMethod.Name);
+                }
+            }
+
+            private void ThrowInjected()
+            {
+                Injected = true;
+                throw new InvalidOperationException("Owned resurrection lifecycle exception fixture");
+            }
+
+            public void Dispose()
+            {
+                try
+                {
+                    foreach (var method in patched)
+                    {
+                        harmony.Unpatch(method, HarmonyPatchType.All, Owner);
+                    }
+                }
+                finally { active = null; }
             }
         }
     }
 }
-
 #endif

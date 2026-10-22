@@ -15,8 +15,6 @@ using System;
 using HarmonyLib;
 using RimWorld;
 using Verse;
-using Eternal;
-using Eternal.Corpse;
 using Eternal.DI;
 using Eternal.Exceptions;
 using Eternal.Extensions;
@@ -49,7 +47,9 @@ namespace Eternal.Patches
             {
                 // SAFE-09: skip all processing when mod is disabled due to missing critical defs.
                 if (EternalModState.IsDisabled)
+                {
                     return;
+                }
 
                 // Validate input parameters
                 if (__instance == null)
@@ -175,15 +175,24 @@ namespace Eternal.Patches
         {
             try
             {
-                if (map == null) return;
+                if (map == null)
+                {
+                    return;
+                }
 
                 // Check if map is temporary (quest maps, etc.)
                 var mapParent = map.Parent;
-                if (mapParent == null) return;
+                if (mapParent == null)
+                {
+                    return;
+                }
 
                 // Only create manager for maps that might need retention
                 // Temporary maps are typically not the player's home map
-                if (mapParent.def?.defName == null) return;
+                if (mapParent.def?.defName == null)
+                {
+                    return;
+                }
 
                 // Create and register the component dynamically
                 var mapManager = new EternalMapManager(map);

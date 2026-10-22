@@ -11,6 +11,7 @@ using System.Collections.Generic;
 using System.Linq;
 using Verse;
 using Eternal.Extensions;
+using Eternal.Healing;
 using Eternal.Healing.Scars;
 using Eternal.Utils;
 
@@ -54,10 +55,11 @@ namespace Eternal
         {
             var currentTick = Find.TickManager.TicksGame;
 
-            // Check if it's time to process (configured rare tick interval — matches
-            // the Status tab's ScarHealTime display, which assumes rareTickRate)
+            // One global dispatch from the rare pass, independent of map-pawn population.
             if (currentTick - lastProcessingTick < Eternal_Mod.GetSettings().rareTickRate)
+            {
                 return;
+            }
 
             lastProcessingTick = currentTick;
 
@@ -78,15 +80,17 @@ namespace Eternal
         public void ProcessPawnScarHealing(Pawn pawn)
         {
             if (pawn?.health?.hediffSet == null)
+            {
                 return;
+            }
 
             // Get all scars using identifier
             var scars = ScarIdentifier.GetPawnScars(pawn);
-            if (scars.Count == 0)
-                return;
-
-            // Update healing records
             applier.UpdateHealingRecords(pawn, scars);
+            if (scars.Count == 0)
+            {
+                return;
+            }
 
             // Sort scars by priority (cost-based)
             // Uses ScarCostCalculator.Default for DI-compatible instance access
@@ -110,7 +114,9 @@ namespace Eternal
             foreach (var record in sortedScars)
             {
                 if (record?.Scar == null || !record.IsHealing)
+                {
                     continue;
+                }
 
                 applier.HealScar(record);
             }
@@ -124,20 +130,65 @@ namespace Eternal
         /// Gets all Eternal pawns (maps + caravans).
         /// </summary>
         private List<Pawn> GetAllEternalPawns()
-        {
-            var pawns = PawnExtensions.GetAllEternalPawnsAllMaps().ToList();
-
-            foreach (var caravan in Find.WorldObjects.Caravans)
-            {
-                pawns.AddRange(caravan.PawnsListForReading.Where(p => p.IsValidEternal()));
-            }
-
-            return pawns;
-        }
+            => PawnExtensions.GetAllLivingEternalPawnsCached().ToList();
 
         #endregion
 
         #region Public API
+
+        /// <summary>
+        /// Projects the dedicated scar path from existing instance state without creating
+        /// records, advancing healing, or consulting random normal-healing thresholds.
+        /// Other healing paths can finish the same hediff sooner.
+        /// </summary>
+        public ScarHealingTimingResult GetHealingTiming(Pawn pawn, Hediff scar, int currentTick,
+            int lastRareHealTick)
+        {
+            if (pawn?.health?.hediffSet == null || pawn.Dead || !pawn.IsValidEternal())
+            {
+                return ScarHealingTimingResult.Unavailable(ScarHealingTimingState.PawnUnavailable);
+            }
+            if (scar?.def == null || !ReferenceEquals(scar.pawn, pawn)
+                || !pawn.health.hediffSet.hediffs.Contains(scar)
+                || scar.def == EternalDefOf.Eternal_Essence
+                || !HediffHealingConfig.CanHealScar(scar))
+            {
+                return ScarHealingTimingResult.Unavailable(ScarHealingTimingState.Ineligible);
+            }
+            if (Current.Game == null || Find.TickManager == null || Find.WorldObjects == null)
+            {
+                return ScarHealingTimingResult.Unavailable(ScarHealingTimingState.SchedulerUnavailable);
+            }
+
+            if (EternalModState.IsDisabled)
+            {
+                return ScarHealingTimingResult.Unavailable(ScarHealingTimingState.Disabled);
+            }
+            var settings = Eternal_Mod.GetSettings();
+
+            var mapEternals = PawnExtensions.GetAllLivingEternalPawnsCached();
+            bool isDiscovered = mapEternals.Contains(pawn);
+            if (!isDiscovered)
+            {
+                foreach (var caravan in Find.WorldObjects.Caravans)
+                {
+                    if (caravan.PawnsListForReading.Contains(pawn))
+                    {
+                        isDiscovered = true;
+                        break;
+                    }
+                }
+            }
+            if (!isDiscovered)
+            {
+                return ScarHealingTimingResult.Unavailable(ScarHealingTimingState.PawnUnavailable);
+            }
+
+            var record = applier.GetHealingRecord(scar, pawn);
+            return ScarHealingTiming.Calculate(currentTick, lastRareHealTick, lastProcessingTick,
+                record?.LastHealedTick, scar.Severity, scar.def.minSeverity,
+                ScarCostCalculator.Default.GetBaseHealingRate(scar), settings.rareTickRate, settings.rareTickRate);
+        }
 
         /// <summary>
         /// Forces immediate healing of all scars for a pawn.

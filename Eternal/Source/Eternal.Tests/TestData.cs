@@ -6,7 +6,6 @@
 //              Values must match their production counterparts in SettingsDefaults,
 //              UnifiedHediffHealingCalculator, CriticalPartConstants, and EternalExceptionCategory.
 
-using Eternal;
 using Eternal.Exceptions;
 
 namespace Eternal.Tests
@@ -38,11 +37,7 @@ namespace Eternal.Tests
         public const bool DefaultModEnabled = SettingsDefaults.LegacySnapshotModEnabled;
         public const bool DefaultDebugMode = SettingsDefaults.DebugMode;
         public const int DefaultLoggingLevel = SettingsDefaults.LoggingLevel;
-        public const bool DefaultShowRegrowthEffects = SettingsDefaults.LegacySnapshotShowRegrowthEffects;
         public const bool DefaultShowRegrowthProgress = SettingsDefaults.ShowEternalPowerLabel;
-        public const bool DefaultPauseOnResourceDepletion = SettingsDefaults.LegacySnapshotPauseOnResourceDepletion;
-        public const float DefaultMinimumNutritionThreshold = SettingsDefaults.LegacySnapshotMinimumNutritionThreshold;
-        public const bool DefaultAllowResourceBorrowing = SettingsDefaults.LegacySnapshotAllowResourceBorrowing;
         public const float DefaultFoodDrainThreshold = SettingsDefaults.FoodDrainThreshold;
         public const float DefaultDebtRepaymentDays = SettingsDefaults.DebtRepaymentDays;
         public const int DefaultNormalTickRate = SettingsDefaults.NormalTickRate;
@@ -50,8 +45,6 @@ namespace Eternal.Tests
         public const int DefaultTraitCheckInterval = SettingsDefaults.TraitCheckInterval;
         public const int DefaultCorpseCheckInterval = SettingsDefaults.CorpseCheckInterval;
         public const int DefaultMapCheckInterval = SettingsDefaults.MapCheckInterval;
-        public const bool DefaultEnableIndividualHediffControl = SettingsDefaults.LegacySnapshotIndividualHediffControl;
-        public const bool DefaultAutoHealEnabled = SettingsDefaults.LegacySnapshotAutoHealEnabled;
         public const bool DefaultEnableMapAnchors = SettingsDefaults.EnableMapAnchors;
         public const int DefaultAnchorGracePeriodTicks = SettingsDefaults.AnchorGracePeriodTicks;
 
@@ -69,7 +62,7 @@ namespace Eternal.Tests
         public const int FloatPrecision = 4;
 
         // -----------------------------------------------------------------
-        // Body size defaults for IPawnData mocks
+        // Independent body-size inputs for scalar policy tests
         // -----------------------------------------------------------------
         public const float DefaultBodySize = 1.0f;
 

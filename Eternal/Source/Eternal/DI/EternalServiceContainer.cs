@@ -59,6 +59,7 @@ namespace Eternal.DI
 
         // Compatibility cache (session-scoped, reset on new game)
         private SOS2ReflectionCache _spaceModCache;
+        private RjwAnatomyTracker _rjwAnatomy;
 
         /// <summary>
         /// Gets the settings provider.
@@ -126,6 +127,8 @@ namespace Eternal.DI
         /// </summary>
         public SOS2ReflectionCache SpaceModCache => _spaceModCache;
 
+        internal RjwAnatomyTracker RjwAnatomy => _rjwAnatomy;
+
         /// <summary>
         /// Gets the healing threshold tracker for debuff hediffs.
         /// </summary>
@@ -172,7 +175,9 @@ namespace Eternal.DI
             EternalRegrowthManager regrowthManager = null)
         {
             if (_initialized)
+            {
                 return;
+            }
 
             // Validate required parameter
             if (debtSystem == null)
@@ -205,6 +210,7 @@ namespace Eternal.DI
 
             // Create SOS2 reflection cache (not initialized yet — that happens in FinalizeInit)
             _spaceModCache = new SOS2ReflectionCache();
+            _rjwAnatomy = new RjwAnatomyTracker();
 
             _initialized = true;
         }
@@ -257,6 +263,7 @@ namespace Eternal.DI
 
             // Compatibility cache — FinalizeInit re-creates on next session
             _spaceModCache = null;
+            _rjwAnatomy = null;
         }
 
         /// <summary>

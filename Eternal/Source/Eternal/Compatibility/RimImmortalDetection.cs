@@ -61,6 +61,7 @@ namespace Eternal.Compatibility
         #region Type Cache
 
         private static bool _typesInitialized = false;
+        private static readonly Action InitializeTypes = EnsureTypesInitialized;
 
         // Core.Pawn_EnergyTracker
         private static Type _pawnEnergyTrackerType;
@@ -76,62 +77,27 @@ namespace Eternal.Compatibility
         /// <summary>
         /// Gets the SetExp method from Pawn_EnergyTracker.
         /// </summary>
-        public static MethodInfo SetExpMethod
-        {
-            get
-            {
-                EnsureTypesInitialized();
-                return _setExpMethod;
-            }
-        }
+        public static MethodInfo SetExpMethod => CompatibilityBinding.Cached(InitializeTypes, ref _setExpMethod);
 
         /// <summary>
         /// Gets the GetFloatUpgrade method from MessageDialog.
         /// </summary>
-        public static MethodInfo GetFloatUpgradeMethod
-        {
-            get
-            {
-                EnsureTypesInitialized();
-                return _getFloatUpgradeMethod;
-            }
-        }
+        public static MethodInfo GetFloatUpgradeMethod => CompatibilityBinding.Cached(InitializeTypes, ref _getFloatUpgradeMethod);
 
         /// <summary>
         /// Gets the pawn field from Pawn_EnergyTracker.
         /// </summary>
-        public static FieldInfo EnergyTrackerPawnField
-        {
-            get
-            {
-                EnsureTypesInitialized();
-                return _energyTrackerPawnField;
-            }
-        }
+        public static FieldInfo EnergyTrackerPawnField => CompatibilityBinding.Cached(InitializeTypes, ref _energyTrackerPawnField);
 
         /// <summary>
         /// Gets the sucessRate field from MessageDialog.
         /// </summary>
-        public static FieldInfo SucessRateField
-        {
-            get
-            {
-                EnsureTypesInitialized();
-                return _sucessRateField;
-            }
-        }
+        public static FieldInfo SucessRateField => CompatibilityBinding.Cached(InitializeTypes, ref _sucessRateField);
 
         /// <summary>
         /// Gets the pawn field from MessageDialog.
         /// </summary>
-        public static FieldInfo MessageDialogPawnField
-        {
-            get
-            {
-                EnsureTypesInitialized();
-                return _messageDialogPawnField;
-            }
-        }
+        public static FieldInfo MessageDialogPawnField => CompatibilityBinding.Cached(InitializeTypes, ref _messageDialogPawnField);
 
         #endregion
 
@@ -143,12 +109,16 @@ namespace Eternal.Compatibility
         private static void EnsureTypesInitialized()
         {
             if (_typesInitialized)
+            {
                 return;
+            }
 
             _typesInitialized = true;
 
             if (!RimImmortalActive)
+            {
                 return;
+            }
 
             try
             {
@@ -156,13 +126,10 @@ namespace Eternal.Compatibility
                 _pawnEnergyTrackerType = AccessTools.TypeByName("Core.Pawn_EnergyTracker");
                 if (_pawnEnergyTrackerType != null)
                 {
-                    _setExpMethod = AccessTools.Method(_pawnEnergyTrackerType, "SetExp", new[] { typeof(float) });
+                    _setExpMethod = CompatibilityBinding.WarnMissing(AccessTools.Method(_pawnEnergyTrackerType, "SetExp", new[] { typeof(float) }),
+                        "[Eternal] RimImmortal: SetExp method not found on Pawn_EnergyTracker");
                     _energyTrackerPawnField = AccessTools.Field(_pawnEnergyTrackerType, "pawn");
 
-                    if (_setExpMethod == null)
-                    {
-                        Log.Warning("[Eternal] RimImmortal: SetExp method not found on Pawn_EnergyTracker");
-                    }
                 }
                 else
                 {
@@ -173,18 +140,12 @@ namespace Eternal.Compatibility
                 _messageDialogType = AccessTools.TypeByName("RIRitualFramework.MessageDialog");
                 if (_messageDialogType != null)
                 {
-                    _getFloatUpgradeMethod = AccessTools.Method(_messageDialogType, "GetFloatUpgrade");
-                    _sucessRateField = AccessTools.Field(_messageDialogType, "sucessRate");
+                    _getFloatUpgradeMethod = CompatibilityBinding.WarnMissing(AccessTools.Method(_messageDialogType, "GetFloatUpgrade"),
+                        "[Eternal] RimImmortal: GetFloatUpgrade method not found on MessageDialog");
+                    _sucessRateField = CompatibilityBinding.WarnMissing(AccessTools.Field(_messageDialogType, "sucessRate"),
+                        "[Eternal] RimImmortal: sucessRate field not found on MessageDialog");
                     _messageDialogPawnField = AccessTools.Field(_messageDialogType, "pawn");
 
-                    if (_getFloatUpgradeMethod == null)
-                    {
-                        Log.Warning("[Eternal] RimImmortal: GetFloatUpgrade method not found on MessageDialog");
-                    }
-                    if (_sucessRateField == null)
-                    {
-                        Log.Warning("[Eternal] RimImmortal: sucessRate field not found on MessageDialog");
-                    }
                 }
                 else
                 {
@@ -208,21 +169,6 @@ namespace Eternal.Compatibility
             }
         }
 
-        /// <summary>
-        /// Resets the type cache (for testing or mod reload scenarios).
-        /// </summary>
-        public static void ResetTypeCache()
-        {
-            _typesInitialized = false;
-            _pawnEnergyTrackerType = null;
-            _setExpMethod = null;
-            _energyTrackerPawnField = null;
-            _messageDialogType = null;
-            _getFloatUpgradeMethod = null;
-            _sucessRateField = null;
-            _messageDialogPawnField = null;
-        }
-
         #endregion
 
         #region Utility Methods
@@ -233,7 +179,9 @@ namespace Eternal.Compatibility
         public static Pawn GetPawnFromEnergyTracker(object energyTracker)
         {
             if (energyTracker == null || EnergyTrackerPawnField == null)
+            {
                 return null;
+            }
 
             try
             {
@@ -253,7 +201,9 @@ namespace Eternal.Compatibility
         public static Pawn GetPawnFromMessageDialog(object messageDialog)
         {
             if (messageDialog == null || MessageDialogPawnField == null)
+            {
                 return null;
+            }
 
             try
             {
@@ -273,7 +223,9 @@ namespace Eternal.Compatibility
         public static float GetSucessRate(object messageDialog)
         {
             if (messageDialog == null || SucessRateField == null)
+            {
                 return 0f;
+            }
 
             try
             {
@@ -293,7 +245,9 @@ namespace Eternal.Compatibility
         public static void SetSucessRate(object messageDialog, float value)
         {
             if (messageDialog == null || SucessRateField == null)
+            {
                 return;
+            }
 
             try
             {
@@ -303,28 +257,6 @@ namespace Eternal.Compatibility
             {
                 EternalLogger.HandleException(EternalExceptionCategory.CompatibilityFailure,
                     "SetSucessRate", null, ex);
-            }
-        }
-
-        /// <summary>
-        /// Logs RimImmortal detection status (for debugging).
-        /// </summary>
-        public static void LogRimImmortalStatus()
-        {
-            if (Eternal_Mod.settings?.debugMode != true)
-                return;
-
-            Log.Message($"[Eternal] RimImmortal Detection Status:");
-            Log.Message($"  - RimImmortal Active: {(RimImmortalActive ? "Yes" : "No")}");
-
-            if (RimImmortalActive)
-            {
-                EnsureTypesInitialized();
-                Log.Message($"  - EnergyTracker Type: {(_pawnEnergyTrackerType != null ? "Found" : "Not Found")}");
-                Log.Message($"  - SetExp Method: {(_setExpMethod != null ? "Found" : "Not Found")}");
-                Log.Message($"  - MessageDialog Type: {(_messageDialogType != null ? "Found" : "Not Found")}");
-                Log.Message($"  - GetFloatUpgrade Method: {(_getFloatUpgradeMethod != null ? "Found" : "Not Found")}");
-                Log.Message($"  - SucessRate Field: {(_sucessRateField != null ? "Found" : "Not Found")}");
             }
         }
 

@@ -49,27 +49,9 @@ namespace Eternal.Patches.CultivatorOfTheRim
         /// Guard: only apply this patch when Cultivator of the Rim is active.
         /// Returning false skips the patch entirely (Harmony will not call TargetMethod).
         /// </summary>
-        public static bool Prepare()
-        {
-            bool isActive = CultivatorOfTheRimDetection.CultivatorOfTheRimActive;
-
-            if (!isActive)
-            {
-                // Only log at debug level — absence of the mod is the normal case
-                if (Eternal_Mod.settings?.debugMode == true)
-                {
-                    Log.Message("[Eternal] Skipping Cultivator of the Rim OnReadingTick patch — mod not active");
-                }
-                return false;
-            }
-
-            if (Eternal_Mod.settings?.debugMode == true)
-            {
-                Log.Message("[Eternal] Cultivator of the Rim detected - enabling technique manual learn boost (1000x)");
-            }
-
-            return true;
-        }
+        public static bool Prepare() => CompatibilityBinding.Prepare(CultivatorOfTheRimDetection.CultivatorOfTheRimActive,
+            "[Eternal] Skipping Cultivator of the Rim OnReadingTick patch — mod not active",
+            "[Eternal] Cultivator of the Rim detected - enabling technique manual learn boost (1000x)");
 
         /// <summary>
         /// Resolve the target method via reflection.
@@ -79,12 +61,8 @@ namespace Eternal.Patches.CultivatorOfTheRim
         {
             var method = CultivatorOfTheRimDetection.OnReadingTickMethod;
 
-            if (method == null)
-            {
-                Log.Warning("[Eternal] Skipping Cultivator of the Rim OnReadingTick patch — method not found (mod absent or API changed)");
-            }
-
-            return method;
+            return CompatibilityBinding.WarnMissing(method,
+                "[Eternal] Skipping Cultivator of the Rim OnReadingTick patch — method not found (mod absent or API changed)");
         }
 
         /// <summary>
@@ -103,15 +81,21 @@ namespace Eternal.Patches.CultivatorOfTheRim
             try
             {
                 if (reader == null || !reader.IsValidEternal())
+                {
                     return;
+                }
 
                 // The original only rolls on this interval — no point boosting other ticks
                 if (!reader.IsHashIntervalTick(250))
+                {
                     return;
+                }
 
                 float originalChance = CultivatorOfTheRimDetection.GetFinalChance(__instance);
                 if (originalChance <= 0f)
+                {
                     return;
+                }
 
                 __state = originalChance;
                 float boostedChance = Math.Min(1f, originalChance * ETERNAL_LEARN_CHANCE_MULTIPLIER);
@@ -143,7 +127,9 @@ namespace Eternal.Patches.CultivatorOfTheRim
             try
             {
                 if (__state < 0f)
+                {
                     return; // NO_BOOST — prefix left the chance untouched
+                }
 
                 CultivatorOfTheRimDetection.SetChanceCached(__instance, __state);
             }

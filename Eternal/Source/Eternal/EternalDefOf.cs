@@ -3,7 +3,7 @@
 // Last Edit: 12-03-2026
 // Author: 0Shard
 // Description: DefOf references for Eternal mod definitions.
-//              Includes WorldObject definitions for Odyssey DLC compatibility.
+//              Includes generic ground, caravan and space recovery WorldObject definitions.
 //              VerifyBindings() now triggers EternalModState kill switch when critical
 //              defs are null, and sends an in-game letter for player notification.
 //              09-03: Added Eternal_MetabolicRecovery as critical def binding.
@@ -12,7 +12,6 @@
 using System.Collections.Generic;
 using Verse;
 using RimWorld;
-using RimWorld.Planet;
 
 namespace Eternal
 {
@@ -41,9 +40,7 @@ namespace Eternal
         // Thing definitions
         public static ThingDef EternalAnchor;
 
-        // WorldObject definitions (Odyssey DLC compatibility)
-        // MayRequireOdyssey attribute ensures this doesn't cause errors if Odyssey isn't loaded
-        [MayRequireOdyssey]
+        // Recovery site XML is unconditional and also serves ground/solo-caravan losses.
         public static WorldObjectDef Eternal_CrashSite;
 
         // Static constructor to initialize DefOf references
@@ -57,7 +54,7 @@ namespace Eternal
         /// Verifies all DefOf references are properly bound.
         /// Critical defs (GeneticMarker, Essence, Regrowing, MetabolicRecovery) trigger the kill switch when null.
         /// Non-critical defs (MoodBuff, TeleportationRecovery, EternalAnchor) log an error only.
-        /// Optional DLC-gated def (CrashSite) is only checked when Odyssey is active.
+        /// Non-critical recovery-site binding is checked with or without Odyssey.
         /// Resets the kill switch first so fixing mod order between sessions recovers cleanly.
         /// </summary>
         /// <returns>True if all critical bindings are valid.</returns>
@@ -104,7 +101,9 @@ namespace Eternal
                     try
                     {
                         if (Find.LetterStack == null)
+                        {
                             return;
+                        }
 
                         Find.LetterStack.ReceiveLetter(
                             "Eternal Mod Disabled",
@@ -143,11 +142,11 @@ namespace Eternal
                 Log.Error("[Eternal] DefOf binding FAILED: Eternal_ElixirSynthesis is null — elixir crafting research will not gate correctly. Check Research_ElixirSynthesis.xml.");
             }
 
-            // --- Optional DLC-gated def: only check when Odyssey is active ---
-            // Pitfall 5: never trigger kill switch for missing optional DLC defs.
-            if (ModsConfig.IsActive("ludeon.rimworld.odyssey") && Eternal_CrashSite == null)
+            // Recovery failure gates defer unsafe removal/death; this binding does not disable
+            // ordinary living healing if XML is broken.
+            if (Eternal_CrashSite == null)
             {
-                Log.Warning("[Eternal] DefOf binding WARNING: Eternal_CrashSite is null but Odyssey DLC is active — crash site world object will not work. Check WorldObjects_Eternal.xml.");
+                Log.Warning("[Eternal] DefOf binding WARNING: Eternal_CrashSite is null — ground, caravan and space recovery will be unavailable. Check WorldObjects_Eternal.xml.");
             }
 
             // Success log gated behind debug mode

@@ -4,9 +4,6 @@
 // Date Last Modified: 22-01-2026
 // Description: Validation utility class for Eternal mod with comprehensive input validation and defensive programming.
 
-using System;
-using System.Collections.Generic;
-using System.Linq;
 using Verse;
 using Eternal.Exceptions;
 using Eternal.Extensions;
@@ -36,7 +33,7 @@ namespace Eternal.Utils
                     operation);
                 throw ex;
             }
-            
+
             if (pawn.Destroyed)
             {
                 var ex = new EternalValidationException(
@@ -46,7 +43,7 @@ namespace Eternal.Utils
                     operation);
                 throw ex;
             }
-            
+
             if (pawn.health == null)
             {
                 var ex = new EternalValidationException(
@@ -56,7 +53,7 @@ namespace Eternal.Utils
                     operation);
                 throw ex;
             }
-            
+
             if (pawn.health.hediffSet == null)
             {
                 var ex = new EternalValidationException(
@@ -67,7 +64,7 @@ namespace Eternal.Utils
                 throw ex;
             }
         }
-        
+
         /// <summary>
         /// Validates that a pawn has the Eternal trait.
         /// </summary>
@@ -78,7 +75,7 @@ namespace Eternal.Utils
         public static void ValidateEternalPawn(Pawn pawn, string parameterName = "pawn", string operation = null)
         {
             ValidatePawn(pawn, parameterName, operation);
-            
+
             if (pawn.story?.traits == null)
             {
                 var ex = new EternalValidationException(
@@ -88,7 +85,7 @@ namespace Eternal.Utils
                     operation);
                 throw ex;
             }
-            
+
             if (!pawn.HasTraitIgnoringSuppression(EternalDefOf.Eternal_GeneticMarker))
             {
                 var ex = new EternalValidationException(
@@ -99,7 +96,7 @@ namespace Eternal.Utils
                 throw ex;
             }
         }
-        
+
         /// <summary>
         /// Validates that a numeric value is within the specified range.
         /// </summary>
@@ -122,7 +119,7 @@ namespace Eternal.Utils
                 throw ex;
             }
         }
-        
+
         /// <summary>
         /// Validates that a numeric value is within the specified range.
         /// </summary>
@@ -145,6 +142,6 @@ namespace Eternal.Utils
                 throw ex;
             }
         }
-        
+
     }
 }

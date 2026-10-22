@@ -16,7 +16,6 @@
 
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.Text;
 using Verse;
 using Eternal.Exceptions;
@@ -184,7 +183,9 @@ namespace Eternal.Utils
 
                 bool shouldLog = (failureCount == 1) || (failureCount % 100 == 0);
                 if (!shouldLog)
+                {
                     return;
+                }
 
                 // --- Format message ---
                 string prefix = GetCategoryPrefix(category);
@@ -194,18 +195,17 @@ namespace Eternal.Utils
                     : $"{prefix} (no exception)";
 
                 if (context.Length > 0)
+                {
                     baseMessage += $" ({context})";
+                }
 
                 if (failureCount > 1)
+                {
                     baseMessage += $" (repeated {failureCount} times)";
+                }
 
                 // --- Severity routing ---
-                bool isErrorLevel = category == EternalExceptionCategory.DataInconsistency
-                    || category == EternalExceptionCategory.GameStateInvalid
-                    || category == EternalExceptionCategory.InternalError
-                    || category == EternalExceptionCategory.HediffSwap
-                    || category == EternalExceptionCategory.Resurrection
-                    || category == EternalExceptionCategory.CorpseTracking;
+                bool isErrorLevel = EternalExceptionSeverity.IsError(category);
 
                 if (isErrorLevel)
                 {
@@ -231,7 +231,9 @@ namespace Eternal.Utils
             {
                 Log.Error($"[Eternal] Critical logging failure in HandleException: {logEx.Message}");
                 if (exception != null)
+                {
                     Log.Error($"[Eternal] Original exception was: {exception.Message}");
+                }
             }
         }
 
@@ -242,18 +244,18 @@ namespace Eternal.Utils
         {
             switch (category)
             {
-                case EternalExceptionCategory.DataInconsistency:   return "[Eternal:DataInconsistency]";
+                case EternalExceptionCategory.DataInconsistency: return "[Eternal:DataInconsistency]";
                 case EternalExceptionCategory.CompatibilityFailure: return "[Eternal:CompatFailure]";
-                case EternalExceptionCategory.GameStateInvalid:    return "[Eternal:GameStateInvalid]";
-                case EternalExceptionCategory.InternalError:       return "[Eternal:InternalError]";
-                case EternalExceptionCategory.ConfigurationError:  return "[Eternal:ConfigError]";
-                case EternalExceptionCategory.HediffSwap:          return "[Eternal:HediffSwap]";
-                case EternalExceptionCategory.Resurrection:        return "[Eternal:Resurrection]";
-                case EternalExceptionCategory.Regrowth:            return "[Eternal:Regrowth]";
-                case EternalExceptionCategory.Snapshot:            return "[Eternal:Snapshot]";
-                case EternalExceptionCategory.CorpseTracking:      return "[Eternal:CorpseTracking]";
-                case EternalExceptionCategory.MapProtection:       return "[Eternal:MapProtection]";
-                default:                                           return "[Eternal:Unknown]";
+                case EternalExceptionCategory.GameStateInvalid: return "[Eternal:GameStateInvalid]";
+                case EternalExceptionCategory.InternalError: return "[Eternal:InternalError]";
+                case EternalExceptionCategory.ConfigurationError: return "[Eternal:ConfigError]";
+                case EternalExceptionCategory.HediffSwap: return "[Eternal:HediffSwap]";
+                case EternalExceptionCategory.Resurrection: return "[Eternal:Resurrection]";
+                case EternalExceptionCategory.Regrowth: return "[Eternal:Regrowth]";
+                case EternalExceptionCategory.Snapshot: return "[Eternal:Snapshot]";
+                case EternalExceptionCategory.CorpseTracking: return "[Eternal:CorpseTracking]";
+                case EternalExceptionCategory.MapProtection: return "[Eternal:MapProtection]";
+                default: return "[Eternal:Unknown]";
             }
         }
 
@@ -263,16 +265,24 @@ namespace Eternal.Utils
         private static string BuildContext(string operation, Pawn pawn)
         {
             if (string.IsNullOrEmpty(operation) && pawn == null)
+            {
                 return string.Empty;
+            }
 
             System.Text.StringBuilder sb = new System.Text.StringBuilder();
 
             if (!string.IsNullOrEmpty(operation))
+            {
                 sb.Append($"Op: {operation}");
+            }
 
             if (pawn != null)
             {
-                if (sb.Length > 0) sb.Append(", ");
+                if (sb.Length > 0)
+                {
+                    sb.Append(", ");
+                }
+
                 sb.Append($"Pawn: {pawn.Name?.ToStringFull ?? "Unknown"}");
             }
 
@@ -312,14 +322,20 @@ namespace Eternal.Utils
                 if (pawn != null)
                 {
                     if (contextBuilder.Length > 0)
+                    {
                         contextBuilder.Append(", ");
+                    }
+
                     contextBuilder.Append($"Pawn: {pawn.Name?.ToStringFull ?? "Unknown"}");
                 }
 
                 if (map != null)
                 {
                     if (contextBuilder.Length > 0)
+                    {
                         contextBuilder.Append(", ");
+                    }
+
                     contextBuilder.Append($"Map: {map}");
                 }
 

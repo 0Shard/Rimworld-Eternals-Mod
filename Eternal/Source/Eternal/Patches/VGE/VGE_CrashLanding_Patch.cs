@@ -40,7 +40,7 @@ namespace Eternal.Patches.VGE
         public List<CorpseType> EternalCorpsesToSave { get; } = new List<CorpseType>();
         public List<Pawn> EternalPawnsToSave { get; } = new List<Pawn>();
         public MapType Map { get; set; }
-        public int WorldTile { get; set; } = -1;
+        public PlanetTile WorldTile { get; set; } = PlanetTile.Invalid;
         public IntVec3 LandingPosition { get; set; } = IntVec3.Invalid;
         public bool PrefixSucceeded { get; set; }
     }
@@ -130,7 +130,9 @@ namespace Eternal.Patches.VGE
         private static MapType GetMap(object controller)
         {
             if (_mapField == null || controller == null)
+            {
                 return null;
+            }
 
             try
             {
@@ -150,7 +152,9 @@ namespace Eternal.Patches.VGE
         private static GravshipType GetGravship(object controller)
         {
             if (_gravshipField == null || controller == null)
+            {
                 return null;
+            }
 
             try
             {
@@ -284,7 +288,7 @@ namespace Eternal.Patches.VGE
                             }
                         }
                         else if (thing is CorpseType riderCorpse && riderCorpse.InnerPawn != null &&
-                            riderCorpse.InnerPawn.IsValidEternal() && overlapCells.Contains(riderCorpse.Position))
+                            riderCorpse.InnerPawn.IsValidEternalCorpse() && overlapCells.Contains(riderCorpse.Position))
                         {
                             __state.EternalCorpsesToSave.Add(riderCorpse);
                             if (riderCorpse.Spawned)
@@ -298,9 +302,9 @@ namespace Eternal.Patches.VGE
                 // Destination-map side: tracked Eternal corpses that ARE blocking things
                 // (or sit on overlap cells) get destroyed by VGE's blocker cleanup.
                 var corpseManager = EternalServiceContainer.Instance.CorpseManager;
-                if (corpseManager != null && corpseManager.HasEternalCorpses(map))
+                if (corpseManager != null)
                 {
-                    foreach (var entry in corpseManager.GetCorpsesOnMap(map).ToList())
+                    foreach (var entry in corpseManager.GetAllCorpses().Where(entry => entry.Corpse?.MapHeld == map).ToList())
                     {
                         if (entry?.Corpse != null && entry.Corpse.Spawned &&
                             overlapCells.Contains(entry.Corpse.Position) &&
@@ -371,7 +375,9 @@ namespace Eternal.Patches.VGE
                         if (corpseManager != null && corpseManager.IsTracked(corpse.InnerPawn))
                         {
                             if (!corpseManager.TryRelocateCorpse(corpse.InnerPawn, map, spawnPos))
+                            {
                                 continue;
+                            }
                         }
                         else
                         {
@@ -476,7 +482,7 @@ namespace Eternal.Patches.VGE
 
             try
             {
-                var crashSite = state.WorldTile >= 0
+                var crashSite = state.WorldTile.Valid
                     ? SpaceCrashRescueService.CreateOrGetCrashSite(state.WorldTile)
                     : null;
 
@@ -492,7 +498,7 @@ namespace Eternal.Patches.VGE
                 {
                     if (corpse != null && !corpse.Destroyed)
                     {
-                        crashSite.AddCorpse(corpse);
+                        SpaceCrashRescueService.DeliverCorpsesToCrashSite(new[] { corpse }, crashSite.Tile);
                     }
                 }
 
@@ -500,8 +506,7 @@ namespace Eternal.Patches.VGE
                 {
                     if (pawn != null && !pawn.Destroyed)
                     {
-                        SpaceCrashRescueService.ApplyFallDamage(pawn);
-                        crashSite.AddPawn(pawn);
+                        SpaceCrashRescueService.StageAfterFallDamage(pawn, crashSite);
                     }
                 }
 

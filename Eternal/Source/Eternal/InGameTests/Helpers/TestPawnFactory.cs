@@ -1,203 +1,218 @@
 // Relative Path: Eternal/Source/Eternal/InGameTests/Helpers/TestPawnFactory.cs
-// Creation Date: 24-02-2026
-// Last Edit: 13-03-2026
 // Author: 0Shard
-// Description: Factory for spawning and managing test Eternal pawns in-game.
-//              Handles pawn generation, trait assignment, killing, and cleanup.
-//              RC1-FIX: Eternal_Essence is now ALWAYS added unconditionally after GainTrait()
-//              to eliminate any dependency on Harmony TraitSet_Patch firing in the test context.
-//              If Harmony already added it, the existing one is removed first to ensure clean state.
-//              Note: Verse.Corpse and Verse.Map used fully-qualified to avoid Eternal.Corpse/Eternal.Map conflicts.
-//              13-03: Added SpawnNonEternalPawn for elixir and mood buff non-Eternal target tests.
-
+// Description: Own fixtures from generation onward; observe hooks and clean only owned state.
 #if DEBUG
-
 using System;
 using System.Collections.Generic;
+using System.Reflection;
 using Verse;
 using RimWorld;
+using Eternal.DI;
 
 namespace Eternal.InGameTests.Helpers
 {
-    /// <summary>
-    /// Creates and manages Eternal test pawns for in-game integration tests.
-    /// </summary>
     public static class TestPawnFactory
     {
         private static readonly List<Thing> _spawnedTestThings = new List<Thing>();
 
-        /// <summary>
-        /// Spawns a new colonist pawn with the Eternal_GeneticMarker trait on the given map.
-        /// The trait assignment triggers TraitSet_Patch which auto-adds Eternal_Essence hediff.
-        /// </summary>
         public static Pawn SpawnEternalPawn(Verse.Map map)
         {
-            var request = new PawnGenerationRequest(
-                PawnKindDefOf.Colonist,
-                Faction.OfPlayer,
-                PawnGenerationContext.NonPlayer,
-                forceGenerateNewPawn: true);
-
-            var pawn = PawnGenerator.GeneratePawn(request);
-
-            // Add the Eternal trait (triggers Eternal_Essence via Harmony patch)
-            if (pawn.story?.traits != null && EternalDefOf.Eternal_GeneticMarker != null)
-            {
-                Log.Message($"[EternalTests] EternalModState.IsDisabled = {EternalModState.IsDisabled}");
-                Log.Message($"[EternalTests] EternalDefOf.Eternal_Essence = {(EternalDefOf.Eternal_Essence != null ? "OK" : "NULL")}");
-                Log.Message($"[EternalTests] EternalDefOf.Eternal_GeneticMarker = {(EternalDefOf.Eternal_GeneticMarker != null ? "OK" : "NULL")}");
-
-                pawn.story.traits.GainTrait(new Trait(EternalDefOf.Eternal_GeneticMarker));
-
-                // RC1-FIX: ALWAYS add Eternal_Essence unconditionally to eliminate Harmony timing dependency.
-                // If Harmony TraitSet_Patch already fired and added it, remove the existing one first to
-                // ensure a clean, properly-initialized hediff with the correct severity.
-                bool hasEssence = pawn.health?.hediffSet?.HasHediff(EternalDefOf.Eternal_Essence) ?? false;
-                Log.Message($"[EternalTests] After GainTrait: HasEternalEssence = {hasEssence} (will re-add unconditionally)");
-
-                if (EternalDefOf.Eternal_Essence != null)
-                {
-                    // Remove any existing Eternal_Essence first (in case Harmony added one)
-                    if (hasEssence)
-                    {
-                        var existingEssence = pawn.health.hediffSet.GetFirstHediffOfDef(EternalDefOf.Eternal_Essence);
-                        if (existingEssence != null)
-                        {
-                            pawn.health.RemoveHediff(existingEssence);
-                            Log.Message("[EternalTests] Removed Harmony-added Eternal_Essence to ensure clean re-add.");
-                        }
-                    }
-
-                    // Always add a fresh Eternal_Essence with correct severity
-                    var hediff = HediffMaker.MakeHediff(EternalDefOf.Eternal_Essence, pawn);
-                    hediff.Severity = 1.0f;
-                    pawn.health.AddHediff(hediff);
-                    Log.Message("[EternalTests] Eternal_Essence added unconditionally for reliable test state.");
-                }
-                else
-                {
-                    Log.Error("[EternalTests] EternalDefOf.Eternal_Essence is null — cannot add hediff. Test will likely fail.");
-                }
-            }
-            else
-            {
-                Log.Error($"[EternalTests] Cannot add trait: story.traits={pawn.story?.traits != null}, GeneticMarker={EternalDefOf.Eternal_GeneticMarker != null}");
-            }
-
-            // Spawn on map at a walkable cell near center
-            var cell = CellFinder.RandomClosewalkCellNear(map.Center, map, 10);
-            GenSpawn.Spawn(pawn, cell, map);
-
-            _spawnedTestThings.Add(pawn);
-
-            Log.Message($"[EternalTests] Spawned Eternal pawn: {pawn.LabelShort} at {cell}");
+            var pawn = GeneratePawn(map);
+            TestAssert.Available(EternalDefOf.Eternal_GeneticMarker, "Eternal trait def");
+            TestAssert.Available(EternalDefOf.Eternal_Essence, "Eternal Essence def");
+            TestAssert.IsFalse(EternalModState.IsDisabled, "Eternal must be enabled for hook tests");
+            PrepareNonEternal(pawn);
+            pawn.story.traits.GainTrait(new Trait(EternalDefOf.Eternal_GeneticMarker));
+            TestAssert.IsTrue(pawn.health.hediffSet.HasHediff(EternalDefOf.Eternal_Essence),
+                "GainTrait must add Essence via the actual TraitSet hook");
+            Spawn(pawn, map);
             return pawn;
         }
 
-        /// <summary>
-        /// Spawns a plain colonist pawn WITHOUT the Eternal trait or Eternal_Essence hediff.
-        /// Used to test elixir acceptance logic (CanBeUsedBy) and non-Eternal mood buff targets.
-        /// Tracked in _spawnedTestThings for cleanup.
-        /// </summary>
         public static Pawn SpawnNonEternalPawn(Verse.Map map)
         {
-            var request = new PawnGenerationRequest(
-                PawnKindDefOf.Colonist,
-                Faction.OfPlayer,
-                PawnGenerationContext.NonPlayer,
-                forceGenerateNewPawn: true);
-
-            var pawn = PawnGenerator.GeneratePawn(request);
-
-            // Remove Eternal trait if somehow assigned by random generation
-            if (pawn.story?.traits != null && EternalDefOf.Eternal_GeneticMarker != null)
-            {
-                var existingTrait = pawn.story.traits.GetTrait(EternalDefOf.Eternal_GeneticMarker);
-                if (existingTrait != null)
-                {
-                    pawn.story.traits.RemoveTrait(existingTrait);
-                    Log.Message("[EternalTests] SpawnNonEternalPawn: removed randomly-generated Eternal trait.");
-                }
-            }
-
-            // Spawn on map at a walkable cell near center
-            var cell = CellFinder.RandomClosewalkCellNear(map.Center, map, 10);
-            GenSpawn.Spawn(pawn, cell, map);
-
-            _spawnedTestThings.Add(pawn);
-
-            Log.Message($"[EternalTests] Spawned non-Eternal pawn: {pawn.LabelShort} at {cell}");
+            var pawn = GeneratePawn(map);
+            PrepareNonEternal(pawn);
+            Spawn(pawn, map);
             return pawn;
         }
 
-        /// <summary>
-        /// Kills the given pawn, triggering the death -> corpse registration flow.
-        /// </summary>
+        private static Pawn GeneratePawn(Verse.Map map)
+        {
+            TestAssert.Available(map, "Current map");
+            var request = new PawnGenerationRequest(PawnKindDefOf.Colonist, Faction.OfPlayer,
+                PawnGenerationContext.NonPlayer, forceGenerateNewPawn: true);
+            var pawn = PawnGenerator.GeneratePawn(request);
+            TestAssert.IsNotNull(pawn, "Pawn generation must succeed");
+            // Ownership precedes trait, health or map setup, all of which may fail.
+            _spawnedTestThings.Add(pawn);
+            TestAssert.Available(pawn.story?.traits, "Generated pawn traits");
+            TestAssert.Available(pawn.health?.hediffSet, "Generated pawn health");
+            return pawn;
+        }
+
+        private static void PrepareNonEternal(Pawn pawn)
+        {
+            // This is input preparation, before observing any tested trait/elixir result.
+            TestAssert.Available(EternalDefOf.Eternal_GeneticMarker, "Eternal trait def");
+            TestAssert.Available(EternalDefOf.Eternal_Essence, "Eternal Essence def");
+            var trait = pawn.story.traits.GetTrait(EternalDefOf.Eternal_GeneticMarker);
+            if (trait != null)
+            {
+                pawn.story.traits.RemoveTrait(trait);
+            }
+
+            var essence = pawn.health.hediffSet.GetFirstHediffOfDef(EternalDefOf.Eternal_Essence);
+            if (essence != null)
+            {
+                pawn.health.RemoveHediff(essence);
+            }
+
+            TestAssert.IsFalse(pawn.health.hediffSet.HasHediff(EternalDefOf.Eternal_Essence),
+                "Non-Eternal input must have no Essence");
+        }
+
+        private static void Spawn(Pawn pawn, Verse.Map map)
+        {
+            GenSpawn.Spawn(pawn, CellFinder.RandomClosewalkCellNear(map.Center, map, 10), map);
+            TestAssert.IsTrue(pawn.Spawned, "Generated fixture must be spawned");
+        }
+
+        internal static void OwnThing(Thing thing)
+        {
+            TestAssert.IsNotNull(thing, "Test thing must exist before ownership registration");
+            _spawnedTestThings.Add(thing);
+        }
+
         public static void KillPawn(Pawn pawn)
         {
-            if (pawn == null || pawn.Dead)
-                return;
-
-            Log.Message($"[EternalTests] Killing pawn: {pawn.LabelShort}");
+            TestAssert.IsNotNull(pawn, "KillPawn requires a pawn");
+            TestAssert.IsFalse(pawn.Dead, "KillPawn requires a living pawn");
             pawn.Kill(null, null);
         }
 
-        /// <summary>
-        /// Finds the corpse for a dead pawn on the given map.
-        /// </summary>
         public static Verse.Corpse FindCorpseForPawn(Pawn pawn, Verse.Map map)
         {
             if (pawn == null || map == null)
-                return null;
-
-            var corpseGroup = ThingRequestGroup.Corpse;
-            foreach (var thing in map.listerThings.ThingsInGroup(corpseGroup))
             {
-                var corpse = thing as Verse.Corpse;
-                if (corpse != null && corpse.InnerPawn == pawn)
+                return null;
+            }
+
+            foreach (var thing in map.listerThings.ThingsInGroup(ThingRequestGroup.Corpse))
+            {
+                if (thing is Verse.Corpse corpse && corpse.InnerPawn == pawn)
                 {
                     return corpse;
                 }
             }
+
             return null;
         }
 
-        /// <summary>
-        /// Cleans up all test pawns and corpses spawned during the test run.
-        /// </summary>
         public static void CleanupAll()
         {
-            Log.Message($"[EternalTests] Cleaning up {_spawnedTestThings.Count} test things");
-
-            foreach (var thing in _spawnedTestThings)
+            var failures = new List<Exception>();
+            foreach (var thing in _spawnedTestThings.ToArray())
             {
                 try
                 {
-                    if (thing != null && !thing.Destroyed)
+                    if (thing is Pawn pawn)
                     {
-                        if (thing is Pawn pawn && pawn.Dead)
-                        {
-                            var corpse = pawn.Corpse;
-                            if (corpse != null && !corpse.Destroyed)
-                            {
-                                corpse.Destroy();
-                            }
-                        }
-                        else if (!thing.Destroyed)
-                        {
-                            thing.Destroy();
-                        }
+                        CleanupPawn(pawn);
+                    }
+                    else if (thing != null && !thing.Destroyed)
+                    {
+                        thing.Destroy();
+                    }
+
+                    _spawnedTestThings.Remove(thing);
+                }
+                catch (Exception ex) { failures.Add(ex); }
+            }
+            if (failures.Count > 0)
+            {
+                throw new AggregateException("Test-owned cleanup failed", failures);
+            }
+        }
+
+        private static void CleanupPawn(Pawn pawn)
+        {
+            var services = EternalServiceContainer.Instance;
+            // Dead pawns are destroyed Things, but their corpse and ledgers still need cleanup.
+            var corpse = pawn.Corpse ?? services.CorpseManager?.GetCorpseData(pawn)?.Corpse;
+            var failures = new List<Exception>();
+            Action<Action> attempt = action => { try { action(); } catch (Exception ex) { failures.Add(ex); } };
+            attempt(() => services.FoodDebtSystem?.UnregisterPawn(pawn));
+            attempt(() => services.ThresholdTracker?.ClearPawnThresholds(pawn));
+            attempt(() => services.HealingProcessor?.HediffHealer?.ClearPawnHealingProgress(pawn));
+            attempt(() =>
+            {
+                if (services.CorpseHealingProcessor != null)
+                {
+                    ((HashSet<Pawn>)RequiredField(services.CorpseHealingProcessor, "activeHealingCorpses")).Remove(pawn);
+                }
+            });
+            attempt(() =>
+            {
+                if (services.CorpseManager?.IsTracked(pawn) == true)
+                {
+                    services.CorpseManager.UnregisterCorpse(pawn);
+                }
+            });
+            attempt(() =>
+            {
+                if (corpse != null)
+                {
+                    services.CorpsePreservation?.UnpreserveCorpse(corpse);
+                }
+            });
+            attempt(() =>
+            {
+                if (corpse != null && !corpse.Destroyed)
+                {
+                    corpse.Destroy();
+                }
+
+                if (!pawn.Destroyed)
+                {
+                    pawn.Destroy();
+                }
+            });
+            // Destruction hooks may enqueue the pawn; remove this fixture only after destruction.
+            attempt(() =>
+            {
+                if (Eternal_Component.Current != null)
+                {
+                    var orchestrator = RequiredField(Eternal_Component.Current, "tickOrchestrator");
+                    ((HashSet<Pawn>)RequiredField(orchestrator, "pendingHealthReconciliation")).Remove(pawn);
+                }
+            });
+            attempt(() =>
+            {
+                TestAssert.IsFalse(services.CorpseManager?.IsTracked(pawn) ?? false, "Owned corpse must be untracked");
+                if (services.FoodDebtSystem != null)
+                {
+                    foreach (var tracked in services.FoodDebtSystem.GetTrackedPawns())
+                    {
+                        TestAssert.IsFalse(ReferenceEquals(pawn, tracked), "Owned debt pawn must be untracked");
                     }
                 }
-                catch (Exception ex)
-                {
-                    Log.Warning($"[EternalTests] Cleanup failed for {thing}: {ex.Message}");
-                }
+            });
+            if (failures.Count > 0)
+            {
+                throw new AggregateException($"Cleanup pawn {pawn.thingIDNumber}", failures);
             }
+        }
 
-            _spawnedTestThings.Clear();
+        internal static object RequiredField(object owner, string name)
+        {
+            TestAssert.IsNotNull(owner, $"Owner of {name}");
+            var field = owner.GetType().GetField(name, BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
+            TestAssert.IsNotNull(field, $"State field {name}");
+            var value = field.GetValue(owner);
+            TestAssert.IsNotNull(value, $"State value {name}");
+            return value;
         }
     }
 }
-
 #endif

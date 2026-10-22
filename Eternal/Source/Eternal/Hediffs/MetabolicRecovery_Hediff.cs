@@ -54,11 +54,15 @@ namespace Eternal.Hediffs
             {
                 // Keep hediff on dead pawns until debt is cleared via resurrection flow
                 if (pawn == null || pawn.Dead)
+                {
                     return false;
+                }
 
                 var foodDebtSystem = EternalServiceContainer.Instance?.FoodDebtSystem;
                 if (foodDebtSystem == null)
+                {
                     return false;
+                }
 
                 return !foodDebtSystem.HasDebt(pawn);
             }
@@ -72,22 +76,31 @@ namespace Eternal.Hediffs
             get
             {
                 if (pawn == null)
+                {
                     return base.SeverityLabel;
+                }
 
                 var foodDebtSystem = EternalServiceContainer.Instance?.FoodDebtSystem;
                 if (foodDebtSystem == null)
+                {
                     return base.SeverityLabel;
+                }
 
                 float debt = foodDebtSystem.GetDebt(pawn);
                 float maxDebt = foodDebtSystem.GetMaxCapacity(pawn);
 
                 if (maxDebt <= 0f)
+                {
                     return base.SeverityLabel;
+                }
 
                 float pct = (debt / maxDebt) * 100f;
                 // F0 would round a live residual down to a misleading "0% debt"
                 if (pct < 1f)
+                {
                     return "<1% debt";
+                }
+
                 return $"{pct:F0}% debt";
             }
         }
@@ -101,11 +114,15 @@ namespace Eternal.Hediffs
         public void SyncSeverityFromDebt()
         {
             if (pawn == null)
+            {
                 return;
+            }
 
             var foodDebtSystem = EternalServiceContainer.Instance?.FoodDebtSystem;
             if (foodDebtSystem == null)
+            {
                 return;
+            }
 
             float debt = foodDebtSystem.GetDebt(pawn);
             float maxDebt = foodDebtSystem.GetMaxCapacity(pawn);
@@ -119,7 +136,9 @@ namespace Eternal.Hediffs
             }
 
             if (maxDebt <= 0f)
+            {
                 return;
+            }
 
             float ratio = debt / maxDebt;
             // Clamp to [MinActiveSeverity, 1.0] — severity 0 causes auto-removal (Pitfall 7)

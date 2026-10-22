@@ -26,10 +26,14 @@ namespace Eternal.Settings
         public static string GetLabel(string defName)
         {
             if (string.IsNullOrEmpty(defName))
+            {
                 return string.Empty;
+            }
 
             if (labels.TryGetValue(defName, out var cachedLabel))
+            {
                 return cachedLabel;
+            }
 
             var hediffDef = DefDatabase<HediffDef>.GetNamedSilentFail(defName);
             string label = hediffDef != null ? hediffDef.LabelCap.ToString() : defName;
@@ -43,10 +47,14 @@ namespace Eternal.Settings
         public static string GetDescription(string defName)
         {
             if (string.IsNullOrEmpty(defName))
+            {
                 return string.Empty;
+            }
 
             if (descriptions.TryGetValue(defName, out var cachedDescription))
+            {
                 return cachedDescription;
+            }
 
             var hediffDef = DefDatabase<HediffDef>.GetNamedSilentFail(defName);
             string description = hediffDef?.description ?? string.Empty;

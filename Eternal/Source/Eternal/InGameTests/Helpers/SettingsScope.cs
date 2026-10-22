@@ -17,13 +17,14 @@ namespace Eternal.InGameTests.Helpers
     /// </summary>
     public class SettingsScope : System.IDisposable
     {
+        private readonly Eternal_Settings _settings;
         // Snapshot of v1.0.1 effects settings taken at construction time
-        private readonly bool   _consciousnessBuffEnabled;
-        private readonly float  _consciousnessMultiplier;
-        private readonly bool   _moodBuffEnabled;
-        private readonly int    _moodBuffValue;
-        private readonly bool   _populationCapEnabled;
-        private readonly int    _populationCap;
+        private readonly bool _consciousnessBuffEnabled;
+        private readonly float _consciousnessMultiplier;
+        private readonly bool _moodBuffEnabled;
+        private readonly int _moodBuffValue;
+        private readonly bool _populationCapEnabled;
+        private readonly int _populationCap;
 
         /// <summary>
         /// Saves current v1.0.1 settings values so they can be restored later.
@@ -31,15 +32,15 @@ namespace Eternal.InGameTests.Helpers
         public SettingsScope()
         {
             var s = Eternal_Mod.settings;
-            if (s == null)
-                return;
+            TestAssert.Available(s, "Eternal effects settings");
+            _settings = s;
 
             _consciousnessBuffEnabled = s.consciousnessBuffEnabled;
-            _consciousnessMultiplier  = s.consciousnessMultiplier;
-            _moodBuffEnabled          = s.moodBuffEnabled;
-            _moodBuffValue            = s.moodBuffValue;
-            _populationCapEnabled     = s.populationCapEnabled;
-            _populationCap            = s.populationCap;
+            _consciousnessMultiplier = s.consciousnessMultiplier;
+            _moodBuffEnabled = s.moodBuffEnabled;
+            _moodBuffValue = s.moodBuffValue;
+            _populationCapEnabled = s.populationCapEnabled;
+            _populationCap = s.populationCap;
         }
 
         /// <summary>
@@ -48,16 +49,18 @@ namespace Eternal.InGameTests.Helpers
         /// </summary>
         public void Dispose()
         {
-            var s = Eternal_Mod.settings;
-            if (s == null)
-                return;
+            var s = _settings;
+            bool sameIdentity = object.ReferenceEquals(s, Eternal_Mod.settings);
 
             s.consciousnessBuffEnabled = _consciousnessBuffEnabled;
-            s.consciousnessMultiplier  = _consciousnessMultiplier;
-            s.moodBuffEnabled          = _moodBuffEnabled;
-            s.moodBuffValue            = _moodBuffValue;
-            s.populationCapEnabled     = _populationCapEnabled;
-            s.populationCap            = _populationCap;
+            s.consciousnessMultiplier = _consciousnessMultiplier;
+            s.moodBuffEnabled = _moodBuffEnabled;
+            s.moodBuffValue = _moodBuffValue;
+            s.populationCapEnabled = _populationCapEnabled;
+            s.populationCap = _populationCap;
+            Eternal_Mod.settings = s;
+            TestAssert.IsTrue(sameIdentity,
+                "Effects settings identity must stay unchanged inside SettingsScope");
         }
     }
 }

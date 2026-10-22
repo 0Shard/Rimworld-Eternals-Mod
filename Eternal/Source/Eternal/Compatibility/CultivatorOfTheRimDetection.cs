@@ -56,6 +56,7 @@ namespace Eternal.Compatibility
         #region Type Cache
 
         private static bool _typesInitialized = false;
+        private static readonly Action InitializeTypes = EnsureTypesInitialized;
 
         // CultivatorOfTheRim.BookOutcomeDoerTechniqueManual — rolls the technique learn chance
         // every 250 reading ticks (binary hediff grant, no exp system). Only loaded by CTR's
@@ -74,62 +75,27 @@ namespace Eternal.Compatibility
         /// <summary>
         /// Gets the OnReadingTick method from BookOutcomeDoerTechniqueManual.
         /// </summary>
-        public static MethodInfo OnReadingTickMethod
-        {
-            get
-            {
-                EnsureTypesInitialized();
-                return _onReadingTickMethod;
-            }
-        }
+        public static MethodInfo OnReadingTickMethod => CompatibilityBinding.Cached(InitializeTypes, ref _onReadingTickMethod);
 
         /// <summary>
         /// Gets the chanceCached field (public float caching the computed learn chance).
         /// </summary>
-        public static FieldInfo ChanceCachedField
-        {
-            get
-            {
-                EnsureTypesInitialized();
-                return _chanceCachedField;
-            }
-        }
+        public static FieldInfo ChanceCachedField => CompatibilityBinding.Cached(InitializeTypes, ref _chanceCachedField);
 
         /// <summary>
         /// Gets the finalChance property (learnChance × book-quality curve, lazily cached).
         /// </summary>
-        public static PropertyInfo FinalChanceProperty
-        {
-            get
-            {
-                EnsureTypesInitialized();
-                return _finalChanceProperty;
-            }
-        }
+        public static PropertyInfo FinalChanceProperty => CompatibilityBinding.Cached(InitializeTypes, ref _finalChanceProperty);
 
         /// <summary>
         /// Gets the CompPostTickInterval method from HediffComp_BodyCultivation.
         /// </summary>
-        public static MethodInfo CompPostTickIntervalMethod
-        {
-            get
-            {
-                EnsureTypesInitialized();
-                return _compPostTickIntervalMethod;
-            }
-        }
+        public static MethodInfo CompPostTickIntervalMethod => CompatibilityBinding.Cached(InitializeTypes, ref _compPostTickIntervalMethod);
 
         /// <summary>
         /// Gets the CultivationSpeed field from HediffComp_BodyCultivation.
         /// </summary>
-        public static FieldInfo BodyCultivationSpeedField
-        {
-            get
-            {
-                EnsureTypesInitialized();
-                return _bodyCultivationSpeedField;
-            }
-        }
+        public static FieldInfo BodyCultivationSpeedField => CompatibilityBinding.Cached(InitializeTypes, ref _bodyCultivationSpeedField);
 
         #endregion
 
@@ -141,28 +107,29 @@ namespace Eternal.Compatibility
         private static void EnsureTypesInitialized()
         {
             if (_typesInitialized)
+            {
                 return;
+            }
 
             _typesInitialized = true;
 
             if (!CultivatorOfTheRimActive)
+            {
                 return;
+            }
 
             try
             {
                 _techniqueManualDoerType = AccessTools.TypeByName("CultivatorOfTheRim.BookOutcomeDoerTechniqueManual");
                 if (_techniqueManualDoerType != null)
                 {
-                    _onReadingTickMethod = AccessTools.Method(_techniqueManualDoerType, "OnReadingTick");
-                    _chanceCachedField = AccessTools.Field(_techniqueManualDoerType, "chanceCached");
-                    _finalChanceProperty = AccessTools.Property(_techniqueManualDoerType, "finalChance");
+                    _onReadingTickMethod = CompatibilityBinding.WarnMissing(AccessTools.Method(_techniqueManualDoerType, "OnReadingTick"),
+                        "[Eternal] Cultivator of the Rim: OnReadingTick method not found on BookOutcomeDoerTechniqueManual");
+                    _chanceCachedField = CompatibilityBinding.WarnMissing(AccessTools.Field(_techniqueManualDoerType, "chanceCached"),
+                        "[Eternal] Cultivator of the Rim: chanceCached field not found on BookOutcomeDoerTechniqueManual");
+                    _finalChanceProperty = CompatibilityBinding.WarnMissing(AccessTools.Property(_techniqueManualDoerType, "finalChance"),
+                        "[Eternal] Cultivator of the Rim: finalChance property not found on BookOutcomeDoerTechniqueManual");
 
-                    if (_onReadingTickMethod == null)
-                        Log.Warning("[Eternal] Cultivator of the Rim: OnReadingTick method not found on BookOutcomeDoerTechniqueManual");
-                    if (_chanceCachedField == null)
-                        Log.Warning("[Eternal] Cultivator of the Rim: chanceCached field not found on BookOutcomeDoerTechniqueManual");
-                    if (_finalChanceProperty == null)
-                        Log.Warning("[Eternal] Cultivator of the Rim: finalChance property not found on BookOutcomeDoerTechniqueManual");
                 }
                 else
                 {
@@ -172,13 +139,11 @@ namespace Eternal.Compatibility
                 _bodyCultivationCompType = AccessTools.TypeByName("CultivatorOfTheRim.HediffComp_BodyCultivation");
                 if (_bodyCultivationCompType != null)
                 {
-                    _compPostTickIntervalMethod = AccessTools.Method(_bodyCultivationCompType, "CompPostTickInterval");
-                    _bodyCultivationSpeedField = AccessTools.Field(_bodyCultivationCompType, "CultivationSpeed");
+                    _compPostTickIntervalMethod = CompatibilityBinding.WarnMissing(AccessTools.Method(_bodyCultivationCompType, "CompPostTickInterval"),
+                        "[Eternal] Cultivator of the Rim: CompPostTickInterval method not found on HediffComp_BodyCultivation");
+                    _bodyCultivationSpeedField = CompatibilityBinding.WarnMissing(AccessTools.Field(_bodyCultivationCompType, "CultivationSpeed"),
+                        "[Eternal] Cultivator of the Rim: CultivationSpeed field not found on HediffComp_BodyCultivation");
 
-                    if (_compPostTickIntervalMethod == null)
-                        Log.Warning("[Eternal] Cultivator of the Rim: CompPostTickInterval method not found on HediffComp_BodyCultivation");
-                    if (_bodyCultivationSpeedField == null)
-                        Log.Warning("[Eternal] Cultivator of the Rim: CultivationSpeed field not found on HediffComp_BodyCultivation");
                 }
                 else
                 {
@@ -204,21 +169,6 @@ namespace Eternal.Compatibility
             }
         }
 
-        /// <summary>
-        /// Resets the type cache (for testing or mod reload scenarios).
-        /// </summary>
-        public static void ResetTypeCache()
-        {
-            _typesInitialized = false;
-            _techniqueManualDoerType = null;
-            _onReadingTickMethod = null;
-            _chanceCachedField = null;
-            _finalChanceProperty = null;
-            _bodyCultivationCompType = null;
-            _compPostTickIntervalMethod = null;
-            _bodyCultivationSpeedField = null;
-        }
-
         #endregion
 
         #region Utility Methods
@@ -230,7 +180,9 @@ namespace Eternal.Compatibility
         public static float GetFinalChance(object techniqueManualDoer)
         {
             if (techniqueManualDoer == null || FinalChanceProperty == null)
+            {
                 return 0f;
+            }
 
             try
             {
@@ -250,7 +202,9 @@ namespace Eternal.Compatibility
         public static void SetChanceCached(object techniqueManualDoer, float value)
         {
             if (techniqueManualDoer == null || ChanceCachedField == null)
+            {
                 return;
+            }
 
             try
             {
@@ -269,7 +223,9 @@ namespace Eternal.Compatibility
         public static float GetBodyCultivationSpeed(object bodyCultivationComp)
         {
             if (bodyCultivationComp == null || BodyCultivationSpeedField == null)
+            {
                 return 0f;
+            }
 
             try
             {

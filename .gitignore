@@ -5,6 +5,7 @@ RimWorld-Decompiled/
 # Build artifacts
 **/obj/
 **/bin/
+tools/__pycache__/
 *.user
 *.suo
 *.userprefs
@@ -36,6 +37,9 @@ Thumbs.db
 .workshop-config
 .workshop-item.vdf
 Eternal/1.6/Assemblies/net472/Eternal.pdb
+Eternal/1.7/Assemblies/net472/Eternal.pdb
 Mods/Eternal/1.6/Assemblies/Eternal.pdb
+Mods/Eternal/1.7/Assemblies/Eternal.pdb
 RimWorld-Decompiled.old*
 .pi/
+.references/

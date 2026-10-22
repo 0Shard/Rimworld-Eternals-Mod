@@ -10,6 +10,7 @@
 //              intentionally NOT touched: GenerateNewPawnInternal only runs for new pawns.
 
 using System;
+using System.Linq;
 using HarmonyLib;
 using RimWorld;
 using Verse;
@@ -34,21 +35,52 @@ namespace Eternal.Patches
             {
                 // SAFE-09: skip all processing when mod is disabled due to missing critical defs.
                 if (EternalModState.IsDisabled)
+                {
                     return;
+                }
 
                 if (__result?.story?.traits == null || EternalDefOf.Eternal_GeneticMarker == null)
+                {
                     return;
+                }
 
                 // Player-faction pawns may legitimately carry the trait (scenario forced
                 // traits, dev tools); everything else spawning with it is a leak.
                 if (__result.Faction != null && __result.Faction == Faction.OfPlayerSilentFail)
+                {
                     return;
+                }
 
-                var eternalTrait = __result.story.traits.GetTrait(EternalDefOf.Eternal_GeneticMarker);
-                if (eternalTrait == null)
+                var traits = __result.story.traits;
+                var markers = traits.allTraits.Where(t => t.def == EternalDefOf.Eternal_GeneticMarker).ToList();
+                if (markers.Count == 0)
+                {
                     return;
+                }
 
-                __result.story.traits.RemoveTrait(eternalTrait);
+                foreach (var marker in markers)
+                {
+                    // Unmask this removal so the native method still handles gene, needs,
+                    // work and trait-cache notifications for suppressed incoming markers.
+                    var suppressedByGene = marker.suppressedByGene;
+                    bool suppressedByTrait = marker.suppressedByTrait;
+                    var sourceGene = marker.sourceGene;
+                    var overriddenByGene = sourceGene?.overriddenByGene;
+                    try
+                    {
+                        marker.suppressedByGene = null;
+                        marker.suppressedByTrait = false;
+                        if (sourceGene != null) { sourceGene.overriddenByGene = null; }
+                        traits.RemoveTrait(marker, true);
+                    }
+                    finally
+                    {
+                        marker.suppressedByGene = suppressedByGene;
+                        marker.suppressedByTrait = suppressedByTrait;
+                        if (sourceGene != null) { sourceGene.overriddenByGene = overriddenByGene; }
+                    }
+                }
+                if (traits.allTraits.Any(t => t.def == EternalDefOf.Eternal_GeneticMarker)) { return; }
 
                 // TraitSet_GainTrait_Patch auto-adds the essence hediff on GainTrait — remove it too
                 var essenceHediff = EternalDefOf.Eternal_Essence != null

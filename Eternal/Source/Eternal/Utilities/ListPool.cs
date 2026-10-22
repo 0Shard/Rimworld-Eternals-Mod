@@ -46,7 +46,10 @@ namespace Eternal.Utilities
         /// <param name="list">The list to return to the pool</param>
         public static void Return(List<T> list)
         {
-            if (list == null) return;
+            if (list == null)
+            {
+                return;
+            }
 
             list.Clear();
 

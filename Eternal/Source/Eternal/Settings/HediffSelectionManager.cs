@@ -12,8 +12,6 @@ namespace Eternal.Settings
     public class HediffSelectionManager
     {
         private readonly HashSet<string> selected = new HashSet<string>();
-        private bool selectAllMode = false;
-        private int totalCount = 0;
 
         /// <summary>
         /// Selects a hediff by def name.
@@ -32,7 +30,6 @@ namespace Eternal.Settings
         public void Deselect(string defName)
         {
             selected.Remove(defName);
-            selectAllMode = false;
         }
 
         /// <summary>
@@ -41,9 +38,13 @@ namespace Eternal.Settings
         public void Toggle(string defName)
         {
             if (IsSelected(defName))
+            {
                 Deselect(defName);
+            }
             else
+            {
                 Select(defName);
+            }
         }
 
         /// <summary>
@@ -51,17 +52,19 @@ namespace Eternal.Settings
         /// </summary>
         public bool IsSelected(string defName)
         {
-            return selectAllMode || selected.Contains(defName);
+            return selected.Contains(defName);
         }
 
         /// <summary>
         /// Selects all hediffs.
         /// </summary>
-        public void SelectAll(int totalCount = 0)
+        public void SelectAll(IEnumerable<string> names)
         {
             selected.Clear();
-            selectAllMode = true;
-            this.totalCount = totalCount;
+            foreach (string name in names ?? Enumerable.Empty<string>())
+            {
+                Select(name);
+            }
         }
 
         /// <summary>
@@ -70,8 +73,6 @@ namespace Eternal.Settings
         public void ClearAll()
         {
             selected.Clear();
-            selectAllMode = false;
-            totalCount = 0;
         }
 
         /// <summary>
@@ -85,24 +86,6 @@ namespace Eternal.Settings
         /// <summary>
         /// Gets the count of selected hediffs.
         /// </summary>
-        public int Count => selectAllMode ? totalCount : selected.Count;
-
-        /// <summary>
-        /// Checks if any hediffs are selected.
-        /// </summary>
-        public bool HasSelection => selectAllMode || selected.Count > 0;
-
-        /// <summary>
-        /// Checks if select all mode is active.
-        /// </summary>
-        public bool IsSelectAllMode => selectAllMode;
-
-        /// <summary>
-        /// Sets the total count for select all mode.
-        /// </summary>
-        public void SetTotalCount(int count)
-        {
-            totalCount = count;
-        }
+        public int Count => selected.Count;
     }
 }

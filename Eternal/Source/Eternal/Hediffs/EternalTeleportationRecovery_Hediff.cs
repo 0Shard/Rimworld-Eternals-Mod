@@ -19,7 +19,7 @@ namespace Eternal.Hediffs
     {
         private const int RECOVERY_DURATION = 18000; // ~6 hours in ticks
         private int startTick;
-        
+
         /// <summary>
         /// Initializes a new instance of EternalTeleportationRecovery_Hediff class.
         /// </summary>
@@ -27,7 +27,7 @@ namespace Eternal.Hediffs
         {
             startTick = Find.TickManager.TicksGame;
         }
-        
+
         /// <summary>
         /// Gets the current recovery progress.
         /// </summary>
@@ -40,7 +40,7 @@ namespace Eternal.Hediffs
                 return Mathf.Clamp01(progress);
             }
         }
-        
+
         /// <summary>
         /// Gets the remaining recovery time.
         /// </summary>
@@ -53,7 +53,7 @@ namespace Eternal.Hediffs
                 return Math.Max(0, RECOVERY_DURATION - elapsed);
             }
         }
-        
+
         /// <summary>
         /// Gets whether recovery is complete.
         /// </summary>
@@ -64,7 +64,7 @@ namespace Eternal.Hediffs
                 return RemainingTicks <= 0;
             }
         }
-        
+
         /// <summary>
         /// Gets the hediff label.
         /// </summary>
@@ -73,12 +73,14 @@ namespace Eternal.Hediffs
             get
             {
                 if (RecoveryComplete)
+                {
                     return "Teleportation Recovery Complete";
-                    
+                }
+
                 return "Teleportation Recovery";
             }
         }
-        
+
         /// <summary>
         /// Gets the hediff description.
         /// </summary>
@@ -92,7 +94,7 @@ namespace Eternal.Hediffs
                        $"Time remaining: {RemainingTicks / 2500:F1} hours";
             }
         }
-        
+
         /// <summary>
         /// Gets whether the hediff should be visible.
         /// </summary>
@@ -103,7 +105,7 @@ namespace Eternal.Hediffs
                 return true;
             }
         }
-        
+
         /// <summary>
         /// Gets whether the hediff is bad.
         /// </summary>
@@ -114,7 +116,7 @@ namespace Eternal.Hediffs
                 return !RecoveryComplete;
             }
         }
-        
+
         /// <summary>
         /// Gets whether the hediff is tendable.
         /// </summary>
@@ -125,7 +127,7 @@ namespace Eternal.Hediffs
                 return false;
             }
         }
-        
+
         /// <summary>
         /// Gets whether the hediff should be displayed on health tab.
         /// </summary>
@@ -136,44 +138,46 @@ namespace Eternal.Hediffs
                 return true;
             }
         }
-        
+
         /// <summary>
         /// Called every tick to update recovery state.
         /// </summary>
         public override void Tick()
         {
             base.Tick();
-            
+
             // Check if recovery is complete
             if (RecoveryComplete)
             {
                 CompleteRecovery();
             }
         }
-        
+
         /// <summary>
         /// Completes the recovery process.
         /// </summary>
         private void CompleteRecovery()
         {
             if (pawn == null)
+            {
                 return;
-                
+            }
+
             // Remove this hediff
             pawn.health.RemoveHediff(this);
-            
+
             // Log recovery completion
             if (Eternal_Mod.settings?.debugMode == true)
             {
                 Log.Message($"Teleportation recovery complete for {pawn.Name?.ToStringFull ?? "Unknown"}");
             }
-            
+
             // Show notification
             Messages.Message(
-                new Message($"{pawn.Name?.ToStringFull ?? "Unknown"} has completed teleportation recovery.", 
+                new Message($"{pawn.Name?.ToStringFull ?? "Unknown"} has completed teleportation recovery.",
                 MessageTypeDefOf.PositiveEvent));
         }
-        
+
         /// <summary>
         /// Exposes data for save/load functionality.
         /// </summary>

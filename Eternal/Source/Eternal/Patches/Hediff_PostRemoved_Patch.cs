@@ -26,11 +26,15 @@ namespace Eternal.Patches
             try
             {
                 if (EternalModState.IsDisabled)
+                {
                     return;
+                }
 
                 Pawn pawn = __instance?.pawn;
                 if (pawn == null)
+                {
                     return;
+                }
 
                 Eternal_Component.Instance?.EnqueueHealthReconciliation(pawn, __instance);
             }

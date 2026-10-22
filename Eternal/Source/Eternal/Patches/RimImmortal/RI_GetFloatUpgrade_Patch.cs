@@ -34,27 +34,9 @@ namespace Eternal.Patches.RimImmortal
         /// Uses ModsConfig.IsActive() via RimImmortalDetection — multiple mod ID variants are checked.
         /// Returning false skips the patch entirely (Harmony will not call TargetMethod).
         /// </summary>
-        public static bool Prepare()
-        {
-            bool isActive = RimImmortalDetection.RimImmortalActive;
-
-            if (!isActive)
-            {
-                // Only log at debug level — absence of RimImmortal is the normal case
-                if (Eternal_Mod.settings?.debugMode == true)
-                {
-                    Log.Message("[Eternal] Skipping RimImmortal GetFloatUpgrade patch — mod not active");
-                }
-                return false;
-            }
-
-            if (Eternal_Mod.settings?.debugMode == true)
-            {
-                Log.Message("[Eternal] RimImmortal detected - enabling breakthrough chance patch (99.99%)");
-            }
-
-            return true;
-        }
+        public static bool Prepare() => CompatibilityBinding.Prepare(RimImmortalDetection.RimImmortalActive,
+            "[Eternal] Skipping RimImmortal GetFloatUpgrade patch — mod not active",
+            "[Eternal] RimImmortal detected - enabling breakthrough chance patch (99.99%)");
 
         /// <summary>
         /// Resolve the target method via reflection.
@@ -65,12 +47,8 @@ namespace Eternal.Patches.RimImmortal
         {
             var method = RimImmortalDetection.GetFloatUpgradeMethod;
 
-            if (method == null)
-            {
-                Log.Warning("[Eternal] Skipping RimImmortal GetFloatUpgrade patch — method not found (mod absent or API changed)");
-            }
-
-            return method;
+            return CompatibilityBinding.WarnMissing(method,
+                "[Eternal] Skipping RimImmortal GetFloatUpgrade patch — method not found (mod absent or API changed)");
         }
 
         /// <summary>
@@ -87,11 +65,15 @@ namespace Eternal.Patches.RimImmortal
                 Pawn pawn = RimImmortalDetection.GetPawnFromMessageDialog(__instance);
 
                 if (pawn == null)
+                {
                     return;
+                }
 
                 // Check if this pawn is an Eternal
                 if (!pawn.IsValidEternal())
+                {
                     return;
+                }
 
                 // Read current success rate for debug logging (percentage form, 0-100)
                 float currentRate = RimImmortalDetection.GetSucessRate(__instance);

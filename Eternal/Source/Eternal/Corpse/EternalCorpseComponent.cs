@@ -134,7 +134,9 @@ namespace Eternal.Corpse
         {
             var rottable = CachedRottable;
             if (rottable == null)
+            {
                 return;
+            }
 
             // Reset rot progress to zero if any accumulated
             if (rottable.RotProgress > 0f)
@@ -328,23 +330,12 @@ namespace Eternal.Corpse
                     return "Error: No corpse data";
                 }
 
-                if (corpseData.IsHealingActive)
-                {
-                    return $"Healing: {corpseData.HealingProgress:P0} complete\n" +
-                           $"Debt: {corpseData.FoodDebt:F1} nutrition\n" +
-                           $"Items remaining: {corpseData.HealingQueue?.Count ?? 0}";
-                }
-                else if (corpseData.HealingProgress >= 1.0f)
-                {
-                    return "Ready for resurrection\n" +
-                           $"Debt: {corpseData.FoodDebt:F1} nutrition";
-                }
-                else
-                {
-                    return $"Dead\n" +
-                           $"Click 'Resurrect' to begin healing\n" +
-                           $"Debt: {corpseData.FoodDebt:F1} nutrition";
-                }
+                var services = Eternal.DI.EternalServiceContainer.Instance;
+                var preview = Eternal.UI.ResurrectionPreview.Capture(corpseData.OriginalPawn, corpseData.Corpse,
+                    corpseData, Eternal_Mod.GetSettings(), services.CorpseHealingProcessor != null,
+                    services.FoodDebtSystem?.GetDebt(corpseData.OriginalPawn) ?? corpseData.FoodDebt);
+                return Eternal.UI.Management.ManagementTabPresenter.CorpseStatus(preview.Status) + "\n" +
+                    Eternal.UI.ResurrectionGizmo.Summary(preview);
             }
             catch (Exception ex)
             {
@@ -369,16 +360,22 @@ namespace Eternal.Corpse
             {
                 // Check if protection is enabled
                 if (!Eternal_Mod.GetSettings().enableRoofCollapseProtection)
+                {
                     return RoofCollapseResponse.None;
+                }
 
                 // Get corpse reference
                 if (!(parent is Verse.Corpse corpse) || corpse.Map == null)
+                {
                     return RoofCollapseResponse.None;
+                }
 
                 // Validate this is a tracked Eternal corpse
                 var corpseManager = EternalServiceContainer.Instance?.CorpseManager;
                 if (corpseManager == null || !corpseManager.IsTracked(corpse.InnerPawn))
+                {
                     return RoofCollapseResponse.None;
+                }
 
                 // Find nearest safe cell using shared helper
                 IntVec3 safeCell = RoofCollapseHelper.FindNearestSafeCell(corpse.Position, corpse.Map, 50);

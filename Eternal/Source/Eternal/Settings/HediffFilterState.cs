@@ -60,26 +60,6 @@ namespace Eternal.Settings
         }
 
         /// <summary>
-        /// Checks if any filter is active.
-        /// </summary>
-        public bool HasActiveFilters()
-        {
-            return !string.IsNullOrEmpty(SearchTerm) ||
-                   CategoryFilter != HediffCategory.All ||
-                   ShowOnlyEnabled ||
-                   ShowOnlyCustom ||
-                   !string.IsNullOrEmpty(ModSourceFilter) ||
-                   FilterByBaseGame ||
-                   FilterByDLC ||
-                   FilterByMods ||
-                   FilterIsBad ||
-                   FilterIsLethal ||
-                   FilterIsTendable ||
-                   FilterIsChronic ||
-                   FilterBeneficial;
-        }
-
-        /// <summary>
         /// Sets the source type filters.
         /// </summary>
         public void SetSourceTypeFilter(bool baseGame, bool dlc, bool mods)
